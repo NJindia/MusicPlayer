@@ -58,8 +58,7 @@ class MainWindow(QMainWindow):
     def media_player_paused_callback(self, button: QToolButton, event: vlc.Event):
         print(f"Event: {event.type}")
         if (
-            event.type == EventType.MediaPlayerPaused  # pyright: ignore[reportAttributeAccessIssue]
-            or event.type == EventType.MediaPlayerStopped  # pyright: ignore[reportAttributeAccessIssue]
+            event.type in [EventType.MediaPlayerPaused, EventType.MediaPlayerStopped]  # pyright: ignore[reportAttributeAccessIssue]
         ):
             button.setIcon(QIcon("icons/play-button.svg"))
 
