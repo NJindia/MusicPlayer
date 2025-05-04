@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Iterator
 
 import soundfile as sf
+from PySide6.QtGui import QIcon, QPixmap, QImage
 from dacite.cache import cache
 from mutagen.flac import FLAC
 from tqdm import tqdm
@@ -28,6 +29,12 @@ class Music:
     @property
     def data_sr(self):
         return sf.read(self.file_path)
+
+    @property
+    def album_icon(self) -> QIcon:
+        if self.album_cover_bytes is not None:
+            return QIcon(QPixmap.fromImage(QImage.fromData(self.album_cover_bytes)))
+        return QIcon()
 
 
 def _parse_lyrics(lyrics: str) -> dict[time | None, str]:

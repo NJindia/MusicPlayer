@@ -1,11 +1,9 @@
 import sys
-from functools import partial
-from typing import cast
 
 import numpy as np
 import vlc
 from PySide6.QtCore import Slot, Qt
-from PySide6.QtGui import QIcon, QTransform, QPixmap, QImage
+from PySide6.QtGui import QIcon, QTransform, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QToolBar,
@@ -14,10 +12,14 @@ from PySide6.QtWidgets import (
     QWidget,
     QSizePolicy,
     QLabel,
+    QHBoxLayout,
+    QTabWidget,
 )
-from vlc import MediaPlayer, MediaListPlayer, Instance, EventType
+from vlc import MediaPlayer, EventType
 
-from music_downloader.music import get_music, Music
+from music_downloader.album import AlbumButton
+from music_downloader.queue_gui import Queue, ScrollableLayout, QueueEntry
+from music_downloader.vlc_core import VLCCore
 
 SKIP_BACK_SECOND_THRESHOLD = 5
 """Number of seconds into a track that pressing the rewind button will skip back to the previous track."""
@@ -29,117 +31,120 @@ def expanding_widget() -> QWidget:
     return widget
 
 
-def get_song_label(metadata: Music) -> str:
-    return f"{metadata.title} - {', '.join(metadata.artists)}"
-
-
-# Subclass QMainWindow to customize your application's main window
 class MainWindow(QMainWindow):
-    def test(self, event):
-        print(f"{event.type}")
-
-    def media_player_playing_callback(
-        self,
-        play_button: QToolButton,
-        song_label: QLabel,
-        album_button: QToolButton,
-        event: vlc.Event,
-    ):
+    def media_player_playing_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
         if event.type == EventType.MediaPlayerPlaying:  # pyright: ignore[reportAttributeAccessIssue]
-            play_button.setIcon(QIcon("icons/pause-button.svg"))
-            md = self.get_media_metadata(self.current_media)
-            song_label.setText(get_song_label(md))
-            if md.album_cover_bytes is not None:
-                album_button.setIcon(
-                    QIcon(QPixmap.fromImage(QImage.fromData(md.album_cover_bytes)))
-                )
+            self.play_button.setIcon(QIcon("icons/pause-button.svg"))
+            curr_media_idx = self._current_media_idx
+            md = self.core.music_list[curr_media_idx]
+            self.song_label.setText(f"{md.title}\n{', '.join(md.artists)}")
+            self.album_button.setIcon(md.album_icon)
+            self.last_played_idx = curr_media_idx
 
-    def media_player_paused_callback(self, button: QToolButton, event: vlc.Event):
+    def media_player_paused_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
         if (
             event.type in [EventType.MediaPlayerPaused, EventType.MediaPlayerStopped]  # pyright: ignore[reportAttributeAccessIssue]
         ):
-            button.setIcon(QIcon("icons/play-button.svg"))
+            self.play_button.setIcon(QIcon("icons/play-button.svg"))
+
+    def media_player_media_changed_callback(self, event: vlc.Event):
+        print(f"Event: {event.type}")
+        curr_media_idx = self._current_media_idx
+        self.queue.update_first_queue_index(curr_media_idx + 1)
+        self.history.insertWidget(0, QueueEntry(self.core, self.last_played_idx))
 
     @Slot()
     def press_play_button(self):
         """Start audio playback if none is playing, otherwise pause existing."""
-        self.list_player.pause() if self.list_player.is_playing() else self.list_player.play()
+        self.core.list_player.pause() if self.core.list_player.is_playing() else self.core.list_player.play()
 
     @Slot()
     def press_rewind_button(self):
         """Rewind player to the beginning of the track."""
-        if self.list_player.is_playing():
-            player: MediaPlayer = self.list_player.get_media_player()
-            if (
-                self._current_media_idx == 0
-                or player.get_time() / 1000 > SKIP_BACK_SECOND_THRESHOLD
-            ):
-                player.set_position(0)
-            else:
-                self.list_player.previous()
+        player: MediaPlayer = self.core.list_player.get_media_player()
+        if (
+            self._current_media_idx == 0
+            or player.get_time() / 1000 > SKIP_BACK_SECOND_THRESHOLD
+        ):
+            player.set_position(0)
+        else:
+            self.core.list_player.previous()
 
     @Slot()
     def press_skip_button(self):
         """Rewind player to the beginning of the track."""
-        if self.list_player.next() == -1:
-            self.list_player.stop()
+        if self.core.list_player.next() == -1:
+            self.core.list_player.stop()
 
     @Slot()
     def press_shuffle_button(self):
         """Shuffle remaining songs in playlist."""
-        if count := self.media_list.count():  # If a queue is loaded
+        if count := self.core.media_list.count():  # If a queue is loaded
             indices = np.arange(start=self._current_media_idx + 1, stop=count)
             np.random.shuffle(indices)
-            new_media = [self.media_list[i] for i in indices]
+            new_media = [self.core.media_list[i] for i in indices]
             for _ in range(len(indices)):
-                self.media_list.remove_index(self._current_media_idx + 1)
-                self.media_list.add_media(new_media.pop(0))
+                self.core.media_list.remove_index(self._current_media_idx + 1)
+                self.core.media_list.add_media(new_media.pop(0))
 
     @property
     def _current_media_idx(self):
-        idx = self.media_list.index_of_item(self.current_media)
-        if idx == -1 and self.media_list.count() > 0:
+        idx = self.core.media_list.index_of_item(self.current_media)
+        if idx == -1 and self.core.media_list.count() > 0:
             idx = 0
         return idx
 
     @property
     def current_media(self):
-        return self.list_player.get_media_player().get_media()
+        return self.core.list_player.get_media_player().get_media()
 
-    def get_media_metadata(self, media: vlc.Media):
-        idx = self.media_list.index_of_item(media)
-        return self.metadata[idx if idx != -1 else 0]
-
-    def __init__(
-        self,
-        media_list: vlc.MediaList,
-        vlc_list_player: vlc.MediaListPlayer,
-        metadata: list[Music],
-    ):
+    def __init__(self, core: VLCCore):
         super().__init__()
 
-        self.list_player = vlc_list_player
-        self.media_list = media_list
-        self.metadata = metadata
+        self.core = core
 
         self.setWindowTitle("Media Player")
+
+        current_media_idx = self._current_media_idx
+        current_media_md = self.core.music_list[current_media_idx]
+        self.last_played_idx: int = current_media_idx
+
+        main_ui = QHBoxLayout()
+
+        self.queue_entries = [
+            QueueEntry(self.core, i) for i in range(len(self.core.music_list))
+        ]
+
+        self.queue = Queue(self.queue_entries)
+        queue_area = ScrollableLayout(self.queue)  # TODO widget?
+        self.history = Queue()
+        history_area = ScrollableLayout(self.history)
+
+        queue_tab = QTabWidget()
+        queue_tab.addTab(queue_area, "Queue")
+        queue_tab.addTab(history_area, "History")
+
+        main_ui.addStretch()  # TODO REMOVE
+        main_ui.addWidget(queue_tab)
+        w = QWidget()
+        w.setLayout(main_ui)
+        self.setCentralWidget(w)
 
         toolbar = QToolBar(
             floatable=False, movable=False, orientation=Qt.Orientation.Horizontal
         )
         self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, toolbar)
 
-        album_button = QToolButton()
-        toolbar.addWidget(album_button)
-        # album_button.setIcon()
+        self.album_button = AlbumButton(current_media_md)
+        toolbar.addWidget(self.album_button)
 
-        song_label = QLabel(get_song_label(self.get_media_metadata(self.current_media)))
-        song_label.setSizePolicy(
+        self.song_label = QLabel(current_media_md.title)
+        self.song_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        toolbar.addWidget(song_label)
+        toolbar.addWidget(self.song_label)
 
         shuffle_button = QToolButton()
         shuffle_button.setIcon(QIcon("icons/shuffle-button.svg"))
@@ -152,10 +157,10 @@ class MainWindow(QMainWindow):
         rewind_button.clicked.connect(self.press_rewind_button)
         toolbar.addWidget(rewind_button)
 
-        play_button = QToolButton()
-        play_button.setIcon(QIcon("icons/play-button.svg"))
-        play_button.clicked.connect(self.press_play_button)
-        toolbar.addWidget(play_button)
+        self.play_button = QToolButton()
+        self.play_button.setIcon(QIcon("icons/play-button.svg"))
+        self.play_button.clicked.connect(self.press_play_button)
+        toolbar.addWidget(self.play_button)
 
         skip_button = QToolButton()
         skip_button.setIcon(
@@ -177,36 +182,29 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(expanding_widget())
 
-        em = self.list_player.get_media_player().event_manager()
-        em.event_attach(
+        player_manager = self.core.list_player.get_media_player().event_manager()
+        player_manager.event_attach(
             EventType.MediaPlayerPlaying,  # pyright: ignore[reportAttributeAccessIssue]
-            partial(
-                self.media_player_playing_callback,
-                play_button,
-                song_label,
-                album_button,
-            ),
+            self.media_player_playing_callback,
         )
-        em.event_attach(
+        player_manager.event_attach(
             EventType.MediaPlayerPaused,  # pyright: ignore[reportAttributeAccessIssue]
-            partial(self.media_player_paused_callback, play_button),
+            self.media_player_paused_callback,
         )
-        em.event_attach(
+        player_manager.event_attach(
             EventType.MediaPlayerStopped,  # pyright: ignore[reportAttributeAccessIssue]
-            partial(self.media_player_paused_callback, play_button),
+            self.media_player_paused_callback,
+        )
+
+        self.core.list_player.event_manager().event_attach(
+            EventType.MediaListPlayerNextItemSet,  # pyright: ignore[reportAttributeAccessIssue]
+            self.media_player_media_changed_callback,
         )
 
 
 if __name__ == "__main__":
-    music = list(get_music())
-
-    instance = cast(Instance, Instance())
-
-    player_: MediaListPlayer = instance.media_list_player_new()
-    media_list_ = instance.media_list_new([m.file_path for m in music])
-    player_.set_media_list(media_list_)
-
+    core = VLCCore()
     app = QApplication(sys.argv)
-    window = MainWindow(media_list_, player_, music)
+    window = MainWindow(core)
     window.show()
     sys.exit(app.exec())
