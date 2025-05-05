@@ -18,7 +18,11 @@ from PySide6.QtWidgets import (
 from vlc import MediaPlayer, EventType
 
 from music_downloader.album import AlbumButton
-from music_downloader.queue_gui import Queue, ScrollableLayout, QueueEntry
+from music_downloader.queue_gui import (
+    ScrollableLayout,
+    QueueEntry,
+    GraphicsViewSection,
+)
 from music_downloader.vlc_core import VLCCore
 
 SKIP_BACK_SECOND_THRESHOLD = 5
@@ -52,8 +56,13 @@ class MainWindow(QMainWindow):
     def media_player_media_changed_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
         curr_media_idx = self._current_media_idx
+        if curr_media_idx == self.last_played_idx:
+            return
         self.queue.update_first_queue_index(curr_media_idx + 1)
-        self.history.insertWidget(0, QueueEntry(self.core, self.last_played_idx))
+        print(self.last_played_idx, curr_media_idx)
+        self.history.insert_queue_entry(
+            0, QueueEntry(self.core, int(self.last_played_idx))
+        )
 
     @Slot()
     def press_play_button(self):
@@ -113,18 +122,14 @@ class MainWindow(QMainWindow):
 
         main_ui = QHBoxLayout()
 
-        self.queue_entries = [
-            QueueEntry(self.core, i) for i in range(len(self.core.music_list))
-        ]
-
-        self.queue = Queue(self.queue_entries)
-        queue_area = ScrollableLayout(self.queue)  # TODO widget?
-        self.history = Queue()
-        history_area = ScrollableLayout(self.history)
+        self.history = GraphicsViewSection()
+        self.queue = GraphicsViewSection(
+            [QueueEntry(self.core, i) for i in range(len(self.core.music_list))]
+        )
 
         queue_tab = QTabWidget()
-        queue_tab.addTab(queue_area, "Queue")
-        queue_tab.addTab(history_area, "History")
+        queue_tab.addTab(self.queue, "Queue")
+        queue_tab.addTab(self.history, "History")
 
         main_ui.addStretch()  # TODO REMOVE
         main_ui.addWidget(queue_tab)
@@ -195,7 +200,10 @@ class MainWindow(QMainWindow):
             EventType.MediaPlayerStopped,  # pyright: ignore[reportAttributeAccessIssue]
             self.media_player_paused_callback,
         )
-
+        self.core.list_player.event_manager().event_attach(
+            EventType.MediaListPlayerPlayed,  # pyright: ignore[reportAttributeAccessIssue]
+            self.media_player_playing_callback,
+        )
         self.core.list_player.event_manager().event_attach(
             EventType.MediaListPlayerNextItemSet,  # pyright: ignore[reportAttributeAccessIssue]
             self.media_player_media_changed_callback,

@@ -1,6 +1,20 @@
+from typing import cast
+
+import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QFrame, QWidget, QHBoxLayout, QVBoxLayout, QScrollArea
+from PySide6.QtGui import QMouseEvent, QPixmap
+from PySide6.QtWidgets import (
+    QFrame,
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QScrollArea,
+    QGraphicsView,
+    QGraphicsScene,
+    QGraphicsPixmapItem,
+    QSizePolicy,
+    QGraphicsProxyWidget,
+)
 
 from music_downloader.album import AlbumButton
 from music_downloader.common import HoverableUnderlineLabel
@@ -8,6 +22,7 @@ from music_downloader.constants import (
     QUEUE_ENTRY_HEIGHT,
     QUEUE_ENTRY_WIDTH,
     QUEUE_ENTRY_SPACING,
+    QUEUE_WIDTH,
 )
 from music_downloader.vlc_core import VLCCore
 
@@ -73,22 +88,52 @@ class QueueEntry(QFrame):
         super().mouseDoubleClickEvent(event)
 
 
-class Queue(QVBoxLayout):
-    def update_first_queue_index(self, index: int) -> QWidget | None:
-        for widget in (w for w in self.queue_entries[:index] if w.parent()):
-            widget.setParent(None)
-        first_widget = (
-            self.queue_entries[index] if index < len(self.queue_entries) else None
+class GraphicsViewSection(QGraphicsView):
+    def update_scene(self, from_index: int = 0):
+        for i, proxy in enumerate(
+            self.queue_entries[self.current_queue_index :][from_index:],
+            start=from_index,
+        ):
+            proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
+        assert all(
+            e in self.scene().items()
+            for e in self.queue_entries[self.current_queue_index :]
         )
-        if (
-            first_widget and first_widget.parent() is None
-        ):  # If going to previous track, parent() will be None
-            self.insertWidget(0, first_widget)
-        return first_widget
+        self.setSceneRect(
+            0, 0, self.width(), self.get_y_pos(len(self.scene().items()))
+        )  # Update scene size
 
-    def __init__(self, queue_widgets: list[QueueEntry] | None = None) -> None:
+    def update_first_queue_index(self, queue_index: int) -> None:
+        self.current_queue_index = queue_index
+        scene_items = self.scene().items()
+        for proxy in self.queue_entries[: self.current_queue_index]:
+            self.scene().removeItem(proxy)
+        first_proxy = (
+            self.queue_entries[self.current_queue_index]
+            if self.current_queue_index < len(self.queue_entries)
+            else None
+        )
+        if first_proxy and first_proxy not in scene_items:
+            self.scene().addItem(first_proxy)
+        self.update_scene()
+
+    def insert_queue_entry(self, queue_index: int, entry: QueueEntry) -> None:
+        self.queue_entries.insert(queue_index, self.scene().addWidget(entry))
+        self.update_scene(queue_index)
+
+    def get_y_pos(self, index: int) -> float:
+        return QUEUE_ENTRY_SPACING + index * (QUEUE_ENTRY_SPACING + QUEUE_ENTRY_HEIGHT)
+
+    def __init__(self, queue_entries: list[QueueEntry] | None = None):
         super().__init__()
-        self.queue_entries = queue_widgets if queue_widgets else []
-        for widget in self.queue_entries:
-            self.addWidget(widget)
-        self.addStretch()
+        self.setScene(QGraphicsScene())
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self.setFixedWidth(QUEUE_WIDTH)
+        self.queue_entries: list[QGraphicsProxyWidget] = []
+        self.current_queue_index = 0
+
+        for i, widget in enumerate(queue_entries or []):
+            proxy = self.scene().addWidget(widget)
+            proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
+            self.queue_entries.append(proxy)
