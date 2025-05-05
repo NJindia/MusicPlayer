@@ -38,13 +38,7 @@ def expanding_widget() -> QWidget:
 class MainWindow(QMainWindow):
     def media_player_playing_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
-        if event.type == EventType.MediaPlayerPlaying:  # pyright: ignore[reportAttributeAccessIssue]
-            self.play_button.setIcon(QIcon("icons/pause-button.svg"))
-            curr_media_idx = self._current_media_idx
-            md = self.core.music_list[curr_media_idx]
-            self.song_label.setText(f"{md.title}\n{', '.join(md.artists)}")
-            self.album_button.setIcon(md.album_icon)
-            self.last_played_idx = curr_media_idx
+        self.play_button.setIcon(QIcon("icons/pause-button.svg"))
 
     def media_player_paused_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
@@ -58,11 +52,17 @@ class MainWindow(QMainWindow):
         curr_media_idx = self._current_media_idx
         if curr_media_idx == self.last_played_idx:
             return
+
+        md = self.core.music_list[curr_media_idx]
+        self.song_label.setText(f"{md.title}\n{', '.join(md.artists)}")
+        self.album_button.setIcon(md.album_icon)
+        
         self.queue.update_first_queue_index(curr_media_idx + 1)
         print(self.last_played_idx, curr_media_idx)
         self.history.insert_queue_entry(
             0, QueueEntry(self.core, int(self.last_played_idx))
         )
+        self.last_played_idx = curr_media_idx
 
     @Slot()
     def press_play_button(self):
