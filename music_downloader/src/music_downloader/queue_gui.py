@@ -61,11 +61,13 @@ class QueueEntry(QFrame):
             QUEUE_ENTRY_SPACING,
             QUEUE_ENTRY_SPACING,
         )
-        metadata = core.music_list[media_list_index]
+        self.core = core
+        self.media_list_index = media_list_index
+        metadata = self.core.music_list[self.media_list_index]
 
         song_album_layout = QVBoxLayout()
         song_label = HoverableUnderlineLabel(metadata.title, self)
-        song_label.clicked.connect(lambda _: core.list_player.play_item_at_index(media_list_index))
+        song_label.clicked.connect(lambda _: self.core.play_jump_to_index(self.media_list_index))
 
         artists_text_browser = HoverableUnderlineLabel(",".join(metadata.artists), self)
         artists_text_browser.clicked.connect(lambda _: print("TODO Go to artist"))
@@ -78,7 +80,7 @@ class QueueEntry(QFrame):
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            print("clicked!")
+            self.core.play_jump_to_index(self.media_list_index)
         super().mouseDoubleClickEvent(event)
 
 
@@ -116,7 +118,8 @@ class GraphicsViewSection(QGraphicsView):
         self.update_scene()
 
     def insert_queue_entry(self, queue_index: int, entry: QueueEntry) -> None:
-        self.queue_entries.insert(queue_index, self.scene().addWidget(entry))
+        assert queue_index > self.current_queue_index, "Can't insert queue entry before current queue index"
+        self.queue_entries.append(self.scene().addWidget(entry))
         for i, idx in enumerate(self.queue_indices):
             if idx >= queue_index:
                 self.queue_indices[i] = idx + 1
@@ -129,7 +132,7 @@ class GraphicsViewSection(QGraphicsView):
     def get_y_pos(index: int) -> float:
         return QUEUE_ENTRY_SPACING + index * (QUEUE_ENTRY_SPACING + QUEUE_ENTRY_HEIGHT)
 
-    def __init__(self, queue_entries: list[QueueEntry] | None = None):
+    def __init__(self, vlc_core: VLCCore, *, empty: bool = False):
         super().__init__()
         self.setScene(QGraphicsScene())
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -137,10 +140,12 @@ class GraphicsViewSection(QGraphicsView):
         self.setFixedWidth(QUEUE_WIDTH)
         self.queue_entries: list[QGraphicsProxyWidget] = []
         self.current_queue_index = 0
+        self.core = vlc_core
 
-        for i, widget in enumerate(queue_entries or []):
-            proxy = self.scene().addWidget(widget)
-            proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
-            self.queue_entries.append(proxy)
+        if not empty:
+            for i in range(len(self.core.music_list)):
+                proxy = self.scene().addWidget(QueueEntry(self.core, i))
+                proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
+                self.queue_entries.append(proxy)
 
-        self.queue_indices = list(range(len(self.queue_entries)))
+        self.queue_indices: list[int] = list(range(len(self.queue_entries)))

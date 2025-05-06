@@ -1,6 +1,5 @@
 import sys
 
-import numpy as np
 import vlc
 from PySide6.QtCore import Slot, Qt
 from PySide6.QtGui import QIcon, QTransform, QPixmap
@@ -15,7 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QTabWidget,
 )
-from vlc import MediaPlayer, EventType
+from vlc import EventType
 
 from music_downloader.album import AlbumButton
 from music_downloader.queue_gui import (
@@ -23,9 +22,6 @@ from music_downloader.queue_gui import (
     GraphicsViewSection,
 )
 from music_downloader.vlc_core import VLCCore
-
-SKIP_BACK_SECOND_THRESHOLD = 5
-"""Number of seconds into a track that pressing the rewind button will skip back to the previous track."""
 
 
 def expanding_widget() -> QWidget:
@@ -35,29 +31,23 @@ def expanding_widget() -> QWidget:
 
 
 class MainWindow(QMainWindow):
-    def media_player_playing_callback(self, event: vlc.Event):
-        print(f"Event: {event.type}")
-        self.play_button.setIcon(QIcon("../icons/pause-button.svg"))
-
     def media_player_paused_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
-        if (
-            event.type in [EventType.MediaPlayerPaused, EventType.MediaPlayerStopped]  # pyright: ignore[reportAttributeAccessIssue]
-        ):
-            self.play_button.setIcon(QIcon("../icons/play-button.svg"))
+        self.play_button.setIcon(QIcon("../icons/play-button.svg"))
 
     def media_player_media_changed_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
-        curr_media_idx = self._current_media_idx
-        if curr_media_idx == self.last_played_idx:
-            return
+        # TODO FIX THIS
+        # curr_media_idx = self._current_media_idx
+        # if curr_media_idx == self.last_played_idx:
+        #     return
 
+        curr_media_idx = self.core.media_list_indices[self.core.current_queue_index]
         md = self.core.music_list[curr_media_idx]
         self.song_label.setText(f"{md.title}\n{', '.join(md.artists)}")
         self.album_button.setIcon(md.album_icon)
 
-        self.queue.update_first_queue_index(curr_media_idx + 1)
-        print(self.last_played_idx, curr_media_idx)
+        self.queue.update_first_queue_index(self.core.current_queue_index + 1)
         self.history.insert_queue_entry(0, QueueEntry(self.core, int(self.last_played_idx)))
         self.last_played_idx = curr_media_idx
 
@@ -67,55 +57,25 @@ class MainWindow(QMainWindow):
         self.core.list_player.pause() if self.core.list_player.is_playing() else self.core.list_player.play()
 
     @Slot()
-    def press_rewind_button(self):
-        """Rewind player to the beginning of the track."""
-        player: MediaPlayer = self.core.list_player.get_media_player()
-        if self._current_media_idx == 0 or player.get_time() / 1000 > SKIP_BACK_SECOND_THRESHOLD:
-            player.set_position(0)
-        else:
-            self.core.list_player.previous()
-
-    @Slot()
-    def press_skip_button(self):
-        """Rewind player to the beginning of the track."""
-        if self.core.list_player.next() == -1:
-            self.core.list_player.stop()
-
-    @Slot()
     def shuffle_button_toggled(self):
         """Shuffle remaining songs in playlist."""
         if count := self.core.media_list.count():  # If a queue is loaded
             if self.shuffle_button.isChecked():
-                indices = np.arange(start=self._current_media_idx + 1, stop=count)
-                np.random.shuffle(indices)
-                # for _ in range(len(indices)):
-                new_media = [self.core.media_list[i] for i in indices]
-                for _ in range(len(new_media)):
-                    self.core.media_list.remove_index(self._current_media_idx + 1)
-                    self.core.media_list.add_media(new_media.pop(0))
-
-                self.queue.queue_indices = self.queue.queue_indices[: -len(indices)] + list(indices)
-                self.queue.update_first_queue_index(self.queue.current_queue_index)  # TODO?
-                self.core.original_indices = list(indices)
+                new_queue_indices = self.core.shuffle_next_indices()
+                self.queue.queue_indices = self.queue.queue_indices[: -len(new_queue_indices)] + new_queue_indices
+                self.queue.update_first_queue_index(self.queue.current_queue_index)
             else:
-                print("TODO RESET QUEUE")
-                self.queue.queue_entries = [
-                    self.queue.queue_entries[current_idx]
-                    for current_idx, _ in sorted(enumerate(self.core.original_indices), key=lambda t: t[1])
-                ]
-                self.queue.update_first_queue_index(self.queue.current_queue_index)  # TODO?
-                self.core.original_indices = list(range(len(self.core.original_indices)))  # TODO USELESS?
-
-    @property
-    def _current_media_idx(self):
-        idx = self.core.media_list.index_of_item(self.current_media)
-        if idx == -1 and self.core.media_list.count() > 0:
-            idx = 0
-        return idx
-
-    @property
-    def current_media(self):
-        return self.core.list_player.get_media_player().get_media()
+                print("TODO")
+                # new_media = [self.core.media_list[i] for i in self.core.original_indices[self._current_media_idx + 1 :]]
+                # for _ in range(len(new_media)):
+                #     self.core.media_list.remove_index(self._current_media_idx + 1)
+                #     self.core.media_list.add_media(new_media.pop(0))
+                #
+                # original_next_indices = self.core.original_indices[-self.queue.current_queue_index :]
+                # self.queue.queue_indices = (
+                #     self.queue.queue_indices[: -len(original_next_indices)] + original_next_indices
+                # )
+                # self.queue.update_first_queue_index(self.queue.current_queue_index)  # TODO?
 
     def __init__(self, core: VLCCore):
         super().__init__()
@@ -124,14 +84,16 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Media Player")
 
-        current_media_idx = self._current_media_idx
-        current_media_md = self.core.music_list[current_media_idx]
-        self.last_played_idx: int = current_media_idx
+        curr_media_idx = self.core.media_list.index_of_item(self.core.list_player.get_media_player().get_media())
+        if curr_media_idx == -1 and self.core.media_list.count() > 0:
+            curr_media_idx = 0
+        current_media_md = self.core.music_list[curr_media_idx]
+        self.last_played_idx: int = curr_media_idx
 
         main_ui = QHBoxLayout()
 
-        self.history = GraphicsViewSection()
-        self.queue = GraphicsViewSection([QueueEntry(self.core, i) for i in range(len(self.core.music_list))])
+        self.history = GraphicsViewSection(self.core, empty=True)
+        self.queue = GraphicsViewSection(self.core)
 
         queue_tab = QTabWidget()
         queue_tab.addTab(self.queue, "Queue")
@@ -161,7 +123,7 @@ class MainWindow(QMainWindow):
 
         rewind_button = QToolButton()
         rewind_button.setIcon(QIcon("../icons/rewind-button.svg"))
-        rewind_button.clicked.connect(self.press_rewind_button)
+        rewind_button.clicked.connect(self.core.play_previous)
         toolbar.addWidget(rewind_button)
 
         self.play_button = QToolButton()
@@ -171,7 +133,7 @@ class MainWindow(QMainWindow):
 
         skip_button = QToolButton()
         skip_button.setIcon((QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1)))))
-        skip_button.clicked.connect(self.press_skip_button)
+        skip_button.clicked.connect(self.core.play_next)
         toolbar.addWidget(skip_button)
 
         repeat_button = QToolButton()
@@ -184,7 +146,7 @@ class MainWindow(QMainWindow):
         player_manager = self.core.list_player.get_media_player().event_manager()
         player_manager.event_attach(
             EventType.MediaPlayerPlaying,  # pyright: ignore[reportAttributeAccessIssue]
-            self.media_player_playing_callback,
+            lambda _: self.play_button.setIcon(QIcon("../icons/pause-button.svg")),
         )
         player_manager.event_attach(
             EventType.MediaPlayerPaused,  # pyright: ignore[reportAttributeAccessIssue]
@@ -193,10 +155,6 @@ class MainWindow(QMainWindow):
         player_manager.event_attach(
             EventType.MediaPlayerStopped,  # pyright: ignore[reportAttributeAccessIssue]
             self.media_player_paused_callback,
-        )
-        self.core.list_player.event_manager().event_attach(
-            EventType.MediaListPlayerPlayed,  # pyright: ignore[reportAttributeAccessIssue]
-            self.media_player_playing_callback,
         )
         self.core.list_player.event_manager().event_attach(
             EventType.MediaListPlayerNextItemSet,  # pyright: ignore[reportAttributeAccessIssue]
