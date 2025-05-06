@@ -19,7 +19,6 @@ from vlc import MediaPlayer, EventType
 
 from music_downloader.album import AlbumButton
 from music_downloader.queue_gui import (
-    ScrollableLayout,
     QueueEntry,
     GraphicsViewSection,
 )
@@ -38,14 +37,14 @@ def expanding_widget() -> QWidget:
 class MainWindow(QMainWindow):
     def media_player_playing_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
-        self.play_button.setIcon(QIcon("icons/pause-button.svg"))
+        self.play_button.setIcon(QIcon("../icons/pause-button.svg"))
 
     def media_player_paused_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
         if (
             event.type in [EventType.MediaPlayerPaused, EventType.MediaPlayerStopped]  # pyright: ignore[reportAttributeAccessIssue]
         ):
-            self.play_button.setIcon(QIcon("icons/play-button.svg"))
+            self.play_button.setIcon(QIcon("../icons/play-button.svg"))
 
     def media_player_media_changed_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
@@ -56,12 +55,10 @@ class MainWindow(QMainWindow):
         md = self.core.music_list[curr_media_idx]
         self.song_label.setText(f"{md.title}\n{', '.join(md.artists)}")
         self.album_button.setIcon(md.album_icon)
-        
+
         self.queue.update_first_queue_index(curr_media_idx + 1)
         print(self.last_played_idx, curr_media_idx)
-        self.history.insert_queue_entry(
-            0, QueueEntry(self.core, int(self.last_played_idx))
-        )
+        self.history.insert_queue_entry(0, QueueEntry(self.core, int(self.last_played_idx)))
         self.last_played_idx = curr_media_idx
 
     @Slot()
@@ -73,10 +70,7 @@ class MainWindow(QMainWindow):
     def press_rewind_button(self):
         """Rewind player to the beginning of the track."""
         player: MediaPlayer = self.core.list_player.get_media_player()
-        if (
-            self._current_media_idx == 0
-            or player.get_time() / 1000 > SKIP_BACK_SECOND_THRESHOLD
-        ):
+        if self._current_media_idx == 0 or player.get_time() / 1000 > SKIP_BACK_SECOND_THRESHOLD:
             player.set_position(0)
         else:
             self.core.list_player.previous()
@@ -88,15 +82,29 @@ class MainWindow(QMainWindow):
             self.core.list_player.stop()
 
     @Slot()
-    def press_shuffle_button(self):
+    def shuffle_button_toggled(self):
         """Shuffle remaining songs in playlist."""
         if count := self.core.media_list.count():  # If a queue is loaded
-            indices = np.arange(start=self._current_media_idx + 1, stop=count)
-            np.random.shuffle(indices)
-            new_media = [self.core.media_list[i] for i in indices]
-            for _ in range(len(indices)):
-                self.core.media_list.remove_index(self._current_media_idx + 1)
-                self.core.media_list.add_media(new_media.pop(0))
+            if self.shuffle_button.isChecked():
+                indices = np.arange(start=self._current_media_idx + 1, stop=count)
+                np.random.shuffle(indices)
+                # for _ in range(len(indices)):
+                new_media = [self.core.media_list[i] for i in indices]
+                for _ in range(len(new_media)):
+                    self.core.media_list.remove_index(self._current_media_idx + 1)
+                    self.core.media_list.add_media(new_media.pop(0))
+
+                self.queue.queue_indices = self.queue.queue_indices[: -len(indices)] + list(indices)
+                self.queue.update_first_queue_index(self.queue.current_queue_index)  # TODO?
+                self.core.original_indices = list(indices)
+            else:
+                print("TODO RESET QUEUE")
+                self.queue.queue_entries = [
+                    self.queue.queue_entries[current_idx]
+                    for current_idx, _ in sorted(enumerate(self.core.original_indices), key=lambda t: t[1])
+                ]
+                self.queue.update_first_queue_index(self.queue.current_queue_index)  # TODO?
+                self.core.original_indices = list(range(len(self.core.original_indices)))  # TODO USELESS?
 
     @property
     def _current_media_idx(self):
@@ -123,9 +131,7 @@ class MainWindow(QMainWindow):
         main_ui = QHBoxLayout()
 
         self.history = GraphicsViewSection()
-        self.queue = GraphicsViewSection(
-            [QueueEntry(self.core, i) for i in range(len(self.core.music_list))]
-        )
+        self.queue = GraphicsViewSection([QueueEntry(self.core, i) for i in range(len(self.core.music_list))])
 
         queue_tab = QTabWidget()
         queue_tab.addTab(self.queue, "Queue")
@@ -137,51 +143,39 @@ class MainWindow(QMainWindow):
         w.setLayout(main_ui)
         self.setCentralWidget(w)
 
-        toolbar = QToolBar(
-            floatable=False, movable=False, orientation=Qt.Orientation.Horizontal
-        )
+        toolbar = QToolBar(floatable=False, movable=False, orientation=Qt.Orientation.Horizontal)
         self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, toolbar)
 
         self.album_button = AlbumButton(current_media_md)
         toolbar.addWidget(self.album_button)
 
         self.song_label = QLabel(current_media_md.title)
-        self.song_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        self.song_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         toolbar.addWidget(self.song_label)
 
-        shuffle_button = QToolButton()
-        shuffle_button.setIcon(QIcon("icons/shuffle-button.svg"))
-        shuffle_button.setCheckable(True)
-        shuffle_button.clicked.connect(self.press_shuffle_button)
-        toolbar.addWidget(shuffle_button)
+        self.shuffle_button = QToolButton()
+        self.shuffle_button.setIcon(QIcon("../icons/shuffle-button.svg"))
+        self.shuffle_button.setCheckable(True)
+        self.shuffle_button.toggled.connect(self.shuffle_button_toggled)
+        toolbar.addWidget(self.shuffle_button)
 
         rewind_button = QToolButton()
-        rewind_button.setIcon(QIcon("icons/rewind-button.svg"))
+        rewind_button.setIcon(QIcon("../icons/rewind-button.svg"))
         rewind_button.clicked.connect(self.press_rewind_button)
         toolbar.addWidget(rewind_button)
 
         self.play_button = QToolButton()
-        self.play_button.setIcon(QIcon("icons/play-button.svg"))
+        self.play_button.setIcon(QIcon("../icons/play-button.svg"))
         self.play_button.clicked.connect(self.press_play_button)
         toolbar.addWidget(self.play_button)
 
         skip_button = QToolButton()
-        skip_button.setIcon(
-            (
-                QIcon(
-                    QPixmap("icons/rewind-button.svg").transformed(
-                        QTransform().scale(-1, 1)
-                    )
-                )
-            )
-        )
+        skip_button.setIcon((QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1)))))
         skip_button.clicked.connect(self.press_skip_button)
         toolbar.addWidget(skip_button)
 
         repeat_button = QToolButton()
-        repeat_button.setIcon(QIcon("icons/repeat-button.svg"))
+        repeat_button.setIcon(QIcon("../icons/repeat-button.svg"))
         # repeat_button.clicked.connect(self.press_repeat_button)
         toolbar.addWidget(repeat_button)
 

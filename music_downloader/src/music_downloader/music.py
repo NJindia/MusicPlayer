@@ -41,18 +41,14 @@ def _parse_lyrics(lyrics: str) -> dict[time | None, str]:
     lyrics_by_timestamp: dict[time | None, str] = {}
     for line in lyrics.split("\n"):
         timestamp_end_idx = line.find("]")
-        _time = (
-            datetime.strptime(line[1:timestamp_end_idx], "%M:%S.%f").time()
-            if timestamp_end_idx != -1
-            else None
-        )
+        _time = datetime.strptime(line[1:timestamp_end_idx], "%M:%S.%f").time() if timestamp_end_idx != -1 else None
         lyrics_by_timestamp[_time] = line[timestamp_end_idx + 1 :].strip()
     return lyrics_by_timestamp
 
 
 @cache
 def get_music() -> Iterator[Music]:
-    for fp in tqdm(list((Path().resolve() / "export/").iterdir())):
+    for fp in tqdm(list((Path().resolve().parent / "export/").iterdir())):
         match fp.suffix:
             case ".flac":
                 md = FLAC(fp)

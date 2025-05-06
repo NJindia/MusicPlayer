@@ -14,3 +14,15 @@ dependencies = [
     "soundfile>=0.13.1",
     "tqdm>=4.67.1",
 ]
+
+[tool.ruff]
+src = ["src"]
+line-length = 120
+target-version = "py313"
+fix = true
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"

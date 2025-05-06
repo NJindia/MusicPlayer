@@ -1,8 +1,5 @@
-from typing import cast
-
-import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QMouseEvent, QPixmap
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QWidget,
@@ -11,7 +8,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QGraphicsView,
     QGraphicsScene,
-    QGraphicsPixmapItem,
     QSizePolicy,
     QGraphicsProxyWidget,
 )
@@ -67,11 +63,9 @@ class QueueEntry(QFrame):
         )
         metadata = core.music_list[media_list_index]
 
-        song_album_layout = QVBoxLayout(self)
+        song_album_layout = QVBoxLayout()
         song_label = HoverableUnderlineLabel(metadata.title, self)
-        song_label.clicked.connect(
-            lambda _: core.list_player.play_item_at_index(media_list_index)
-        )
+        song_label.clicked.connect(lambda _: core.list_player.play_item_at_index(media_list_index))
 
         artists_text_browser = HoverableUnderlineLabel(",".join(metadata.artists), self)
         artists_text_browser.clicked.connect(lambda _: print("TODO Go to artist"))
@@ -89,28 +83,32 @@ class QueueEntry(QFrame):
 
 
 class GraphicsViewSection(QGraphicsView):
+    @property
+    def current_entries(self):
+        return [self.queue_entries[i] for i in self.queue_indices[self.current_queue_index :]]
+
+    @property
+    def past_entries(self):
+        return [self.queue_entries[i] for i in self.queue_indices[: self.current_queue_index]]
+
     def update_scene(self, from_index: int = 0):
         for i, proxy in enumerate(
-            self.queue_entries[self.current_queue_index :][from_index:],
+            self.current_entries[from_index:],
             start=from_index,
         ):
             proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
-        assert all(
-            e in self.scene().items()
-            for e in self.queue_entries[self.current_queue_index :]
-        )
-        self.setSceneRect(
-            0, 0, self.width(), self.get_y_pos(len(self.scene().items()))
-        )  # Update scene size
+        assert all(e in self.scene().items() for e in self.current_entries)
+        self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(self.scene().items())))  # Update scene size
 
     def update_first_queue_index(self, queue_index: int) -> None:
         self.current_queue_index = queue_index
         scene_items = self.scene().items()
-        for proxy in self.queue_entries[: self.current_queue_index]:
-            self.scene().removeItem(proxy)
+        for proxy in self.past_entries:
+            if proxy.scene():
+                self.scene().removeItem(proxy)
         first_proxy = (
-            self.queue_entries[self.current_queue_index]
-            if self.current_queue_index < len(self.queue_entries)
+            self.queue_entries[self.queue_indices[self.current_queue_index]]
+            if self.current_queue_index < len(self.queue_indices)
             else None
         )
         if first_proxy and first_proxy not in scene_items:
@@ -119,9 +117,16 @@ class GraphicsViewSection(QGraphicsView):
 
     def insert_queue_entry(self, queue_index: int, entry: QueueEntry) -> None:
         self.queue_entries.insert(queue_index, self.scene().addWidget(entry))
+        for i, idx in enumerate(self.queue_indices):
+            if idx >= queue_index:
+                self.queue_indices[i] = idx + 1
+        self.queue_indices.insert(queue_index, len(self.queue_entries) - 1)
+        assert len(self.queue_indices) == len(self.queue_entries)
+
         self.update_scene(queue_index)
 
-    def get_y_pos(self, index: int) -> float:
+    @staticmethod
+    def get_y_pos(index: int) -> float:
         return QUEUE_ENTRY_SPACING + index * (QUEUE_ENTRY_SPACING + QUEUE_ENTRY_HEIGHT)
 
     def __init__(self, queue_entries: list[QueueEntry] | None = None):
@@ -137,3 +142,5 @@ class GraphicsViewSection(QGraphicsView):
             proxy = self.scene().addWidget(widget)
             proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
             self.queue_entries.append(proxy)
+
+        self.queue_indices = list(range(len(self.queue_entries)))
