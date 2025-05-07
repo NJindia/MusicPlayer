@@ -19,7 +19,8 @@ from vlc import EventType
 from music_downloader.album import AlbumButton
 from music_downloader.queue_gui import (
     QueueEntry,
-    GraphicsViewSection,
+    QueueGraphicsView,
+    QueueEntryGraphicsView,
 )
 from music_downloader.vlc_core import VLCCore
 
@@ -47,7 +48,7 @@ class MainWindow(QMainWindow):
         self.song_label.setText(f"{md.title}\n{', '.join(md.artists)}")
         self.album_button.setIcon(md.album_icon)
 
-        self.queue.update_first_queue_index(self.core.current_queue_index + 1)
+        self.queue.update_first_queue_index()
         self.history.insert_queue_entry(0, QueueEntry(self.core, int(self.last_played_idx)))
         self.last_played_idx = curr_media_idx
 
@@ -62,20 +63,10 @@ class MainWindow(QMainWindow):
         if count := self.core.media_list.count():  # If a queue is loaded
             if self.shuffle_button.isChecked():
                 new_queue_indices = self.core.shuffle_next_indices()
-                self.queue.queue_indices = self.queue.queue_indices[: -len(new_queue_indices)] + new_queue_indices
-                self.queue.update_first_queue_index(self.queue.current_queue_index)
+                self.queue.update_first_queue_index()
             else:
-                print("TODO")
-                # new_media = [self.core.media_list[i] for i in self.core.original_indices[self._current_media_idx + 1 :]]
-                # for _ in range(len(new_media)):
-                #     self.core.media_list.remove_index(self._current_media_idx + 1)
-                #     self.core.media_list.add_media(new_media.pop(0))
-                #
-                # original_next_indices = self.core.original_indices[-self.queue.current_queue_index :]
-                # self.queue.queue_indices = (
-                #     self.queue.queue_indices[: -len(original_next_indices)] + original_next_indices
-                # )
-                # self.queue.update_first_queue_index(self.queue.current_queue_index)  # TODO?
+                self.core.unshuffle()
+                self.queue.update_first_queue_index()
 
     def __init__(self, core: VLCCore):
         super().__init__()
@@ -92,8 +83,8 @@ class MainWindow(QMainWindow):
 
         main_ui = QHBoxLayout()
 
-        self.history = GraphicsViewSection(self.core, empty=True)
-        self.queue = GraphicsViewSection(self.core)
+        self.history = QueueEntryGraphicsView()
+        self.queue = QueueGraphicsView(self.core)
 
         queue_tab = QTabWidget()
         queue_tab.addTab(self.queue, "Queue")

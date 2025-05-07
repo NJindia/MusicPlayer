@@ -41,7 +41,7 @@ class VLCCore:
 
     def play_jump_to_index(self, queue_index: int):
         self.current_queue_index = queue_index
-        self.list_player.play_item_at_index(self.current_queue_index)
+        self.list_player.play_item_at_index(self.media_list_indices[self.current_queue_index])
 
     def _play_current_queue_index(self) -> Success:
         return self.list_player.play_item_at_index(self.media_list_indices[self.current_queue_index])
@@ -79,8 +79,6 @@ class VLCCore:
         self.media_list_indices[queue_index:] = shuffled
         return shuffled
 
-    def unshuffle_next_indices(self) -> list[int]:
-        queue_index = self.current_queue_index
-        unshuffled = self.media_list_indices[queue_index:]  # TODO THIS IS WRONG
-        self.media_list_indices[queue_index:] = unshuffled
-        return unshuffled
+    def unshuffle(self):
+        self.current_queue_index = self.media_list_indices[self.current_queue_index]
+        self.media_list_indices = list(range(len(self.music_list)))
