@@ -1,6 +1,6 @@
 from functools import partial
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
@@ -23,6 +23,7 @@ from music_downloader.constants import (
     QUEUE_ENTRY_SPACING,
     QUEUE_WIDTH,
 )
+from music_downloader.music import Music
 from music_downloader.vlc_core import VLCCore
 
 
@@ -38,7 +39,7 @@ class ScrollableLayout(QScrollArea):
 
 
 class QueueEntry(QFrame):
-    def __init__(self, core: VLCCore, media_list_index: int):
+    def __init__(self, metadata: Music):
         super().__init__()
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover)
@@ -64,9 +65,6 @@ class QueueEntry(QFrame):
             QUEUE_ENTRY_SPACING,
             QUEUE_ENTRY_SPACING,
         )
-        self.core = core
-        self.media_list_index = media_list_index
-        metadata = self.core.music_list[self.media_list_index]
 
         song_album_layout = QVBoxLayout()
         self.song_label = HoverableUnderlineLabel(metadata.title, self)
@@ -77,7 +75,7 @@ class QueueEntry(QFrame):
         song_album_layout.addWidget(self.song_label)
         song_album_layout.addWidget(artists_text_browser)
 
-        layout.addWidget(AlbumButton(metadata, self))
+        layout.addWidget(AlbumButton(metadata, self, (self.height(), self.lineWidth())))
         layout.addLayout(song_album_layout)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
@@ -122,17 +120,18 @@ class QueueGraphicsView(QueueEntryGraphicsView):
     def __init__(self, vlc_core: VLCCore):
         super().__init__()
         self.core = vlc_core
-        for i in range(len(self.core.music_list)):
-            qe = QueueEntry(self.core, i)
+        for i, music_idx in enumerate(self.core.indices):
+            qe = QueueEntry(self.core.music_list[music_idx])
             qe.song_label.clicked.connect(partial(self.play_song, qe))
             proxy = self.scene().addWidget(qe)
 
             proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
             self.queue_entries.append(proxy)
 
+    @Slot(QueueEntry)
     def play_song(self, queue_entry: QueueEntry, _: QMouseEvent):
         queue_index = [p.widget() for p in self.ordered_entries].index(queue_entry)
-        self.core.play_jump_to_index(queue_index)
+        self.core.list_player.play_item_at_index(queue_index)
         # if self.queue_index is not None:
         #     self.core.play_jump_to_index(self.queue_index)
         # else:
@@ -140,15 +139,15 @@ class QueueGraphicsView(QueueEntryGraphicsView):
 
     @property
     def current_entries(self):
-        return self.ordered_entries[self.core.current_queue_index + 1 :]
+        return self.ordered_entries[self.core.current_media_idx + 1 :]
 
     @property
     def past_entries(self):
-        return self.ordered_entries[: self.core.current_queue_index + 1]
+        return self.ordered_entries[: self.core.current_media_idx + 1]
 
     @property
     def ordered_entries(self):
-        return [self.queue_entries[i] for i in self.core.media_list_indices]
+        return [self.queue_entries[i] for i in self.core.indices]
 
     def update_first_queue_index(self) -> None:
         for proxy in self.past_entries:
@@ -161,5 +160,5 @@ class QueueGraphicsView(QueueEntryGraphicsView):
 
     @override
     def insert_queue_entry(self, queue_index: int, entry: QueueEntry) -> None:
-        assert queue_index > self.core.current_queue_index, "Can't insert queue entry before current queue index"
+        assert queue_index > self.core.current_media_idx, "Can't insert queue entry before current queue index"
         super().insert_queue_entry(queue_index, entry)

@@ -1,13 +1,14 @@
 from dataclasses import dataclass
 from datetime import time, date, datetime
 from pathlib import Path
-from typing import Iterator
+from typing import cast
 
 import soundfile as sf
 from PySide6.QtGui import QIcon, QPixmap, QImage
 from dacite.cache import cache
 from mutagen.flac import FLAC
 from tqdm import tqdm
+from vlc import Media, Instance
 
 
 class NotAcceptedFileTypeError(ValueError):
@@ -24,6 +25,7 @@ class Music:
     release_date: date
     isrc: str
     file_path: Path
+    mrl: str
     album_cover_bytes: bytes | None
 
     @property
@@ -47,13 +49,17 @@ def _parse_lyrics(lyrics: str) -> dict[time | None, str]:
 
 
 @cache
-def get_music() -> Iterator[Music]:
+def get_music_media(instance: Instance) -> tuple[list[Music], list[Media]]:
+    music_list: list[Music] = []
+    media_list: list[Media] = []
     for fp in tqdm(list((Path().resolve().parent / "export/").iterdir())):
+        media = cast(Media, instance.media_new(fp))
+        media_list.append(media)
         match fp.suffix:
             case ".flac":
                 md = FLAC(fp)
                 assert md.tags is not None
-                yield Music(
+                music = Music(
                     title=md.tags["TITLE"][0],  # pyright: ignore[reportIndexIssue]
                     artists=[s.strip() for s in md.tags["ARTIST"][0].split(",")],  # pyright: ignore[reportIndexIssue]
                     album=md.tags["ALBUM"][0],  # pyright: ignore[reportIndexIssue]
@@ -67,12 +73,15 @@ def get_music() -> Iterator[Music]:
                     if "LYRICS" in md.tags  # pyright: ignore[reportOperatorIssue]
                     else {},
                     file_path=fp,
+                    mrl=media.get_mrl(),
                     album_cover_bytes=md.pictures[0].data if md.pictures else None,  # pyright: ignore[reportIndexIssue]
                 )
+                music_list.append(music)
             case ".m4a":
                 continue
                 raise NotAcceptedFileTypeError()
+    return music_list, media_list
 
 
 if __name__ == "__main__":
-    music_list = list(get_music())
+    music_list = list(get_music_media())

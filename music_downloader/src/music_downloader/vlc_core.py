@@ -1,84 +1,100 @@
-from functools import cached_property
-from typing import cast, Literal
+import itertools
+from typing import cast, Literal, get_args
 
 import numpy as np
-from vlc import Instance, MediaPlayer, EventType, Event, MediaList, Media
+from PySide6.QtCore import Slot
+from vlc import Instance, MediaPlayer, EventType, Event, MediaList, MediaListPlayer, MediaLibrary, Media
 
-from music_downloader.music import get_music, Music
+from music_downloader.music import get_music_media, Music
 from music_downloader.constants import SKIP_BACK_SECOND_THRESHOLD
 
 Success = Literal[-1, 0]
 
+RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
+
+
+def index_media_list(media_list: MediaList, media: Media) -> int:
+    return next(i for i, m in enumerate(media_list) if m.get_mrl() == media.get_mrl())
+
 
 class VLCCore:
     def on_playing(self, _: Event):
-        self.list_player.pause()
-        self.media_player.event_manager().event_detach(EventType.MediaPlayerPlaying)  # pyright: ignore[reportAttributeAccessIssue]
+        self.media_player.pause()
+        self.player_event_manager.event_detach(EventType.MediaPlayerPlaying)  # pyright: ignore[reportAttributeAccessIssue]
 
     def __init__(self):
-        self.instance = cast(Instance, Instance())
-        self.music_list = list(get_music())
-        self.list_player = self.instance.media_list_player_new()
-        self.media_list: MediaList = self.instance.media_list_new([m.file_path for m in self.music_list])
+        self.instance = cast(Instance, Instance("--no-xlib"))
+        self.music_list, media_list = list(get_music_media(self.instance))
+        self.list_player: MediaListPlayer = self.instance.media_list_player_new()
+
+        self.media_list: MediaList = self.instance.media_list_new(media_list)
         self.list_player.set_media_list(self.media_list)
-        self.original_indices: list[int] = list(range(len(self.music_list)))
+        self.player_event_manager = self.media_player.event_manager()
+        self.list_player_event_manager = self.list_player.event_manager()
+
+        self.library: MediaLibrary = self.instance.media_library_new()
+        self.library.load()
+        lib_media: MediaList = self.library.media_list()
+        for _ in range(lib_media.count()):
+            lib_media.remove_index(0)
+        for m in self.music_list:
+            lib_media.add_media(self.instance.media_new(m.file_path))
+        self.list_player.set_media_list(lib_media)
+        self.indices: list[int] = list(range(lib_media.count()))
+
         if self.media_list.count():
-            self.media_player.event_manager().event_attach(
+            self.player_event_manager.event_attach(
                 EventType.MediaPlayerPlaying,  # pyright: ignore[reportAttributeAccessIssue]
                 self.on_playing,
             )
-            self.list_player.play_item_at_index(0)
+            self.list_player.next()
+        assert not self.media_player.is_playing()
 
-        self.current_queue_index = 0
-        self.media_list_indices: list[int] = list(range(len(self.music_list)))
+        self.repeat_states = itertools.cycle(get_args(RepeatState))
+        self.repeat_state: RepeatState = next(self.repeat_states)
+        assert self.repeat_state == "NO_REPEAT"  # Should always start here TODO (for now)
 
-        assert not self.list_player.is_playing()
-        assert self.media_list.index_of_item(self.media_player.get_media()) != -1
+    @property
+    def current_music(self) -> Music:
+        """The Music that is currently playing"""
+        return next(m for m in self.music_list if m.mrl == self.current_media.get_mrl())
 
-    @cached_property
+    @property
+    def current_media_idx(self) -> int:
+        """The index of the current media. Corresponds to appropriate index of `self.indices`"""
+        return index_media_list(self.media_list, self.current_media)
+
+    @property
+    def current_media(self) -> Media:
+        """The currently playing media"""
+        return self.media_player.get_media()
+
+    @property
     def media_player(self) -> MediaPlayer:
+        """The media player instance"""
         return self.list_player.get_media_player()
 
-    def play_jump_to_index(self, queue_index: int):
-        self.current_queue_index = queue_index
-        self.list_player.play_item_at_index(self.media_list_indices[self.current_queue_index])
-
-    def _play_current_queue_index(self) -> Success:
-        return self.list_player.play_item_at_index(self.media_list_indices[self.current_queue_index])
-
-    def play_next(self) -> Success:
-        self.current_queue_index += 1
-        if self.current_queue_index >= len(self.media_list):
-            return self.list_player.stop()
-        return self._play_current_queue_index()
-
+    @Slot()
     def play_previous(self) -> Success:
-        if (
-            self.current_queue_index == 0
-            or self.list_player.get_media_player().get_time() / 1000 > SKIP_BACK_SECOND_THRESHOLD
-        ):
-            self.list_player.get_media_player().set_position(0)
+        if self.current_media_idx == 0 or self.media_player.get_time() / 1000 > SKIP_BACK_SECOND_THRESHOLD:
+            self.media_player.set_position(0)
             return 0
         else:
-            self.current_queue_index -= 1
-            return self._play_current_queue_index()
+            return self.list_player.previous()
 
-    def remove_music_at_index(self, media_index: int):
-        self.media_list.remove_index(media_index)
-        self.music_list.pop(media_index)
-
-    def add_music_at_index(self, index: int, music: Music, media: Media):
-        self.music_list.insert(index, music)
-        self.media_list.add_media(media)
-        self.media_list_indices.insert(index, self.media_list.count() - 1)
-
-    def shuffle_next_indices(self) -> list[int]:
-        queue_index = self.current_queue_index + 1
-        shuffled = self.media_list_indices[queue_index:]
-        np.random.shuffle(shuffled)
-        self.media_list_indices[queue_index:] = shuffled
-        return shuffled
+    def shuffle_next(self):
+        shuffle_indices = self.indices[self.current_media_idx + 1 :]
+        np.random.shuffle(shuffle_indices)
+        self.indices = self.indices[: self.current_media_idx + 1] + shuffle_indices
+        self.media_list = self.instance.media_list_new([self.library.media_list()[i] for i in self.indices])
+        self.list_player.set_media_list(self.media_list)
 
     def unshuffle(self):
-        self.current_queue_index = self.media_list_indices[self.current_queue_index]
-        self.media_list_indices = list(range(len(self.music_list)))
+        played_media = self.media_list[: self.current_media_idx + 1]
+        index_of_current_media_in_library = index_media_list(self.library.media_list(), self.current_media)
+        next_media = self.library.media_list()[index_of_current_media_in_library + 1 :]
+        self.media_list = self.instance.media_list_new([*played_media, *next_media])
+        self.list_player.set_media_list(self.media_list)
+        self.indices = self.indices[: self.current_media_idx + 1] + list(
+            range(index_of_current_media_in_library, index_of_current_media_in_library + len(next_media))
+        )
