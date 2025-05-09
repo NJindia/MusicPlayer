@@ -1,6 +1,6 @@
 from functools import cache
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QWidget, QSlider, QLabel, QHBoxLayout, QToolButton
 from typing_extensions import Literal
@@ -38,18 +38,20 @@ class VolumeSlider(QHBoxLayout):
         super().__init__(parent)
         self.core = core
         current_volume = self.core.media_player.audio_get_volume()
-        self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setValue(current_volume)
-        self.slider.setMaximum(100)
-        self.slider.valueChanged.connect(self.update_volume)
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setValue(current_volume)
+        self.volume_slider.setMaximum(100)
+        self.volume_slider.valueChanged.connect(self.update_volume)
 
         self.volume_button: QToolButton = QToolButton()
         self.volume_button.setCheckable(True)
+        self.volume_button.toggled.connect(self.toggle_volume_button)
         self.update_volume(current_volume)
 
         self.addWidget(self.volume_button)
-        self.addWidget(self.slider)
+        self.addWidget(self.volume_slider)
 
+    @Slot()
     def update_volume(self, new_volume: int):
         assert self.core.media_player.audio_set_volume(new_volume) != -1
         if self.volume_button.isChecked():
@@ -60,4 +62,12 @@ class VolumeSlider(QHBoxLayout):
             self.volume_button.setIcon(get_volume_icons()["VOLUME_MAX"])
         else:
             self.volume_button.setIcon(get_volume_icons()["VOLUME_MIN"])
-        print(new_volume)
+        
+    @Slot()
+    def toggle_volume_button(self):
+        if self.volume_button.isChecked():
+            self.update_volume(0)
+            self.volume_slider.setEnabled(False)
+        else:
+            self.update_volume(self.volume_slider.value())
+            self.volume_slider.setEnabled(True)
