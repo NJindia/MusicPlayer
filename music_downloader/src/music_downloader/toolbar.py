@@ -39,26 +39,19 @@ class MediaScrubberSlider(QHBoxLayout):
         return self.core.current_media.get_duration() / 1000
 
     @Slot()
-    def _update_before_label(self):
-        current_second = round(self.slider.value() / 100 * self.get_current_media_duration())
-        print(current_second)
+    def _update_before_label(self, current_second: int | None = None):
+        if current_second is None:
+            current_second = round(self.core.media_player.get_time() / 1000)
         self.before_label.setText(timestamp_to_str(current_second))
 
     def _update_after_label(self):
         self.after_label.setText(timestamp_to_str(self.get_current_media_duration()))
 
-    prev_time = 0  # TODO
     def update_ui_live(self, event: vlc.Event):
         new_time: float = event.u.new_time / 1000
-        if round(new_time) == self.prev_time:
-            print("SKIP")
-            return
-        self.prev_time = round(new_time)
-        print("UPDATE" + str(new_time))
         new_slider_position = new_time / self.get_current_media_duration() * 100
         self.slider.setValue(new_slider_position)
-        # self.slider.setValue(self.core.media_player.get_position() * 100)
-        
+        self._update_before_label(round(new_time))
 
     def update_ui_song_changed(self):
         self._update_after_label()
