@@ -50,7 +50,7 @@ class MediaScrubberSlider(QHBoxLayout):
     def update_ui_live(self, event: vlc.Event):
         new_time: float = event.u.new_time / 1000
         new_slider_position = new_time / self.get_current_media_duration() * 100
-        self.slider.setValue(new_slider_position)
+        self.slider.setValue(new_slider_position)  # TODO: BLOCK valueChanged signal!
         self._update_before_label(round(new_time))
 
     def update_ui_song_changed(self):
