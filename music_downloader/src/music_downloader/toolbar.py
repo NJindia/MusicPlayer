@@ -1,23 +1,71 @@
+from datetime import datetime
 from functools import cache
 
+import vlc
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QWidget, QSlider, QLabel, QHBoxLayout, QToolButton
+from PySide6.QtWidgets import QWidget, QSlider, QLabel, QHBoxLayout, QToolButton, QSizePolicy
 from typing_extensions import Literal
 
 from music_downloader.vlc_core import VLCCore
 
 
-class LabeledSlider(QHBoxLayout):
-    def __init__(self, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.slider = QSlider(Qt.Orientation.Horizontal)  # TODO TICK POS
+def timestamp_to_str(timestamp: int):
+    return datetime.fromtimestamp(timestamp).strftime("%M:%S")
+
+
+class MediaScrubberSlider(QHBoxLayout):
+    def __init__(self, core: VLCCore):
+        super().__init__()
+        self.core = core
+
         self.before_label = QLabel()
         self.after_label = QLabel()
+
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setTracking(True)
+        self.slider.valueChanged.connect(self._update_before_label)
+        self.slider.sliderReleased.connect(self.set_media_position)
+        self.slider.setValue(0)
 
         self.addWidget(self.before_label)
         self.addWidget(self.slider)
         self.addWidget(self.after_label)
+
+        self._update_before_label()
+        self._update_after_label()
+
+    def get_current_media_duration(self):
+        return self.core.current_media.get_duration() / 1000
+
+    @Slot()
+    def _update_before_label(self):
+        current_second = round(self.slider.value() / 100 * self.get_current_media_duration())
+        print(current_second)
+        self.before_label.setText(timestamp_to_str(current_second))
+
+    def _update_after_label(self):
+        self.after_label.setText(timestamp_to_str(self.get_current_media_duration()))
+
+    prev_time = 0  # TODO
+    def update_ui_live(self, event: vlc.Event):
+        new_time: float = event.u.new_time / 1000
+        if round(new_time) == self.prev_time:
+            print("SKIP")
+            return
+        self.prev_time = round(new_time)
+        print("UPDATE" + str(new_time))
+        new_slider_position = new_time / self.get_current_media_duration() * 100
+        self.slider.setValue(new_slider_position)
+        # self.slider.setValue(self.core.media_player.get_position() * 100)
+        
+
+    def update_ui_song_changed(self):
+        self._update_after_label()
+
+    @Slot()
+    def set_media_position(self):
+        self.core.media_player.set_position(self.slider.value() / 100)
 
 
 VOLUME_ICONS = Literal["VOLUME_MUTED", "VOLUME_OFF", "VOLUME_MAX", "VOLUME_MIN"]
@@ -39,6 +87,9 @@ class VolumeSlider(QHBoxLayout):
         self.core = core
         current_volume = self.core.media_player.audio_get_volume()
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.volume_slider.setMaximumWidth(200)
+        self.volume_slider.setTracking(True)
         self.volume_slider.setValue(current_volume)
         self.volume_slider.setMaximum(100)
         self.volume_slider.valueChanged.connect(self.update_volume)
@@ -62,7 +113,7 @@ class VolumeSlider(QHBoxLayout):
             self.volume_button.setIcon(get_volume_icons()["VOLUME_MAX"])
         else:
             self.volume_button.setIcon(get_volume_icons()["VOLUME_MIN"])
-        
+
     @Slot()
     def toggle_volume_button(self):
         if self.volume_button.isChecked():

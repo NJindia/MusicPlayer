@@ -2,11 +2,9 @@ import itertools
 from typing import cast, Literal, get_args
 
 import numpy as np
-from PySide6.QtCore import Slot
 from vlc import Instance, MediaPlayer, EventType, Event, MediaList, MediaListPlayer, MediaLibrary, Media
 
 from music_downloader.music import get_music_media, Music
-from music_downloader.constants import SKIP_BACK_SECOND_THRESHOLD
 
 Success = Literal[-1, 0]
 
@@ -73,14 +71,6 @@ class VLCCore:
     def media_player(self) -> MediaPlayer:
         """The media player instance"""
         return self.list_player.get_media_player()
-
-    @Slot()
-    def play_previous(self) -> Success:
-        if self.current_media_idx == 0 or self.media_player.get_time() / 1000 > SKIP_BACK_SECOND_THRESHOLD:
-            self.media_player.set_position(0)
-            return 0
-        else:
-            return self.list_player.previous()
 
     def shuffle_next(self):
         shuffle_indices = self.indices[self.current_media_idx + 1 :]
