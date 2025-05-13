@@ -10,7 +10,9 @@ from typing_extensions import Literal
 from music_downloader.vlc_core import VLCCore
 
 
-def timestamp_to_str(timestamp: int):
+def timestamp_to_str(timestamp: int | float):
+    if isinstance(timestamp, float):
+        timestamp = round(timestamp)
     return datetime.fromtimestamp(timestamp).strftime("%M:%S")
 
 
@@ -19,13 +21,12 @@ class MediaScrubberSlider(QHBoxLayout):
         super().__init__()
         self.core = core
 
-        self.before_label = QLabel(timestamp_to_str(round(0)))
+        self.before_label = QLabel(timestamp_to_str(0))
         self.after_label = QLabel()
 
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.sliderMoved.connect(self.scrub_media)
         self.slider.sliderReleased.connect(self.set_media_position)
-        self.slider.setMaximum(100)
         self.slider.setValue(0)
 
         self.addWidget(self.before_label)
@@ -34,30 +35,28 @@ class MediaScrubberSlider(QHBoxLayout):
 
         self.update_after_label()
 
-    def get_current_media_duration(self):
+    def get_current_media_duration(self) -> float:
         return self.core.current_media.get_duration() / 1000
 
     @Slot()
     def scrub_media(self):
-        position = self.slider.sliderPosition()
-        timestamp: int = round(position / 100 * self.get_current_media_duration())
-        self.before_label.setText(timestamp_to_str(timestamp))
+        self.before_label.setText(timestamp_to_str(self.slider.sliderPosition()))
 
     def update_after_label(self):
+        self.slider.setMaximum(round(self.get_current_media_duration()))
         self.after_label.setText(timestamp_to_str(self.get_current_media_duration()))
 
     def update_ui_live(self, event: vlc.Event):
         if self.slider.isSliderDown():
             return  # Don't update if scrubbing
-        new_time: float = event.u.new_time / 1000
-        new_slider_position: int = round(new_time / self.get_current_media_duration() * 100)
-        self.slider.setSliderPosition(new_slider_position)
-        self.before_label.setText(timestamp_to_str(round(new_time)))
-        # TODO CONSIDER round(self.core.media_player.get_time() / 1000) for choppiness
+        new_time = round(event.u.new_time / 1000)
+        self.slider.setSliderPosition(new_time)
+        self.before_label.setText(timestamp_to_str(new_time))
+        # TODO CONSIDER round(self.core.media_player.get_time() / 1000) for time choppiness
 
     @Slot()
     def set_media_position(self):
-        self.core.media_player.set_position(self.slider.value() / 100)
+        self.core.media_player.set_position(self.slider.value() / self.get_current_media_duration())
 
 
 VOLUME_ICONS = Literal["VOLUME_MUTED", "VOLUME_OFF", "VOLUME_MAX", "VOLUME_MIN"]
