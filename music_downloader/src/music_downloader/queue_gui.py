@@ -31,7 +31,7 @@ from music_downloader.constants import (
     QUEUE_ENTRY_SPACING,
     QUEUE_WIDTH,
 )
-from music_downloader.music_importer import Music, get_music_df
+from music_downloader.music_importer import get_music_df
 from music_downloader.vlc_core import VLCCore
 
 
@@ -60,9 +60,10 @@ class HoverRect(QRectF):
 
 
 class QueueEntryGraphicsItem(QGraphicsItem):
-    def __init__(self, metadata: Music):
+    def __init__(self, music_idx: int):
         super().__init__()
-        self.metadata = metadata
+        self.music_idx = music_idx
+        self.metadata = get_music_df().iloc[self.music_idx]
         self.signal = QueueSignal()
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
@@ -220,7 +221,7 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         self.queue_entries = []
         self.scene().clear()
         for i, music_idx in enumerate(self.core.indices):
-            qe = QueueEntryGraphicsItem(get_music_df().iloc[music_idx])
+            qe = QueueEntryGraphicsItem(music_idx)
             qe.signal.song_clicked.connect(partial(self.play_queue_song, qe))
             self.scene().addItem(qe)
 
@@ -229,20 +230,16 @@ class QueueGraphicsView(QueueEntryGraphicsView):
 
     @Slot(QueueEntryGraphicsView)
     def play_queue_song(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent):
-        queue_index = self.ordered_entries.index(queue_entry)
+        queue_index = self.queue_entries.index(queue_entry)
         self.core.list_player.play_item_at_index(queue_index)
 
     @property
     def current_entries(self):
-        return self.ordered_entries[self.core.current_media_idx + 1 :]
+        return self.queue_entries[self.core.current_media_idx + 1 :]
 
     @property
     def past_entries(self):
-        return self.ordered_entries[: self.core.current_media_idx + 1]
-
-    @property
-    def ordered_entries(self):
-        return [self.queue_entries[i] for i in self.core.indices]
+        return self.queue_entries[: self.core.current_media_idx + 1]
 
     def update_first_queue_index(self) -> None:
         for proxy in self.past_entries:

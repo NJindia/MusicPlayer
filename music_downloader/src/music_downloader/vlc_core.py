@@ -2,7 +2,6 @@ import itertools
 from pathlib import Path
 from typing import cast, Literal, get_args
 
-import numpy as np
 from vlc import Instance, MediaPlayer, EventType, Event, MediaList, MediaListPlayer, Media
 
 from music_downloader.music_importer import Music, get_music_df
@@ -47,15 +46,9 @@ class VLCCore:
         self.repeat_state: RepeatState = next(self.repeat_states)
         assert self.repeat_state == "NO_REPEAT"  # Should always start here TODO (for now)
 
-    def initialize_list_player(self, media_list: MediaList, music_list: list[Music]):
-        assert media_list.count() == len(music_list)
-        self.media_list = media_list
-        self.list_player.set_media_list(self.media_list)
-        self.indices = list(range(self.media_list.count()))  # TODO
-
-    @property
-    def current_music(self) -> Music:
-        return from_dict(Music, get_music_df().iloc[self.indices[self.current_media_idx]].to_dict())
+    def get_current_idx_music(self) -> tuple[int, Music]:
+        idx = self.indices[self.current_media_idx]
+        return idx, from_dict(Music, get_music_df().iloc[idx].to_dict())
 
     @property
     def current_media_idx(self) -> int:
@@ -71,13 +64,6 @@ class VLCCore:
     def media_player(self) -> MediaPlayer:
         """The media player instance"""
         return self.list_player.get_media_player()
-
-    def shuffle_next(self):
-        shuffle_indices = self.indices[self.current_media_idx + 1 :]
-        np.random.shuffle(shuffle_indices)
-        self.indices = self.indices[: self.current_media_idx + 1] + shuffle_indices
-        self.media_list = self.instance.media_list_new([self.media_list[i] for i in self.indices])
-        self.list_player.set_media_list(self.media_list)
 
     def unshuffle(self):
         current_media_idx = self.current_media_idx
