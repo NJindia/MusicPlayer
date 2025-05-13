@@ -1,11 +1,13 @@
 import itertools
+from pathlib import Path
 from typing import cast, Literal, get_args
 
 import numpy as np
-from dacite import from_dict
 from vlc import Instance, MediaPlayer, EventType, Event, MediaList, MediaListPlayer, Media
 
 from music_downloader.music_importer import Music, get_music_df
+from music_downloader.common import get_playlist
+from dacite import from_dict
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
 
@@ -22,13 +24,13 @@ class VLCCore:
 
     def __init__(self):
         self.instance = cast(Instance, Instance("--no-xlib"))
-        self.music_list = [from_dict(Music, d) for d in get_music_df().to_dict(orient="records")]
 
         self.list_player: MediaListPlayer = self.instance.media_list_player_new()
 
-        self.media_list: MediaList = self.instance.media_list_new([m.file_path for m in self.music_list])
+        init_playlist = get_playlist(Path("../playlists/playlist4.json"))
+        self.media_list = init_playlist.to_media_list(self.instance)
+        self.indices = init_playlist.indices
         self.list_player.set_media_list(self.media_list)
-        self.indices: list[int] = list(range(self.media_list.count()))
 
         self.player_event_manager = self.media_player.event_manager()
         self.list_player_event_manager = self.list_player.event_manager()
@@ -48,14 +50,12 @@ class VLCCore:
     def initialize_list_player(self, media_list: MediaList, music_list: list[Music]):
         assert media_list.count() == len(music_list)
         self.media_list = media_list
-        self.music_list = music_list
         self.list_player.set_media_list(self.media_list)
-        self.indices = list(range(self.media_list.count()))
+        self.indices = list(range(self.media_list.count()))  # TODO
 
     @property
     def current_music(self) -> Music:
-        """The Music that is currently playing"""
-        return self.music_list[self.current_media_idx]
+        return from_dict(Music, get_music_df().iloc[self.indices[self.current_media_idx]].to_dict())
 
     @property
     def current_media_idx(self) -> int:
@@ -80,11 +80,11 @@ class VLCCore:
         self.list_player.set_media_list(self.media_list)
 
     def unshuffle(self):
-        played_media = self.media_list[: self.current_media_idx + 1]
-        index_of_current_media_in_list = index_media_list(self.media_list, self.current_media)
-        next_media = self.media_list[index_of_current_media_in_list + 1 :]
+        current_media_idx = self.current_media_idx
+        played_media = self.media_list[: current_media_idx + 1]
+        next_media = self.media_list[current_media_idx + 1 :]
         self.media_list = self.instance.media_list_new([*played_media, *next_media])
         self.list_player.set_media_list(self.media_list)
         self.indices = self.indices[: self.current_media_idx + 1] + list(
-            range(index_of_current_media_in_list, index_of_current_media_in_list + len(next_media))
+            range(current_media_idx, current_media_idx + len(next_media))
         )
