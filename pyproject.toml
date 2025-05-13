@@ -6,8 +6,10 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "dacite>=1.9.2",
+    "line-profiler-pycharm>=1.2.0",
     "mutagen>=1.47.0",
     "numpy>=2.2.5",
+    "pandas>=2.2.3",
     "pyright>=1.1.400",
     "pyside6>=6.9.0",
     "python-vlc>=3.0.21203",

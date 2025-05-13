@@ -19,42 +19,41 @@ class MediaScrubberSlider(QHBoxLayout):
         super().__init__()
         self.core = core
 
-        self.before_label = QLabel()
+        self.before_label = QLabel(timestamp_to_str(round(0)))
         self.after_label = QLabel()
 
         self.slider = QSlider(Qt.Orientation.Horizontal)
-        self.slider.setTracking(True)
-        self.slider.valueChanged.connect(self._update_before_label)
+        self.slider.sliderMoved.connect(self.scrub_media)
         self.slider.sliderReleased.connect(self.set_media_position)
+        self.slider.setMaximum(100)
         self.slider.setValue(0)
 
         self.addWidget(self.before_label)
         self.addWidget(self.slider)
         self.addWidget(self.after_label)
 
-        self._update_before_label()
-        self._update_after_label()
+        self.update_after_label()
 
     def get_current_media_duration(self):
         return self.core.current_media.get_duration() / 1000
 
     @Slot()
-    def _update_before_label(self, current_second: int | None = None):
-        if current_second is None:
-            current_second = round(self.core.media_player.get_time() / 1000)
-        self.before_label.setText(timestamp_to_str(current_second))
+    def scrub_media(self):
+        position = self.slider.sliderPosition()
+        timestamp: int = round(position / 100 * self.get_current_media_duration())
+        self.before_label.setText(timestamp_to_str(timestamp))
 
-    def _update_after_label(self):
+    def update_after_label(self):
         self.after_label.setText(timestamp_to_str(self.get_current_media_duration()))
 
     def update_ui_live(self, event: vlc.Event):
+        if self.slider.isSliderDown():
+            return  # Don't update if scrubbing
         new_time: float = event.u.new_time / 1000
-        new_slider_position = new_time / self.get_current_media_duration() * 100
-        self.slider.setValue(new_slider_position)  # TODO: BLOCK valueChanged signal!
-        self._update_before_label(round(new_time))
-
-    def update_ui_song_changed(self):
-        self._update_after_label()
+        new_slider_position: int = round(new_time / self.get_current_media_duration() * 100)
+        self.slider.setSliderPosition(new_slider_position)
+        self.before_label.setText(timestamp_to_str(round(new_time)))
+        # TODO CONSIDER round(self.core.media_player.get_time() / 1000) for choppiness
 
     @Slot()
     def set_media_position(self):

@@ -1,29 +1,37 @@
 from functools import partial
 
-from PySide6.QtCore import Qt, Slot
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import Qt, Slot, Signal, QRectF, QObject
+from PySide6.QtGui import (
+    QMouseEvent,
+    QPainter,
+    QColor,
+    QBrush,
+    QPen,
+    QFont,
+    QFontMetricsF,
+)
 from PySide6.QtWidgets import (
-    QFrame,
     QWidget,
-    QHBoxLayout,
     QVBoxLayout,
     QScrollArea,
     QGraphicsView,
     QGraphicsScene,
     QSizePolicy,
-    QGraphicsProxyWidget,
+    QGraphicsItem,
+    QGraphicsSceneHoverEvent,
+    QGraphicsSceneMouseEvent,
 )
+from line_profiler_pycharm import profile
 from typing_extensions import override
 
-from music_downloader.album import AlbumButton
-from music_downloader.common import HoverableUnderlineLabel
+from music_downloader.album import get_pixmap
 from music_downloader.constants import (
     QUEUE_ENTRY_HEIGHT,
     QUEUE_ENTRY_WIDTH,
     QUEUE_ENTRY_SPACING,
     QUEUE_WIDTH,
 )
-from music_downloader.music import Music
+from music_downloader.music_importer import Music
 from music_downloader.vlc_core import VLCCore
 
 
@@ -38,53 +46,146 @@ class ScrollableLayout(QScrollArea):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
 
-class QueueEntry(QFrame):
+class QueueSignal(QObject):
+    song_clicked = Signal(object)
+
+    def song_is_clicked(self, queue_entry: object) -> None:
+        self.song_clicked.emit(queue_entry)
+
+
+class HoverRect(QRectF):
+    def __init__(self, left: float, top: float, width: float, height: float) -> None:
+        super().__init__(left, top, width, height)
+        self.hovered: bool = False
+
+
+class QueueEntryGraphicsItem(QGraphicsItem):
     def __init__(self, metadata: Music):
         super().__init__()
-        self.setMouseTracking(True)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, False)
-        self.setFrameStyle(QFrame.Shape.Box | QFrame.Shadow.Plain)
-        self.setFixedSize(QUEUE_ENTRY_WIDTH, QUEUE_ENTRY_HEIGHT)
+        self.metadata = metadata
+        self.signal = QueueSignal()
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setLineWidth(QUEUE_ENTRY_SPACING)
-        self.setStyleSheet("""
-                    QFrame {
-                        background-color: #1b4af5;
-                        border-radius: 4px;
-                    }
-                    QFrame:hover {
-                        background-color: #e6e6f0;
-                    }
-                """)
+        self._hovered = False
+        self._bounding_rect = QRectF(0, 0, QUEUE_ENTRY_WIDTH, QUEUE_ENTRY_HEIGHT)
+        album_size = self.boundingRect().height() - 2 * QUEUE_ENTRY_SPACING
+        self._album_rect = QRectF(QUEUE_ENTRY_SPACING, QUEUE_ENTRY_SPACING, album_size, album_size)
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(
-            QUEUE_ENTRY_SPACING,
-            QUEUE_ENTRY_SPACING,
-            QUEUE_ENTRY_SPACING,
-            QUEUE_ENTRY_SPACING,
+        self._song_font = QFont()
+        padding_left = self.boundingRect().height()  # Space for album + spacing
+
+        font_rect = QFontMetricsF(self._song_font).boundingRect(self.metadata.title)
+        song_width, song_height = font_rect.width() + 2, font_rect.height() + 2
+        self._song_text_rect = HoverRect(padding_left, QUEUE_ENTRY_SPACING, song_width, song_height)
+
+        self._artist_font = QFont()
+        self._artist_rects: list[HoverRect] = []
+        curr_start = padding_left
+        for i, artist in enumerate(self.metadata.artists):
+            text = artist if i == len(self.metadata.artists) - 1 else f"{artist},"
+            font_rect = QFontMetricsF(self._artist_font).boundingRect(text)
+            text_width, text_height = font_rect.width() + 2, font_rect.height() + 2
+            self._artist_rects.append(
+                HoverRect(curr_start, song_height + QUEUE_ENTRY_SPACING * 2, text_width, text_height)
+            )
+            curr_start += text_width + QUEUE_ENTRY_SPACING
+
+    def boundingRect(self):
+        return self._bounding_rect
+
+    def paint(self, painter: QPainter, option, widget=None):
+        bg_color = QColor("#e6e6f0") if self._hovered else QColor("#1b4af5")
+        painter.setBrush(QBrush(bg_color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(self.boundingRect(), 4, 4)
+
+        if self.metadata.album_cover_bytes is not None:
+            pixmap = get_pixmap(self.metadata.album_cover_bytes).scaled(
+                self._album_rect.size().toSize(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            painter.drawPixmap(self._album_rect.topLeft(), pixmap)
+
+        self._song_font.setUnderline(self._song_text_rect.hovered)
+        painter.setFont(self._song_font)
+        painter.setPen(QPen(Qt.GlobalColor.black))
+        # painter.drawRect(self._song_text_rect)  # TODO REMOVE
+        painter.drawText(
+            self._song_text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, self.metadata.title
         )
 
-        song_album_layout = QVBoxLayout()
-        self.song_label = HoverableUnderlineLabel(metadata.title, self)
+        for i, (artist, artist_rect) in enumerate(zip(self.metadata.artists, self._artist_rects, strict=True)):
+            self._artist_font.setUnderline(artist_rect.hovered)
+            painter.setFont(self._artist_font)
+            # painter.drawRect(artist_rect)
+            text = artist if i == len(self._artist_rects) - 1 else f"{artist}, "
+            painter.drawText(artist_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, text)
 
-        artists_text_browser = HoverableUnderlineLabel(",".join(metadata.artists), self)
-        artists_text_browser.clicked.connect(lambda _: print("TODO Go to artist"))
+    def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent):
+        self._hovered = True
+        if self._song_text_rect.contains(event.pos()):
+            self._song_text_rect.hovered = True
+        for artist_rect in self._artist_rects:
+            if artist_rect.contains(event.pos()):
+                artist_rect.hovered = True
+            else:
+                artist_rect.hovered = False
+        self.update()
+        super().hoverEnterEvent(event)
 
-        song_album_layout.addWidget(self.song_label)
-        song_album_layout.addWidget(artists_text_browser)
+    def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent):
+        if self._song_text_rect.contains(event.pos()):
+            self._song_text_rect.hovered = True
+        else:
+            self._song_text_rect.hovered = False
+        for artist_rect in self._artist_rects:
+            if artist_rect.contains(event.pos()):
+                artist_rect.hovered = True
+            else:
+                artist_rect.hovered = False
+        self.update()
+        super().hoverMoveEvent(event)
 
-        layout.addWidget(AlbumButton(metadata, self, (self.height(), self.lineWidth())))
-        layout.addLayout(song_album_layout)
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent):
+        self._hovered = False
+        self._song_text_rect.hovered = False
+        for artist_rect in self._artist_rects:
+            artist_rect.hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
 
-    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._song_text_rect.contains(event.pos()):
+            print("CLICKED SONG")
+            self.signal.song_is_clicked(self)
+        elif self._album_rect.contains(event.pos()):
+            print("TODO: GO TO ALBUM")
+        else:
+            for artist_rect in self._artist_rects:
+                if artist_rect.contains(event.pos()):
+                    print("TODO: GO TO ARTIST")
+                    break
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.song_label.clicked.emit(event)
+            print("CLICKED ENTRY")
+            self.signal.song_is_clicked(self)
         super().mouseDoubleClickEvent(event)
 
 
 class QueueEntryGraphicsView(QGraphicsView):
+    def __init__(self):
+        super().__init__()
+        self.setScene(QGraphicsScene())
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self.setFixedWidth(int(QUEUE_WIDTH * 1.1))
+        self.queue_entries: list[QueueEntryGraphicsItem] = []
+
     @property
     def current_entries(self):
         return self.queue_entries
@@ -98,44 +199,38 @@ class QueueEntryGraphicsView(QGraphicsView):
         assert all(e in self.scene().items() for e in self.current_entries)
         self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(self.scene().items())))  # Update scene size
 
-    def insert_queue_entry(self, queue_index: int, entry: QueueEntry) -> None:
-        self.queue_entries.insert(queue_index, self.scene().addWidget(entry))
+    def insert_queue_entry(self, queue_index: int, entry: QueueEntryGraphicsItem) -> None:
+        self.queue_entries.insert(queue_index, entry)
+        self.scene().addItem(entry)
         self.update_scene(queue_index)
 
     @staticmethod
     def get_y_pos(index: int) -> float:
         return QUEUE_ENTRY_SPACING + index * (QUEUE_ENTRY_SPACING + QUEUE_ENTRY_HEIGHT)
 
-    def __init__(self):
-        super().__init__()
-        self.setScene(QGraphicsScene())
-        self.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        self.setFixedWidth(QUEUE_WIDTH)
-        self.queue_entries: list[QGraphicsProxyWidget] = []
-
 
 class QueueGraphicsView(QueueEntryGraphicsView):
     def __init__(self, vlc_core: VLCCore):
         super().__init__()
         self.core = vlc_core
+        self.initialize_queue()
+
+    @profile
+    def initialize_queue(self):
+        self.queue_entries = []
+        self.scene().clear()
         for i, music_idx in enumerate(self.core.indices):
-            qe = QueueEntry(self.core.music_list[music_idx])
-            qe.song_label.clicked.connect(partial(self.play_song, qe))
-            proxy = self.scene().addWidget(qe)
+            qe = QueueEntryGraphicsItem(self.core.music_list[music_idx])
+            qe.signal.song_clicked.connect(partial(self.play_queue_song, qe))
+            self.scene().addItem(qe)
 
-            proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
-            self.queue_entries.append(proxy)
+            qe.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
+            self.queue_entries.append(qe)
 
-    @Slot(QueueEntry)
-    def play_song(self, queue_entry: QueueEntry, _: QMouseEvent):
-        queue_index = [p.widget() for p in self.ordered_entries].index(queue_entry)
+    @Slot(QueueEntryGraphicsView)
+    def play_queue_song(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent):
+        queue_index = self.ordered_entries.index(queue_entry)
         self.core.list_player.play_item_at_index(queue_index)
-        # if self.queue_index is not None:
-        #     self.core.play_jump_to_index(self.queue_index)
-        # else:
-        #     print("TODO: WIPE Q AND PLAY THIS SONG")
 
     @property
     def current_entries(self):
@@ -159,6 +254,6 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         self.update_scene()
 
     @override
-    def insert_queue_entry(self, queue_index: int, entry: QueueEntry) -> None:
+    def insert_queue_entry(self, queue_index: int, entry: QueueEntryGraphicsItem) -> None:
         assert queue_index > self.core.current_media_idx, "Can't insert queue entry before current queue index"
         super().insert_queue_entry(queue_index, entry)
