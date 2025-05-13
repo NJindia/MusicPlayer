@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
         if playlist is None:
             raise NotImplementedError
         playlist.last_played = datetime.now()
-        self.core.initialize_list_player(*playlist.to_media_music_list(self.core.instance))
+        self.core.initialize_list_player(*playlist.to_media_list(self.core.instance))
         self.core.list_player.play_item_at_index(0)
         self.queue.initialize_queue()
         self.queue.update_first_queue_index()
@@ -166,11 +166,8 @@ class MainWindow(QMainWindow):
         self.media_changed: bool = False
         self.setWindowTitle("Media Player")
         self.media_changed_signal.connect(self.media_changed_ui)
-        curr_media_idx = self.core.media_list.index_of_item(self.core.list_player.get_media_player().get_media())
-        if curr_media_idx == -1 and self.core.media_list.count() > 0:
-            curr_media_idx = 0
-        current_media_md = self.core.music_list[curr_media_idx]
-        self.last_played_music: Music = self.core.current_music
+        current_media_md = self.core.current_music
+        self.last_played_music: Music = current_media_md
 
         main_ui = QHBoxLayout()
 

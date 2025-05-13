@@ -1,55 +1,13 @@
-import json
-from dataclasses import dataclass
-from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import cast
 
-import dacite
-import vlc
 from PySide6.QtCore import Qt, QModelIndex, QPoint, Slot
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction
 from PySide6.QtWidgets import QTreeView, QSizePolicy, QWidget, QVBoxLayout, QMenu
-from dacite import Config
-from line_profiler_pycharm import profile
 
-from music_downloader.music_importer import Music, get_music_df
+from music_downloader.common import Playlist, get_playlist
 from music_downloader.vlc_core import VLCCore
-
-
-@dataclass
-class PlaylistItem:
-    song_index: int
-    added_on: datetime
-
-    def to_json(self):
-        return {"song_index": self.song_index, "added_on": self.added_on.isoformat()}
-
-
-@dataclass
-class Playlist:
-    title: str
-    last_played: datetime | None
-    playlist_items: list[PlaylistItem]
-    # thumbnail: QPixmap | None = None
-
-    @profile
-    def to_media_music_list(self, instance: vlc.Instance) -> tuple[vlc.MediaList, list[Music]]:
-        d = get_music_df()
-        music_df = d.iloc[[i.song_index for i in self.playlist_items]]
-        music_list = [dacite.from_dict(Music, d) for d in music_df.to_dict(orient="records")]
-        media_list = instance.media_list_new(music_df["file_path"].to_list())
-        return media_list, music_list
-
-    def to_music_list(self) -> list[Music]:
-        return get_music_df().loc[[i.song_index for i in self.playlist_items]]
-
-    def to_json(self):
-        return {
-            "title": self.title,
-            "last_played": self.last_played.isoformat() if self.last_played else None,
-            "playlist_items": [i.to_json() for i in self.playlist_items],
-        }
 
 
 class TreeModelItem(QStandardItem):
@@ -135,11 +93,6 @@ class PlaylistView(QWidget):
                 root_item.appendRow(item)
                 self.initialize_model(fp, item)
             else:
-                with fp.open("r") as f:
-                    playlist = dacite.from_dict(
-                        Playlist,
-                        json.load(f),
-                        config=Config(type_hooks={datetime: lambda d: datetime.fromisoformat(d)}),
-                    )
-                    item = TreeModelItem(playlist.title, playlist)
-                    root_item.appendRow(item)
+                playlist = get_playlist(fp)
+                item = TreeModelItem(playlist.title, playlist)
+                root_item.appendRow(item)

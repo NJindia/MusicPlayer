@@ -31,7 +31,7 @@ from music_downloader.constants import (
     QUEUE_ENTRY_SPACING,
     QUEUE_WIDTH,
 )
-from music_downloader.music_importer import Music
+from music_downloader.music_importer import Music, get_music_df
 from music_downloader.vlc_core import VLCCore
 
 
@@ -220,7 +220,7 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         self.queue_entries = []
         self.scene().clear()
         for i, music_idx in enumerate(self.core.indices):
-            qe = QueueEntryGraphicsItem(self.core.music_list[music_idx])
+            qe = QueueEntryGraphicsItem(get_music_df().iloc[music_idx])
             qe.signal.song_clicked.connect(partial(self.play_queue_song, qe))
             self.scene().addItem(qe)
 
