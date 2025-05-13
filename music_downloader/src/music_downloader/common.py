@@ -51,6 +51,7 @@ class PlaylistItem:
 @dataclass
 class Playlist:
     title: str
+    created: datetime | None
     last_played: datetime | None
     playlist_items: list[PlaylistItem]
     # thumbnail: QPixmap | None = None
