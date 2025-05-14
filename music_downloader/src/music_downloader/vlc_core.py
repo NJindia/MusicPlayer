@@ -5,7 +5,7 @@ from typing import cast, Literal, get_args
 from vlc import Instance, MediaPlayer, EventType, Event, MediaList, MediaListPlayer, Media
 
 from music_downloader.music_importer import Music, get_music_df
-from music_downloader.common import get_playlist
+from music_downloader.common import get_playlist, Playlist
 from dacite import from_dict
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
@@ -26,9 +26,9 @@ class VLCCore:
 
         self.list_player: MediaListPlayer = self.instance.media_list_player_new()
 
-        init_playlist = get_playlist(Path("../playlists/playlist4.json"))
-        self.media_list = init_playlist.to_media_list(self.instance)
-        self.indices = init_playlist.indices
+        self.current_playlist: Playlist = get_playlist(Path("../playlists/playlist4.json"))
+        self.media_list = self.instance.media_list_new(self.current_playlist.file_paths)
+        self.indices = self.current_playlist.indices
         self.list_player.set_media_list(self.media_list)
 
         self.player_event_manager = self.media_player.event_manager()
@@ -64,13 +64,3 @@ class VLCCore:
     def media_player(self) -> MediaPlayer:
         """The media player instance"""
         return self.list_player.get_media_player()
-
-    def unshuffle(self):
-        current_media_idx = self.current_media_idx
-        played_media = self.media_list[: current_media_idx + 1]
-        next_media = self.media_list[current_media_idx + 1 :]
-        self.media_list = self.instance.media_list_new([*played_media, *next_media])
-        self.list_player.set_media_list(self.media_list)
-        self.indices = self.indices[: self.current_media_idx + 1] + list(
-            range(current_media_idx, current_media_idx + len(next_media))
-        )
