@@ -207,7 +207,7 @@ class MainWindow(QMainWindow):
         self.queue = QueueGraphicsView(self.core)
 
         queue_tab = QTabWidget()
-        queue_tab.setFixedWidth(QUEUE_ENTRY_WIDTH * 1.25)  # TODO
+        queue_tab.setFixedWidth(QUEUE_ENTRY_WIDTH * 1.25)  # TODO int
         queue_tab.addTab(self.queue, "Queue")
         queue_tab.addTab(self.history, "History")
 
