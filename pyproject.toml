@@ -1,5 +1,5 @@
 [project]
-name = "MusicDownloader"
+name = "MusicPlayer"
 version = "0.1.0"
 description = "Add your description here"  # TODO
 readme = "README.md"
