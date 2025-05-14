@@ -30,7 +30,7 @@ from music_downloader.constants import (
     QUEUE_ENTRY_SPACING,
     QUEUE_WIDTH,
 )
-from music_downloader.music_importer import get_music_df
+from music_downloader.music_importer import Music
 from music_downloader.vlc_core import VLCCore
 
 
@@ -59,10 +59,9 @@ class HoverRect(QRectF):
 
 
 class QueueEntryGraphicsItem(QGraphicsItem):
-    def __init__(self, music_idx: int):
+    def __init__(self, music: Music):
         super().__init__()
-        self.music_idx = music_idx
-        self.metadata = get_music_df().iloc[self.music_idx]
+        self.music = music
         self.signal = QueueSignal()
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
@@ -75,15 +74,15 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         self._song_font = QFont()
         padding_left = self.boundingRect().height()  # Space for album + spacing
 
-        font_rect = QFontMetricsF(self._song_font).boundingRect(self.metadata.title)
+        font_rect = QFontMetricsF(self._song_font).boundingRect(self.music.title)
         song_width, song_height = font_rect.width() + 2, font_rect.height() + 2
         self._song_text_rect = HoverRect(padding_left, QUEUE_ENTRY_SPACING, song_width, song_height)
 
         self._artist_font = QFont()
         self._artist_rects: list[HoverRect] = []
         curr_start = padding_left
-        for i, artist in enumerate(self.metadata.artists):
-            text = artist if i == len(self.metadata.artists) - 1 else f"{artist},"
+        for i, artist in enumerate(self.music.artists):
+            text = artist if i == len(self.music.artists) - 1 else f"{artist},"
             font_rect = QFontMetricsF(self._artist_font).boundingRect(text)
             text_width, text_height = font_rect.width() + 2, font_rect.height() + 2
             self._artist_rects.append(
@@ -100,8 +99,8 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.boundingRect(), 4, 4)
 
-        if self.metadata.album_cover_bytes is not None:
-            pixmap = get_pixmap(self.metadata.album_cover_bytes).scaled(
+        if self.music.album_cover_bytes is not None:
+            pixmap = get_pixmap(self.music.album_cover_bytes).scaled(
                 self._album_rect.size().toSize(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
@@ -112,11 +111,9 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         painter.setFont(self._song_font)
         painter.setPen(QPen(Qt.GlobalColor.black))
         # painter.drawRect(self._song_text_rect)  # TODO REMOVE
-        painter.drawText(
-            self._song_text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, self.metadata.title
-        )
+        painter.drawText(self._song_text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, self.music.title)
 
-        for i, (artist, artist_rect) in enumerate(zip(self.metadata.artists, self._artist_rects, strict=True)):
+        for i, (artist, artist_rect) in enumerate(zip(self.music.artists, self._artist_rects, strict=True)):
             self._artist_font.setUnderline(artist_rect.hovered)
             painter.setFont(self._artist_font)
             # painter.drawRect(artist_rect)
@@ -158,7 +155,6 @@ class QueueEntryGraphicsItem(QGraphicsItem):
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         if self._song_text_rect.contains(event.pos()):
-            print("CLICKED SONG")
             self.signal.song_is_clicked(self)
         elif self._album_rect.contains(event.pos()):
             print("TODO: GO TO ALBUM")
@@ -218,8 +214,8 @@ class QueueGraphicsView(QueueEntryGraphicsView):
     def initialize_queue(self):
         self.queue_entries = []
         self.scene().clear()
-        for i, music_idx in enumerate(self.core.indices):
-            qe = QueueEntryGraphicsItem(music_idx)
+        for i, list_index in enumerate(self.core.list_indices):
+            qe = QueueEntryGraphicsItem(self.core.music_list[list_index])
             qe.signal.song_clicked.connect(partial(self.play_queue_song, qe))
             self.scene().addItem(qe)
 
@@ -228,16 +224,20 @@ class QueueGraphicsView(QueueEntryGraphicsView):
 
     @Slot(QueueEntryGraphicsView)
     def play_queue_song(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent):
-        queue_index = self.queue_entries.index(queue_entry)
-        self.core.list_player.play_item_at_index(queue_index)
+        self.core.jump_play_index(self.ordered_entries.index(queue_entry))
 
     @property
     def current_entries(self):
-        return self.queue_entries[self.core.current_media_idx + 1 :]
+        return self.ordered_entries[self.core.current_media_idx + 1 :]
 
     @property
     def past_entries(self):
-        return self.queue_entries[: self.core.current_media_idx + 1]
+        return self.ordered_entries[: self.core.current_media_idx + 1]
+
+    @property
+    def ordered_entries(self):
+        assert len(self.queue_entries) == len(self.core.list_indices)
+        return [self.queue_entries[i] for i in self.core.list_indices]
 
     def update_first_queue_index(self) -> None:
         for proxy in self.past_entries:
