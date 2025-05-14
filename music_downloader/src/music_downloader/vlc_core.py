@@ -4,9 +4,8 @@ from typing import cast, Literal, get_args
 
 from vlc import Instance, MediaPlayer, EventType, Event, MediaList, MediaListPlayer, Media
 
-from music_downloader.music_importer import Music, get_music_df
+from music_downloader.music_importer import Music
 from music_downloader.common import get_playlist, Playlist
-from dacite import from_dict
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
 
@@ -26,9 +25,12 @@ class VLCCore:
 
         self.list_player: MediaListPlayer = self.instance.media_list_player_new()
 
-        self.current_playlist: Playlist = get_playlist(Path("../playlists/playlist4.json"))
-        self.media_list = self.instance.media_list_new(self.current_playlist.file_paths)
-        self.indices = self.current_playlist.indices
+        init_playlist: Playlist = get_playlist(Path("../playlists/playlist4.json"))
+        paths = init_playlist.file_paths
+        self.media_list: MediaList = self.instance.media_list_new(paths)
+        self.list_indices = list(range(len(paths)))
+        self.music_list: list[Music] = init_playlist.music_list
+        self.current_media_idx: int = 0
         self.list_player.set_media_list(self.media_list)
 
         self.player_event_manager = self.media_player.event_manager()
@@ -46,21 +48,31 @@ class VLCCore:
         self.repeat_state: RepeatState = next(self.repeat_states)
         assert self.repeat_state == "NO_REPEAT"  # Should always start here TODO (for now)
 
-    def get_current_idx_music(self) -> tuple[int, Music]:
-        idx = self.indices[self.current_media_idx]
-        return idx, from_dict(Music, get_music_df().iloc[idx].to_dict())
-
     @property
-    def current_media_idx(self) -> int:
-        """The index of the current media. Corresponds to appropriate index of `self.indices`"""
-        return index_media_list(self.media_list, self.current_media)
+    def current_music(self) -> Music:
+        return self.music_list[self.list_indices[self.current_media_idx]]
 
     @property
     def current_media(self) -> Media:
         """The currently playing media"""
-        return self.media_player.get_media()
+        return self.media_player.get_media()  # TODO: IS LIST REF FASTER?
 
     @property
     def media_player(self) -> MediaPlayer:
         """The media player instance"""
         return self.list_player.get_media_player()
+
+    def jump_play_index(self, list_index: int):
+        print(list_index)
+        self.current_media_idx = list_index
+        self.list_player.play_item_at_index(self.list_indices[list_index])
+
+    def previous(self):
+        self.current_media_idx -= 1
+        if self.current_media_idx < 0:
+            self.current_media_idx = 0
+        self.list_player.play_item_at_index(self.list_indices[self.current_media_idx])
+
+    def next(self):
+        self.current_media_idx += 1
+        self.list_player.play_item_at_index(self.list_indices[self.current_media_idx])

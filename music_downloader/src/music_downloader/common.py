@@ -7,9 +7,9 @@ from pathlib import Path
 import dacite
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import QLabel, QWidget
-from dacite import Config
+from dacite import Config, from_dict
 
-from music_downloader.music_importer import get_music_df
+from music_downloader.music_importer import get_music_df, Music
 
 
 class HoverableUnderlineLabel(QLabel):
@@ -62,6 +62,10 @@ class Playlist:
     def file_paths(self) -> list[Path]:
         music_df = get_music_df().iloc[self.indices]
         return music_df["file_path"].to_list()
+
+    @property
+    def music_list(self) -> list[Music]:
+        return [from_dict(Music, d) for d in get_music_df().iloc[self.indices].to_dict(orient="records")]
 
     def to_json(self):
         return {
