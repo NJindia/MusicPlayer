@@ -1,6 +1,7 @@
 import sys
 from datetime import datetime
 from functools import partial
+from pathlib import Path
 from typing import cast
 
 import numpy as np
@@ -33,8 +34,6 @@ from music_downloader.queue_gui import (
 from music_downloader.toolbar import MediaScrubberSlider, VolumeSlider
 from music_downloader.vlc_core import VLCCore
 
-from line_profiler_pycharm import profile
-
 
 def expanding_widget() -> QWidget:
     widget = QWidget()
@@ -65,13 +64,13 @@ class MainWindow(QMainWindow):
     media_changed_signal = Signal()
 
     def load_media(
-        self, media_list: vlc.MediaList, indices: list[int], queue_entries: list[QueueEntryGraphicsItem] | None
+        self, file_paths: list[Path], indices: list[int], queue_entries: list[QueueEntryGraphicsItem] | None
     ):
         """Set a new MediaList, and all the other fields that would also need to be set to work properly.
 
         If queue_entries is None, it will wipe the queue and initialize a new one from self.core.indices"""
-        assert media_list.count() == len(indices)
-        self.core.media_list = media_list
+        assert len(file_paths) == len(indices)
+        self.core.media_list = self.core.instance.media_list_new(file_paths)
         self.core.list_player.set_media_list(self.core.media_list)
         self.core.indices = indices
         if queue_entries is None:
@@ -81,8 +80,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
-        new_media_list = self.core.instance.media_list_new([queue_entry.metadata.file_path])
-        self.load_media(new_media_list, [queue_entry.music_idx], None)
+        self.load_media([queue_entry.metadata.file_path], [queue_entry.music_idx], None)
         self.core.list_player.play_item_at_index(0)
         self.queue.update_first_queue_index()
 
@@ -136,9 +134,10 @@ class MainWindow(QMainWindow):
     @Slot()
     def shuffle_button_toggled(self):
         """Shuffle remaining songs in playlist."""
+        current_media_idx = self.core.current_media_idx
+        split_idx = current_media_idx + 1
         if self.shuffle_button.isChecked():
             self.shuffle_button.button_on()
-            split_idx = self.core.current_media_idx + 1
             assert len(self.core.indices) == len(self.queue.queue_entries) == self.core.media_list.count()
             to_shuffle_indices = self.core.indices[split_idx:]
             to_shuffle_media = [self.core.media_list[i] for i in range(split_idx, self.core.media_list.count())]
@@ -159,8 +158,12 @@ class MainWindow(QMainWindow):
                 [*self.queue.queue_entries[:split_idx], *shuffled_queue_entries],
             )
         else:
+            curr_playlist = self.core.current_playlist
+            curr_playlist_index = curr_playlist.indices.index(self.core.indices[current_media_idx])
+            self.load_media(curr_playlist.file_paths, curr_playlist.indices, None)
+            self.core.list_player.play_item_at_index(curr_playlist_index)
+
             self.shuffle_button.button_off()
-            self.core.unshuffle()
         self.queue.update_first_queue_index()
 
     @Slot()
@@ -181,7 +184,6 @@ class MainWindow(QMainWindow):
                 self.core.list_player.set_playback_mode(vlc.PlaybackMode.repeat)  # pyright: ignore[reportAttributeAccessIssue]
 
     @Slot()
-    @profile
     def double_click_tree_view_item(self, index: QModelIndex) -> None:
         item: TreeModelItem = cast(TreeModelItem, self.playlist_view.model.itemFromIndex(index))
         print(f"Play {item.text()}")
@@ -189,7 +191,8 @@ class MainWindow(QMainWindow):
         if playlist is None:
             raise NotImplementedError
         playlist.last_played = datetime.now()
-        self.load_media(playlist.to_media_list(self.core.instance), playlist.indices, None)
+        self.core.current_playlist = playlist
+        self.load_media(playlist.file_paths, playlist.indices, None)
         self.core.list_player.play_item_at_index(0)
         self.queue.update_first_queue_index()
 

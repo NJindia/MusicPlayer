@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
 )
-from line_profiler_pycharm import profile
 from typing_extensions import override
 
 from music_downloader.album import get_pixmap
@@ -216,7 +215,6 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         self.core = vlc_core
         self.initialize_queue()
 
-    @profile
     def initialize_queue(self):
         self.queue_entries = []
         self.scene().clear()

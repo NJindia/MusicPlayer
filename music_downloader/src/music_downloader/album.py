@@ -3,7 +3,6 @@ from typing import cast
 from PySide6.QtCore import QSize, Slot
 from PySide6.QtGui import QPixmap, QImage, QPixmapCache, QIcon
 from PySide6.QtWidgets import QToolButton, QWidget
-from line_profiler_pycharm import profile
 
 from music_downloader.music_importer import Music
 
@@ -22,7 +21,6 @@ def get_pixmap(cover_bytes: bytes) -> QPixmap:
 
 
 class AlbumButton(QToolButton):
-    @profile
     def __init__(self, metadata: Music, parent: QWidget | None = None, height_linewidth: tuple[int, int] | None = None):
         super().__init__(parent)
         self.clicked.connect(go_to_album)

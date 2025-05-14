@@ -5,11 +5,9 @@ from functools import cache
 from pathlib import Path
 
 import dacite
-import vlc
 from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import QLabel, QWidget
 from dacite import Config
-from line_profiler_pycharm import profile
 
 from music_downloader.music_importer import get_music_df
 
@@ -60,10 +58,10 @@ class Playlist:
     def indices(self) -> list[int]:
         return [i.song_index for i in self.playlist_items]
 
-    @profile
-    def to_media_list(self, instance: vlc.Instance) -> vlc.MediaList:
+    @property
+    def file_paths(self) -> list[Path]:
         music_df = get_music_df().iloc[self.indices]
-        return instance.media_list_new(music_df["file_path"].to_list())
+        return music_df["file_path"].to_list()
 
     def to_json(self):
         return {
