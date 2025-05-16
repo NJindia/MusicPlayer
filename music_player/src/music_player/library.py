@@ -36,29 +36,38 @@ class SongItemDelegate(QStyledItemDelegate):
         super().__init__()
         self.hovered_mouse_pos = QPoint()
 
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+    def paint(
+        self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
+    ) -> None:
         painter.save()
+
         text = index.data(Qt.ItemDataRole.DisplayRole)
         pixmap = index.data(Qt.ItemDataRole.DecorationRole)
 
-        icon_rect = QRect(option.rect.topLeft() + QPoint(0, PADDING), pixmap.size())  # pyright: ignore[reportAttributeAccessIssue]
+        index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
+        icon_rect = QRect(index_rect.topLeft() + QPoint(0, PADDING), pixmap.size())
         painter.drawPixmap(icon_rect, pixmap)
-        text_rect = option.rect.adjusted(  # pyright: ignore[reportAttributeAccessIssue]
-            0, PADDING, -PADDING, -PADDING
-        )  # TODO FIT TO TEXT
+        text_rect = index_rect.adjusted(0, PADDING, -PADDING, -PADDING)
         text_rect.setLeft(icon_rect.right() + 5)
 
-        text = option.fontMetrics.elidedText(  # pyright: ignore[reportAttributeAccessIssue]
-            text,
-            Qt.TextElideMode.ElideRight,
-            option.widget.columnWidth(index.column()) - ROW_HEIGHT,  # pyright: ignore[reportAttributeAccessIssue]
-        )
-        if text_rect.contains(option.widget.current_hovered_pos):  # pyright: ignore[reportAttributeAccessIssue]
-            option.widget.hovered_text_rect = text_rect  # pyright: ignore[reportAttributeAccessIssue]
+        font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
+        view: MusicLibrary = option.widget  # pyright: ignore[reportAttributeAccessIssue]
+        text = font_metrics.elidedText(text, Qt.TextElideMode.ElideRight, view.columnWidth(index.column()) - ROW_HEIGHT)
+        text_size = font_metrics.boundingRect(text).size()
+        h_space = (text_rect.width() - text_size.width()) - 2
+        v_space = (text_rect.height() - text_size.height()) - 2
+        text_rect.adjust(0, v_space // 2, -h_space, -v_space // 2)
+
+        if text_rect.contains(view.current_hovered_pos):
+            view.hovered_text_rect = text_rect
             font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
             font.setUnderline(True)
             painter.setFont(font)
+            view.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            view.setCursor(Qt.CursorShape.ArrowCursor)
         painter.drawText(text_rect, option.displayAlignment | Qt.TextFlag.TextSingleLine, text)  # pyright: ignore[reportAttributeAccessIssue]
+
         painter.restore()
 
 
@@ -168,12 +177,9 @@ class MusicLibrary(QTableView):
         if not index.isValid():
             return
         if not self.hovered_text_rect.contains(pos):
-            self.setCursor(Qt.CursorShape.ArrowCursor)
             self.current_hovered_pos = pos
             self.hovered_text_rect = QRect()
             self.viewport().update(self.visualRect(index))
-        else:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
