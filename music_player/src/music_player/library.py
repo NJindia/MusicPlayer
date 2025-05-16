@@ -51,7 +51,7 @@ class SongItemDelegate(QStyledItemDelegate):
         text = option.fontMetrics.elidedText(  # pyright: ignore[reportAttributeAccessIssue]
             text,
             Qt.TextElideMode.ElideRight,
-            option.widget.columnWidth(index.column()) - ICON_SIZE - PADDING * 2,  # pyright: ignore[reportAttributeAccessIssue]
+            option.widget.columnWidth(index.column()) - ROW_HEIGHT,  # pyright: ignore[reportAttributeAccessIssue]
         )
         if text_rect.contains(option.widget.current_hovered_pos):  # pyright: ignore[reportAttributeAccessIssue]
             option.widget.hovered_text_rect = text_rect  # pyright: ignore[reportAttributeAccessIssue]
@@ -60,14 +60,6 @@ class SongItemDelegate(QStyledItemDelegate):
             painter.setFont(font)
         painter.drawText(text_rect, option.displayAlignment | Qt.TextFlag.TextSingleLine, text)  # pyright: ignore[reportAttributeAccessIssue]
         painter.restore()
-
-    # def editorEvent(self, event: QMouseEvent, model, option, index, /):
-    #     if event.type() == QMouseEvent.Type.MouseMove:
-    #         if index == option.widget.current_hovered_index:
-    #             self.hovered_mouse_pos = event.pos()
-    #             option.widget.viewport().update()
-    #         return True
-    #     return super().editorEvent(event, model, option, index)
 
 
 class MusicTableModel(QAbstractTableModel):
@@ -111,10 +103,7 @@ class MusicTableModel(QAbstractTableModel):
             if index.column() == self.display_df.columns.get_loc("date added"):
                 return self.music_data["_date_added"].iloc[index.row()]
             text = self.data(index, Qt.ItemDataRole.DisplayRole)
-            if (
-                self.view.font_metrics.horizontalAdvance(text)
-                > self.view.columnWidth(index.column()) - ICON_SIZE - PADDING * 2
-            ):
+            if self.view.font_metrics.horizontalAdvance(text) > self.view.columnWidth(index.column()) - ROW_HEIGHT:
                 return text
             return None
         if role == Qt.ItemDataRole.DecorationRole and index.column() == 0:
