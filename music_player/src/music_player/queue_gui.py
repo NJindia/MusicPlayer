@@ -1,8 +1,5 @@
-from functools import partial
-
 from PySide6.QtCore import Qt, Slot, Signal, QRectF, QObject
 from PySide6.QtGui import (
-    QMouseEvent,
     QPainter,
     QColor,
     QBrush,
@@ -23,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 from typing_extensions import override
 
-from music_player.album import get_pixmap
+from music_player.utils import get_pixmap
 from music_player.constants import (
     QUEUE_ENTRY_HEIGHT,
     QUEUE_ENTRY_WIDTH,
@@ -216,14 +213,14 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         self.scene().clear()
         for i, list_index in enumerate(self.core.list_indices):
             qe = QueueEntryGraphicsItem(self.core.music_list[list_index])
-            qe.signal.song_clicked.connect(partial(self.play_queue_song, qe))
+            qe.signal.song_clicked.connect(self.play_queue_song)
             self.scene().addItem(qe)
 
             qe.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
             self.queue_entries.append(qe)
 
     @Slot(QueueEntryGraphicsView)
-    def play_queue_song(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent):
+    def play_queue_song(self, queue_entry: QueueEntryGraphicsItem):
         self.core.jump_play_index(self.ordered_entries.index(queue_entry))
 
     @property

@@ -1,4 +1,3 @@
-from datetime import datetime
 from functools import cache
 
 import vlc
@@ -7,13 +6,8 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QWidget, QSlider, QLabel, QHBoxLayout, QToolButton, QSizePolicy
 from typing_extensions import Literal
 
+from music_player.utils import timestamp_to_str
 from music_player.vlc_core import VLCCore
-
-
-def timestamp_to_str(timestamp: int | float):
-    if isinstance(timestamp, float):
-        timestamp = round(timestamp)
-    return datetime.fromtimestamp(timestamp).strftime("%M:%S")
 
 
 class MediaScrubberSlider(QHBoxLayout):

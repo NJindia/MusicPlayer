@@ -25,6 +25,7 @@ class Music:
     album_artist: str
     lyrics_by_timestamp: dict[time | None, str]
     release_date: date
+    duration_timestamp: float
     isrc: str
     file_path: Path
     album_cover_bytes: bytes | None
@@ -56,6 +57,7 @@ def load_music(path: Path) -> Music:
                 artists=[s.strip() for s in md.tags["ARTIST"][0].split(",")],  # pyright: ignore[reportIndexIssue]
                 album=md.tags["ALBUM"][0],  # pyright: ignore[reportIndexIssue]
                 album_artist=md.tags["ALBUMARTIST"][0],  # pyright: ignore[reportIndexIssue]
+                duration_timestamp=md.info.length,
                 isrc=md.tags["ISRC"][0],  # pyright: ignore[reportIndexIssue]
                 release_date=datetime.strptime(
                     md.tags["DATE"][0],  # pyright: ignore[reportIndexIssue]
