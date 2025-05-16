@@ -1,23 +1,14 @@
-from typing import cast
-
 from PySide6.QtCore import QSize, Slot
-from PySide6.QtGui import QPixmap, QImage, QPixmapCache, QIcon
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QToolButton, QWidget
 
 from music_player.music_importer import Music
+from music_player.utils import get_pixmap
 
 
 @Slot()
 def go_to_album():
     print("TODO Going to album...")
-
-
-def get_pixmap(cover_bytes: bytes) -> QPixmap:
-    pixmap = cast(QPixmap | None, QPixmapCache.find(str(cover_bytes)))  # pyright: ignore [reportCallIssue]
-    if pixmap is None:
-        pixmap = QPixmap.fromImage(QImage.fromData(cover_bytes))
-        QPixmapCache.insert(str(cover_bytes), pixmap)
-    return pixmap
 
 
 class AlbumButton(QToolButton):

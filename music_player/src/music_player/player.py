@@ -23,8 +23,11 @@ from PySide6.QtWidgets import (
 )
 from vlc import EventType
 
-from music_player.album import AlbumButton, get_pixmap
+from music_player.album import AlbumButton
+from music_player.common import Playlist
+from music_player.utils import get_pixmap
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD, QUEUE_ENTRY_WIDTH
+from music_player.library import MusicLibrary
 from music_player.playlist import PlaylistView, TreeModelItem
 from music_player.queue_gui import (
     QueueGraphicsView,
@@ -33,7 +36,7 @@ from music_player.queue_gui import (
 )
 from music_player.music_importer import Music
 from music_player.toolbar import MediaScrubberSlider, VolumeSlider
-from music_player.vlc_core import VLCCore
+from music_player.vlc_core import VLCCore, get_init_playlist
 
 
 def expanding_widget() -> QWidget:
@@ -63,31 +66,6 @@ class OpacityButton(QToolButton):
 
 class MainWindow(QMainWindow):
     media_changed_signal = Signal()
-
-    def load_media(
-        self,
-        file_paths: list[Path] | list[vlc.Media],
-        music_list: list[Music],
-        queue_entries: list[QueueEntryGraphicsItem] | None,
-    ):
-        """Set a new MediaList, and all the other fields that would also need to be set to work properly.
-
-        If queue_entries is None, it will wipe the queue and initialize a new one from self.core.indices"""
-        assert len(file_paths) == len(music_list)
-        self.core.media_list = self.core.instance.media_list_new(file_paths)
-        self.core.list_player.set_media_list(self.core.media_list)
-        self.core.music_list = music_list
-        if queue_entries is None:
-            self.queue.initialize_queue()
-        else:
-            self.queue.queue_entries = queue_entries
-
-    @Slot()
-    def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
-        self.core.current_media_idx = 0
-        self.load_media([queue_entry.music.file_path], [queue_entry.music], None)
-        self.core.list_player.play_item_at_index(0)
-        self.queue.update_first_queue_index()
 
     @Slot()
     def media_changed_ui(self):
@@ -171,17 +149,51 @@ class MainWindow(QMainWindow):
                 self.repeat_button.button_on()
                 self.core.list_player.set_playback_mode(vlc.PlaybackMode.repeat)  # pyright: ignore[reportAttributeAccessIssue]
 
+    def load_media(
+        self,
+        file_paths: list[Path] | list[vlc.Media],
+        music_list: list[Music],
+        queue_entries: list[QueueEntryGraphicsItem] | None,
+    ):
+        """Set a new MediaList, and all the other fields that would also need to be set to work properly.
+
+        If queue_entries is None, it will wipe the queue and initialize a new one from self.core.indices"""
+        assert len(file_paths) == len(music_list)
+        self.core.media_list = self.core.instance.media_list_new(file_paths)
+        self.core.list_player.set_media_list(self.core.media_list)
+        self.core.music_list = music_list
+        self.core.list_indices = list(range(len(music_list)))
+        if queue_entries is None:
+            self.queue.initialize_queue()
+        else:
+            self.queue.queue_entries = queue_entries
+
     @Slot()
-    def double_click_tree_view_item(self, index: QModelIndex) -> None:
-        item: TreeModelItem = cast(TreeModelItem, self.playlist_view.model.itemFromIndex(index))
-        print(f"Play {item.text()}")
-        playlist = item.playlist
-        if playlist is None:
-            raise NotImplementedError
-        playlist.last_played = datetime.now()
-        self.load_media(playlist.file_paths, playlist.music_list, None)
+    def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
+        self.core.current_media_idx = 0
+        self.load_media([queue_entry.music.file_path], [queue_entry.music], None)
         self.core.list_player.play_item_at_index(0)
         self.queue.update_first_queue_index()
+
+    @Slot(Playlist, int)
+    def play_playlist(self, playlist: Playlist, playlist_index: int):
+        playlist.last_played = datetime.now()  # TODO
+        self.load_media(playlist.file_paths, playlist.music_list, None)
+        self.core.jump_play_index(playlist_index)
+
+    @Slot()
+    def select_tree_view_item(self, index: QModelIndex):
+        playlist = cast(TreeModelItem, self.playlist_view.model.itemFromIndex(index)).playlist
+        if playlist is None:
+            raise NotImplementedError
+        self.library.load_playlist(playlist)
+
+    @Slot()
+    def double_click_tree_view_item(self, index: QModelIndex) -> None:
+        playlist = cast(TreeModelItem, self.playlist_view.model.itemFromIndex(index)).playlist
+        if playlist is None:
+            raise NotImplementedError
+        self.play_playlist(playlist, 0)
 
     def media_player_ended(self, event):
         print(f"Event: {event.type}")
@@ -200,8 +212,13 @@ class MainWindow(QMainWindow):
         main_ui = QHBoxLayout()
 
         self.playlist_view = PlaylistView(self.core)
+        self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
         self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
         main_ui.addWidget(self.playlist_view)
+
+        self.library = MusicLibrary(get_init_playlist())
+        self.library.signal.song_clicked.connect(self.play_playlist)
+        main_ui.addWidget(self.library)
 
         self.history = QueueEntryGraphicsView()
         self.queue = QueueGraphicsView(self.core)
@@ -210,9 +227,8 @@ class MainWindow(QMainWindow):
         queue_tab.setFixedWidth(QUEUE_ENTRY_WIDTH * 1.25)  # TODO int
         queue_tab.addTab(self.queue, "Queue")
         queue_tab.addTab(self.history, "History")
-
-        main_ui.addStretch()  # TODO REMOVE
         main_ui.addWidget(queue_tab)
+
         w = QWidget()
         w.setLayout(main_ui)
         self.setCentralWidget(w)
