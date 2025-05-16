@@ -48,11 +48,11 @@ class SongItemDelegate(QStyledItemDelegate):
         )  # TODO FIT TO TEXT
         text_rect.setLeft(icon_rect.right() + 5)
 
-        if (
-            option.fontMetrics.horizontalAdvance(text)  # pyright: ignore[reportAttributeAccessIssue]
-            > option.widget.columnWidth(index.column()) - ICON_SIZE - PADDING * 2  # pyright: ignore[reportAttributeAccessIssue]
-        ):
-            text = text[:-3] + "..."  # TODO PROPERLY DO THIS
+        text = option.fontMetrics.elidedText(  # pyright: ignore[reportAttributeAccessIssue]
+            text,
+            Qt.TextElideMode.ElideRight,
+            option.widget.columnWidth(index.column()) - ICON_SIZE - PADDING * 2,  # pyright: ignore[reportAttributeAccessIssue]
+        )
         if text_rect.contains(option.widget.current_hovered_pos):  # pyright: ignore[reportAttributeAccessIssue]
             option.widget.hovered_text_rect = text_rect  # pyright: ignore[reportAttributeAccessIssue]
             font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
