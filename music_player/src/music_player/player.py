@@ -114,15 +114,17 @@ class MainWindow(QMainWindow):
         """Start audio playback if none is playing, otherwise pause existing."""
         self.core.list_player.pause() if self.core.list_player.is_playing() else self.core.list_player.play()
 
+    def shuffle_indices(self, split_index: int):
+        shuffled_indices = self.core.list_indices[split_index:]
+        np.random.shuffle(shuffled_indices)
+        self.core.list_indices = [*self.core.list_indices[:split_index], *shuffled_indices]
+
     @Slot()
     def shuffle_button_toggled(self):
         """Shuffle remaining songs in playlist."""
-        split_idx = self.core.current_media_idx + 1
         if self.shuffle_button.isChecked():
             self.shuffle_button.button_on()
-            shuffled_indices = self.core.list_indices[split_idx:]
-            np.random.shuffle(shuffled_indices)
-            self.core.list_indices = [*self.core.list_indices[:split_idx], *shuffled_indices]
+            self.shuffle_indices(self.core.current_media_idx + 1)
         else:
             current_music = self.core.current_music
             self.core.list_indices = list(range(len(self.core.music_list)))
@@ -149,6 +151,26 @@ class MainWindow(QMainWindow):
                 self.repeat_button.button_on()
                 self.core.list_player.set_playback_mode(vlc.PlaybackMode.repeat)  # pyright: ignore[reportAttributeAccessIssue]
 
+    @Slot()
+    def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
+        self.core.current_media_idx = 0
+        self.load_media([queue_entry.music.file_path], [queue_entry.music], None)
+        self.core.list_player.play_item_at_index(0)
+        self.queue.update_first_queue_index()
+
+    @Slot(Playlist, int)
+    def play_playlist(self, playlist: Playlist, playlist_index: int):
+        playlist.last_played = datetime.now()  # TODO
+        self.load_media(playlist.file_paths, playlist.music_list, None)
+        list_index = playlist_index
+        if self.shuffle_button.isChecked():
+            list_index = 0
+            self.shuffle_indices(list_index)  # Shuffle all
+            # Find index of song we want to play now in the shuffled list, then swap that with the shuffled 1st song
+            self.core.list_indices[self.core.list_indices.index(playlist_index)] = self.core.list_indices[list_index]
+            self.core.list_indices[list_index] = playlist_index
+        self.core.jump_play_index(list_index)
+
     def load_media(
         self,
         file_paths: list[Path] | list[vlc.Media],
@@ -167,19 +189,6 @@ class MainWindow(QMainWindow):
             self.queue.initialize_queue()
         else:
             self.queue.queue_entries = queue_entries
-
-    @Slot()
-    def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
-        self.core.current_media_idx = 0
-        self.load_media([queue_entry.music.file_path], [queue_entry.music], None)
-        self.core.list_player.play_item_at_index(0)
-        self.queue.update_first_queue_index()
-
-    @Slot(Playlist, int)
-    def play_playlist(self, playlist: Playlist, playlist_index: int):
-        playlist.last_played = datetime.now()  # TODO
-        self.load_media(playlist.file_paths, playlist.music_list, None)
-        self.core.jump_play_index(playlist_index)
 
     @Slot()
     def select_tree_view_item(self, index: QModelIndex):
