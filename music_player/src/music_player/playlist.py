@@ -65,11 +65,11 @@ class PlaylistTreeWidget(QWidget):
 
     @Slot()
     def update_playlist(self, item: TreeModelItem) -> None:
-        print(f"Playlist Update {item.text()}")
-        if item.playlist is None:
+        playlist = item.playlist
+        if playlist is None:
             raise NotImplementedError
-        item.playlist.title = item.text()
-        print("TODO: ACTUALLY UPDATE")
+        playlist.title = item.text()
+        playlist.save()
 
     @Slot()
     def playlist_context_menu(self, point: QPoint):
