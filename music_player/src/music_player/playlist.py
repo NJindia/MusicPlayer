@@ -65,6 +65,7 @@ class PlaylistTreeWidget(QWidget):
 
     @Slot()
     def update_playlist(self, item: TreeModelItem) -> None:
+        print(f"UPDATING {item.text()}")
         playlist = item.playlist
         if playlist is None:
             raise NotImplementedError

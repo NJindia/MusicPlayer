@@ -134,6 +134,7 @@ class MainWindow(QMainWindow):
             self.load_media(self.core.current_playlist.file_paths, self.core.current_playlist.music_list)
         self.queue.update_first_queue_index()
 
+    @Slot(int)
     def add_to_queue(self, music_df_index: int):
         music = from_dict(Music, get_music_df().iloc[music_df_index].to_dict())
         try:
@@ -148,6 +149,13 @@ class MainWindow(QMainWindow):
         self.queue.insert_queue_entry(
             self.core.current_media_idx + 1, QueueEntryGraphicsItem(music, manually_added=True)
         )
+
+    @Slot()
+    def remove_from_queue(self, item: QueueEntryGraphicsItem):
+        queue_index = self.queue.queue_entries.index(item)
+        self.queue.scene().removeItem(self.queue.queue_entries.pop(queue_index))
+        del self.core.list_indices[queue_index]
+        self.queue.update_first_queue_index()
 
     @Slot()
     def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
@@ -236,6 +244,20 @@ class MainWindow(QMainWindow):
 
         chosen_action = menu.exec(self.library.mapToGlobal(point))
 
+    def queue_context_menu(self, point: QPoint):
+        item = cast(QueueEntryGraphicsItem, self.queue.itemAt(point))
+        menu = QMenu(self)
+
+        remove_from_queue_action = QAction("Remove from queue", self)
+        remove_from_queue_action.triggered.connect(partial(self.remove_from_queue, item))
+        menu.addAction(remove_from_queue_action)
+
+        music_df_idx = get_music_df()[get_music_df()["file_path"] == item.music.file_path].index[0]
+        add_to_playlist_menu = AddToPlaylistMenu(music_df_idx, self.add_to_playlist_signal, menu, self)
+        menu.addMenu(add_to_playlist_menu)
+
+        menu.exec(self.queue.mapToGlobal(point))
+
     def __init__(self, core: VLCCore):
         super().__init__()
 
@@ -263,6 +285,7 @@ class MainWindow(QMainWindow):
 
         self.history = QueueEntryGraphicsView()
         self.queue = QueueGraphicsView(self.core)
+        self.queue.customContextMenuRequested.connect(self.queue_context_menu)
 
         queue_tab = QTabWidget()
         queue_tab.setFixedWidth(QUEUE_ENTRY_WIDTH * 1.25)  # TODO int
