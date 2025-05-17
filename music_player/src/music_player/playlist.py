@@ -21,7 +21,7 @@ class TreeModelItem(QStandardItem):
             self.setIcon(QIcon("../icons/music-playlist2.svg"))
 
 
-class PlaylistView(QWidget):
+class PlaylistTreeWidget(QWidget):
     @Slot()
     def rename_playlist(self, index: QModelIndex) -> None:
         item: TreeModelItem = cast(TreeModelItem, self.model.itemFromIndex(index))

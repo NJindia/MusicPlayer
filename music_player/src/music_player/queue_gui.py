@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
 )
-from typing_extensions import override
 
 from music_player.utils import get_pixmap
 from music_player.constants import (
@@ -183,8 +182,8 @@ class QueueEntryGraphicsView(QGraphicsView):
     def current_entries(self):
         return self.queue_entries
 
-    def update_scene(self, from_index: int = 0):
-        for i, proxy in enumerate(self.current_entries[from_index:], start=from_index):
+    def update_scene(self):
+        for i, proxy in enumerate(self.current_entries):
             proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
 
         # TODO REMOVE BAD ENTRIES
@@ -195,7 +194,7 @@ class QueueEntryGraphicsView(QGraphicsView):
     def insert_queue_entry(self, queue_index: int, entry: QueueEntryGraphicsItem) -> None:
         self.queue_entries.insert(queue_index, entry)
         self.scene().addItem(entry)
-        self.update_scene(queue_index)
+        self.update_scene()
 
     @staticmethod
     def get_y_pos(index: int) -> float:
@@ -221,20 +220,15 @@ class QueueGraphicsView(QueueEntryGraphicsView):
 
     @Slot(QueueEntryGraphicsView)
     def play_queue_song(self, queue_entry: QueueEntryGraphicsItem):
-        self.core.jump_play_index(self.ordered_entries.index(queue_entry))
+        self.core.jump_play_index(self.queue_entries.index(queue_entry))
 
     @property
     def current_entries(self):
-        return self.ordered_entries[self.core.current_media_idx + 1 :]
+        return self.queue_entries[self.core.current_media_idx + 1 :]
 
     @property
     def past_entries(self):
-        return self.ordered_entries[: self.core.current_media_idx + 1]
-
-    @property
-    def ordered_entries(self):
-        assert len(self.queue_entries) == len(self.core.list_indices)
-        return [self.queue_entries[i] for i in self.core.list_indices]
+        return self.queue_entries[: self.core.current_media_idx + 1]
 
     def update_first_queue_index(self) -> None:
         for proxy in self.past_entries:
@@ -244,8 +238,3 @@ class QueueGraphicsView(QueueEntryGraphicsView):
             if not proxy.scene():
                 self.scene().addItem(proxy)
         self.update_scene()
-
-    @override
-    def insert_queue_entry(self, queue_index: int, entry: QueueEntryGraphicsItem) -> None:
-        assert queue_index > self.core.current_media_idx, "Can't insert queue entry before current queue index"
-        super().insert_queue_entry(queue_index, entry)

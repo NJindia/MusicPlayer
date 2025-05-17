@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     QObject,
     Signal,
     QEvent,
+    Slot,
 )
 from PySide6.QtGui import QFontMetrics, QFont, QPainter, QMouseEvent
 from PySide6.QtWidgets import QTableView, QSizePolicy, QStyledItemDelegate, QStyleOptionViewItem
@@ -149,6 +150,8 @@ class MusicLibrary(QTableView):
         self.setFont(QFont())
         self.font_metrics = QFontMetrics(self.font())
 
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
         self.signal = LibrarySignal()
 
         self.setItemDelegateForColumn(0, SongItemDelegate())
@@ -158,6 +161,11 @@ class MusicLibrary(QTableView):
 
         self.hovered_text_rect = QRect()
         self.current_hovered_pos = QPoint()
+
+    @Slot()
+    def remove_item_from_playlist(self, item_index: int):
+        self.playlist.remove_item(item_index)
+        self.load_playlist(self.playlist)
 
     def load_playlist(self, playlist: Playlist):
         model = self.model_
