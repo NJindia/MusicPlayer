@@ -191,14 +191,15 @@ class MusicLibrary(QTableView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        pos = event.pos()
-        if self.hovered_text_rect.contains(pos):
-            index = self.indexAt(pos)
-            match index.column():
-                case 0:
-                    self.signal.song_is_clicked(self.playlist, index.row())
-                case _:
-                    raise NotImplementedError
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.pos()
+            if self.hovered_text_rect.contains(pos):
+                index = self.indexAt(pos)
+                match index.column():
+                    case 0:
+                        self.signal.song_is_clicked(self.playlist, index.row())
+                    case _:
+                        raise NotImplementedError
         super().mouseReleaseEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:

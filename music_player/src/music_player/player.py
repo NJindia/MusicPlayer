@@ -6,29 +6,23 @@ from typing import cast
 
 import numpy as np
 import vlc
-from PySide6.QtCore import Slot, Qt, QThread, Signal, QSize, QModelIndex, QPoint
-from PySide6.QtGui import QIcon, QTransform, QPixmap, QMouseEvent, QAction
+from PySide6.QtCore import Slot, Qt, QThread, Signal, QModelIndex, QPoint, SignalInstance
+from PySide6.QtGui import QIcon, QMouseEvent, QAction
 from PySide6.QtWidgets import (
     QApplication,
-    QToolBar,
-    QToolButton,
     QMainWindow,
     QWidget,
-    QSizePolicy,
-    QLabel,
     QHBoxLayout,
     QTabWidget,
-    QGraphicsOpacityEffect,
-    QVBoxLayout,
     QMenu,
+    QWidgetAction,
 )
 from dacite import from_dict
 from vlc import EventType
 
-from music_player.album import AlbumButton
 from music_player.common import Playlist
 from music_player.utils import get_pixmap
-from music_player.constants import SKIP_BACK_SECOND_THRESHOLD, QUEUE_ENTRY_WIDTH
+from music_player.constants import QUEUE_ENTRY_WIDTH
 from music_player.library import MusicLibrary
 from music_player.playlist import PlaylistTreeWidget, TreeModelItem
 from music_player.queue_gui import (
@@ -37,37 +31,41 @@ from music_player.queue_gui import (
     QueueEntryGraphicsItem,
 )
 from music_player.music_importer import Music, get_music_df
-from music_player.toolbar import MediaScrubberSlider, VolumeSlider
+from music_player.toolbar import MediaToolbar
 from music_player.vlc_core import VLCCore
 
 
-def expanding_widget() -> QWidget:
-    widget = QWidget()
-    widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-    return widget
+class AddToQueueAction(QAction):
+    def __init__(self, selected_song_df_idx: int, signal: SignalInstance, parent: QWidget):
+        super().__init__("Add to queue", parent)
+        self.triggered.connect(partial(signal.emit, selected_song_df_idx))
 
 
-class OpacityButton(QToolButton):
-    button_off_opacity = 0.5
+class AddToPlaylistMenu(QMenu):
+    def __init__(self, selected_song_idx: int, signal: SignalInstance, parent_menu: QMenu, parent: QWidget):
+        super().__init__("Add to playlist", parent)
+        self.parent_menu = parent_menu
+        self.signal = signal
+        self.playlist_tree_widget = PlaylistTreeWidget()
+        self.playlist_tree_widget.tree_view.clicked.connect(
+            partial(self.add_item_to_playlist_at_index, selected_song_idx)
+        )
+        widget_action = QWidgetAction(self)
+        widget_action.setDefaultWidget(self.playlist_tree_widget)
+        new_playlist_action = QAction("New playlist", self)
+        new_playlist_action.triggered.connect(lambda: print("TODO NEW PLAYLIST"))
+        self.addActions([widget_action, new_playlist_action])
 
-    def __init__(self):
-        super().__init__()
-        self.graphics_effect = QGraphicsOpacityEffect(self)
-        self.graphics_effect.setOpacity(self.button_off_opacity)
-        self.setGraphicsEffect(self.graphics_effect)
-        self.setCheckable(True)
-
-    def button_on(self):
-        self.graphics_effect.setOpacity(1)
-        self.setChecked(True)
-
-    def button_off(self):
-        self.graphics_effect.setOpacity(self.button_off_opacity)
-        self.setChecked(False)
+    def add_item_to_playlist_at_index(self, selected_song_idx: int, index: QModelIndex):
+        playlist = self.playlist_tree_widget.item_at_index(index).playlist
+        self.signal.emit(selected_song_idx, playlist)
+        self.parent_menu.close()
 
 
 class MainWindow(QMainWindow):
     media_changed_signal = Signal()
+    add_to_queue_signal = Signal(int)
+    add_to_playlist_signal = Signal(int, Playlist)
 
     @Slot()
     def media_changed_ui(self):
@@ -78,22 +76,22 @@ class MainWindow(QMainWindow):
 
     def media_player_playing_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
-        self.play_button.setIcon(QIcon("../icons/pause-button.svg"))
+        self.toolbar.play_button.setIcon(QIcon("../icons/pause-button.svg"))
         if self.media_changed:
             self.media_changed = False
-            self.media_slider.update_after_label()
+            self.toolbar.media_slider.update_after_label()
 
     def media_player_paused_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
-        self.play_button.setIcon(QIcon("../icons/play-button.svg"))
+        self.toolbar.play_button.setIcon(QIcon("../icons/play-button.svg"))
 
     def media_player_media_changed_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
         self.media_changed = True
         current_music = self.core.current_music
-        self.song_label.setText(f"{current_music.title}\n{', '.join(current_music.artists)}")
+        self.toolbar.song_label.setText(f"{current_music.title}\n{', '.join(current_music.artists)}")
         if current_music.album_cover_bytes is not None:
-            self.album_button.setIcon(QIcon(get_pixmap(current_music.album_cover_bytes)))
+            self.toolbar.album_button.setIcon(QIcon(get_pixmap(current_music.album_cover_bytes)))
 
         # when VLC emits the MediaPlayerEnded event, it does in a separate thread
         if QThread.currentThread().isMainThread():
@@ -105,20 +103,7 @@ class MainWindow(QMainWindow):
 
     def media_player_ended_callback(self, event):
         print(f"Event: {event.type}")
-        self.skip_button.clicked.emit()
-
-    @Slot()
-    def press_rewind_button(self):
-        if self.core.current_media_idx == 0 or self.core.media_player.get_time() / 1000 > SKIP_BACK_SECOND_THRESHOLD:
-            self.core.media_player.set_position(0)
-            self.media_slider.slider.setValue(0)
-        else:
-            self.core.previous()
-
-    @Slot()
-    def press_play_button(self):
-        """Start audio playback if none is playing, otherwise pause existing."""
-        self.core.list_player.pause() if self.core.list_player.is_playing() else self.core.list_player.play()
+        self.toolbar.skip_button.clicked.emit()
 
     def shuffle_indices(self, split_index: int):
         shuffled_indices = self.core.list_indices[split_index:]
@@ -132,11 +117,11 @@ class MainWindow(QMainWindow):
     @Slot()
     def shuffle_button_toggled(self):
         """Shuffle remaining songs in playlist."""
-        if self.shuffle_button.isChecked():
-            self.shuffle_button.button_on()
+        if self.toolbar.shuffle_button.isChecked():
+            self.toolbar.shuffle_button.button_on()
             self.shuffle_indices(self.core.current_media_idx + 1)
         else:
-            self.shuffle_button.button_off()
+            self.toolbar.shuffle_button.button_off()
             self.core.list_indices = list(range(len(self.core.music_list)))
 
             # Get index of original playlist music that was most recently played, and start queue from there
@@ -148,23 +133,6 @@ class MainWindow(QMainWindow):
             # Replace any music/media that was added manually with the original lists
             self.load_media(self.core.current_playlist.file_paths, self.core.current_playlist.music_list)
         self.queue.update_first_queue_index()
-
-    @Slot()
-    def press_repeat_button(self):
-        """Change repeat state."""
-        self.core.repeat_state = next(self.core.repeat_states)
-        match self.core.repeat_state:
-            case "NO_REPEAT":
-                self.repeat_button.setIcon(QIcon("../icons/repeat-button.svg"))
-                self.repeat_button.button_off()
-                self.core.list_player.set_playback_mode(vlc.PlaybackMode.default)  # pyright: ignore[reportAttributeAccessIssue]
-            case "REPEAT_QUEUE":
-                self.repeat_button.button_on()
-                self.core.list_player.set_playback_mode(vlc.PlaybackMode.loop)  # pyright: ignore[reportAttributeAccessIssue]
-            case "REPEAT_ONE":
-                self.repeat_button.setIcon(QIcon("../icons/repeat-1-button.svg"))
-                self.repeat_button.button_on()
-                self.core.list_player.set_playback_mode(vlc.PlaybackMode.repeat)  # pyright: ignore[reportAttributeAccessIssue]
 
     def add_to_queue(self, music_df_index: int):
         music = from_dict(Music, get_music_df().iloc[music_df_index].to_dict())
@@ -193,7 +161,7 @@ class MainWindow(QMainWindow):
         playlist.last_played = datetime.now()  # TODO
         self.load_media(playlist.file_paths, playlist.music_list)
         list_index = playlist_index
-        if self.shuffle_button.isChecked():
+        if self.toolbar.shuffle_button.isChecked():
             list_index = 0
             self.shuffle_indices(list_index)  # Shuffle all
             # Find index of song we want to play now in the shuffled list, then swap that with the shuffled 1st song
@@ -224,7 +192,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def select_tree_view_item(self, index: QModelIndex):
-        playlist = cast(TreeModelItem, self.playlist_view.model.itemFromIndex(index)).playlist
+        playlist = self.playlist_view.item_at_index(index).playlist
         if playlist is None:
             raise NotImplementedError
         self.library.load_playlist(playlist)
@@ -236,28 +204,37 @@ class MainWindow(QMainWindow):
             raise NotImplementedError
         self.play_playlist(playlist, 0)
 
+    def add_item_to_playlist(self, music_df_idx: int, playlist: Playlist | None):
+        if playlist is None:
+            raise NotImplementedError
+        playlist.add_item(music_df_idx)
+        if playlist.playlist_path == self.library.playlist.playlist_path:
+            self.library.load_playlist(playlist)
+
     @Slot()
     def library_context_menu(self, point: QPoint):
         index = self.library.indexAt(point)
         if not index.isValid():
             return
         row = index.row()
+        selected_song_idx = self.library.playlist.playlist_items[row].song_index
 
         menu = QMenu(self)
 
-        add_to_queue_action = QAction("Add to queue", self)
-        add_to_queue_action.triggered.connect(
-            partial(self.add_to_queue, self.library.playlist.playlist_items[row].song_index)
-        )
+        # Add to queue
+        add_to_queue_action = AddToQueueAction(selected_song_idx, self.add_to_queue_signal, self)
+        menu.addAction(add_to_queue_action)
 
-        add_to_playlist_action = QAction("Add to playlist", self)
-        # add_to_playlist_action.triggered.connect(self.playlist.add_item)
+        # Add to playlist
+        playlist_menu = AddToPlaylistMenu(selected_song_idx, self.add_to_playlist_signal, menu, self)
+        menu.addMenu(playlist_menu)
 
+        # Remove from current playlist
         remove_from_curr_playlist_action = QAction("Remove from this playlist", self)
         remove_from_curr_playlist_action.triggered.connect(partial(self.library.remove_item_from_playlist, row))
+        menu.addAction(remove_from_curr_playlist_action)
 
-        menu.addActions([add_to_queue_action, add_to_playlist_action, remove_from_curr_playlist_action])
-        chosen_action = menu.exec(self.mapToGlobal(point))
+        chosen_action = menu.exec(self.library.mapToGlobal(point))
 
     def __init__(self, core: VLCCore):
         super().__init__()
@@ -266,14 +243,17 @@ class MainWindow(QMainWindow):
         self.media_changed: bool = False
         self.setWindowTitle("Media Player")
         self.media_changed_signal.connect(self.media_changed_ui)
-        current_music = self.core.current_music
-        self.last_played_music = current_music
+        self.last_played_music = self.core.current_music  # TODO -> VLCCore?
+
+        self.add_to_queue_signal.connect(self.add_to_queue)
+        self.add_to_playlist_signal.connect(self.add_item_to_playlist)
 
         main_ui = QHBoxLayout()
 
-        self.playlist_view = PlaylistTreeWidget(self.core)
+        self.playlist_view = PlaylistTreeWidget()
         self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
         self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
+        self.playlist_view.tree_view.customContextMenuRequested.connect(self.playlist_view.playlist_context_menu)
         main_ui.addWidget(self.playlist_view)
 
         self.library = MusicLibrary(self.core.current_playlist)
@@ -290,70 +270,13 @@ class MainWindow(QMainWindow):
         queue_tab.addTab(self.history, "History")
         main_ui.addWidget(queue_tab)
 
+        self.toolbar = MediaToolbar(self.core)
+        self.toolbar.shuffle_button.toggled.connect(self.shuffle_button_toggled)
+        self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.toolbar)
+
         w = QWidget()
         w.setLayout(main_ui)
         self.setCentralWidget(w)
-
-        toolbar = QToolBar(floatable=False, movable=False, orientation=Qt.Orientation.Horizontal)
-        toolbar.setFixedHeight(100)
-        toolbar.setIconSize(QSize(100, 100))
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, toolbar)
-
-        self.album_button = AlbumButton(current_music, toolbar, (100, 0))
-        toolbar.addWidget(self.album_button)
-
-        self.song_label = QLabel(current_music.title)
-        self.song_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        toolbar.addWidget(self.song_label)
-
-        ### MEDIA PLAYBACK BUTTONS AND SCRUBBER
-        media_control_widget = QWidget()
-        media_control_vbox = QVBoxLayout(media_control_widget)
-
-        media_control_widget.setStyleSheet("QWidget { background: transparent; }")  # Make the container transparent
-
-        ### MEDIA PLAYBACK BUTTONS
-        media_control_button_hbox = QHBoxLayout()
-        media_control_vbox.addLayout(media_control_button_hbox)
-
-        self.shuffle_button = OpacityButton()
-        self.shuffle_button.setIcon(QIcon("../icons/shuffle-button.svg"))
-        self.shuffle_button.toggled.connect(self.shuffle_button_toggled)
-        media_control_button_hbox.addWidget(self.shuffle_button)
-
-        rewind_button = QToolButton()
-        rewind_button.setIcon(QIcon("../icons/rewind-button.svg"))
-        rewind_button.clicked.connect(self.press_rewind_button)
-        media_control_button_hbox.addWidget(rewind_button)
-
-        self.play_button = QToolButton()
-        self.play_button.setIcon(QIcon("../icons/play-button.svg"))
-        self.play_button.clicked.connect(self.press_play_button)
-        media_control_button_hbox.addWidget(self.play_button)
-
-        self.skip_button = QToolButton()
-        self.skip_button.setIcon((QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1)))))
-        self.skip_button.clicked.connect(self.core.next)
-        media_control_button_hbox.addWidget(self.skip_button)
-
-        self.repeat_button = OpacityButton()
-        self.repeat_button.setIcon(QIcon("../icons/repeat-button.svg"))
-        self.repeat_button.clicked.connect(self.press_repeat_button)
-        media_control_button_hbox.addWidget(self.repeat_button)
-
-        ### MEDIA SCRUBBER
-        self.media_slider = MediaScrubberSlider(self.core)
-        media_control_vbox.addLayout(self.media_slider)
-
-        toolbar.addWidget(expanding_widget())
-        toolbar.addWidget(media_control_widget)
-        toolbar.addWidget(expanding_widget())
-
-        ### VOLUME BAR
-        volume_widget = QWidget()
-        VolumeSlider(self.core, volume_widget)
-        toolbar.addWidget(volume_widget)
 
         self.core.player_event_manager.event_attach(
             EventType.MediaPlayerPlaying,  # pyright: ignore[reportAttributeAccessIssue]
@@ -369,7 +292,7 @@ class MainWindow(QMainWindow):
         )
         self.core.player_event_manager.event_attach(
             EventType.MediaPlayerTimeChanged,  # pyright: ignore[reportAttributeAccessIssue]
-            self.media_slider.update_ui_live,
+            self.toolbar.media_slider.update_ui_live,
         )
         self.core.player_event_manager.event_attach(
             EventType.MediaPlayerEndReached,  # pyright: ignore[reportAttributeAccessIssue]

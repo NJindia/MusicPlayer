@@ -7,7 +7,6 @@ from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction
 from PySide6.QtWidgets import QTreeView, QSizePolicy, QWidget, QVBoxLayout, QMenu
 
 from music_player.common import Playlist, get_playlist
-from music_player.vlc_core import VLCCore
 
 
 class TreeModelItem(QStandardItem):
@@ -22,9 +21,35 @@ class TreeModelItem(QStandardItem):
 
 
 class PlaylistTreeWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+
+        self.tree_view = QTreeView()
+        self.tree_view.setUniformRowHeights(True)
+        self.tree_view.setExpandsOnDoubleClick(True)
+        self.tree_view.setAnimated(True)
+        self.tree_view.setSortingEnabled(False)
+        self.tree_view.setHeaderHidden(True)
+
+        self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+        self.model: QStandardItemModel = QStandardItemModel()
+        self.model.itemChanged.connect(self.update_playlist)
+        self.initialize_model(Path("../playlists"), self.model)
+
+        layout = QVBoxLayout()
+        layout.addWidget(self.tree_view)
+        self.setLayout(layout)
+
+        self.tree_view.setModel(self.model)
+
+    def item_at_index(self, index: QModelIndex) -> TreeModelItem:
+        return cast(TreeModelItem, self.model.itemFromIndex(index))
+
     @Slot()
     def rename_playlist(self, index: QModelIndex) -> None:
-        item: TreeModelItem = cast(TreeModelItem, self.model.itemFromIndex(index))
+        item = self.item_at_index(index)
         self.model.blockSignals(True)
         item.setEditable(True)
         self.tree_view.edit(index)
@@ -33,7 +58,7 @@ class PlaylistTreeWidget(QWidget):
 
     @Slot()
     def delete_playlist(self, index: QModelIndex) -> None:
-        item: TreeModelItem = cast(TreeModelItem, self.model.itemFromIndex(index))
+        item = self.item_at_index(index)
         parent = item.parent()
         (self.model if parent is None else parent).removeRow(item.row())
         print("TODO: PUSH CONFIRMATION + ACTUALLY DELETE")
@@ -59,32 +84,6 @@ class PlaylistTreeWidget(QWidget):
 
         menu.addActions([rename_action, delete_action])
         chosen_action = menu.exec_(self.tree_view.mapToGlobal(point))
-
-    def __init__(self, vlc_core: VLCCore):
-        super().__init__()
-        self.core = vlc_core
-
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-
-        self.tree_view = QTreeView()
-        self.tree_view.setUniformRowHeights(True)
-        self.tree_view.setExpandsOnDoubleClick(True)
-        self.tree_view.setAnimated(True)
-        self.tree_view.setSortingEnabled(False)
-        self.tree_view.setHeaderHidden(True)
-
-        self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tree_view.customContextMenuRequested.connect(self.playlist_context_menu)
-
-        self.model: QStandardItemModel = QStandardItemModel()
-        self.model.itemChanged.connect(self.update_playlist)
-        self.initialize_model(Path("../playlists"), self.model)
-
-        layout = QVBoxLayout()
-        layout.addWidget(self.tree_view)
-        self.setLayout(layout)
-
-        self.tree_view.setModel(self.model)
 
     def initialize_model(self, path: Path, root_item: QStandardItem | QStandardItemModel) -> None:
         for fp in path.iterdir():

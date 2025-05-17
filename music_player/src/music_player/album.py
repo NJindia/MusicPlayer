@@ -1,6 +1,6 @@
 from PySide6.QtCore import QSize, Slot
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QToolButton, QWidget
+from PySide6.QtWidgets import QToolButton
 
 from music_player.music_importer import Music
 from music_player.utils import get_pixmap
@@ -12,8 +12,8 @@ def go_to_album():
 
 
 class AlbumButton(QToolButton):
-    def __init__(self, metadata: Music, parent: QWidget | None = None, height_linewidth: tuple[int, int] | None = None):
-        super().__init__(parent)
+    def __init__(self, metadata: Music, height_linewidth: tuple[int, int] | None = None):
+        super().__init__()
         self.clicked.connect(go_to_album)
         if metadata.album_cover_bytes is not None:
             self.setIcon(QIcon(get_pixmap(metadata.album_cover_bytes)))
