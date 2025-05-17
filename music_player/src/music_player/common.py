@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, UTC
 from functools import cache
 from pathlib import Path
 
@@ -81,7 +81,11 @@ class Playlist:
 
     def remove_item(self, item_index: int):
         del self.playlist_items[item_index]
-        # self.save()
+        self.save()
+
+    def add_item(self, music_df_idx: int):
+        self.playlist_items.append(PlaylistItem(music_df_idx, datetime.now(tz=UTC)))
+        self.save()
 
 
 @cache
