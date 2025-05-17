@@ -38,7 +38,7 @@ from music_player.queue_gui import (
 )
 from music_player.music_importer import Music, get_music_df
 from music_player.toolbar import MediaScrubberSlider, VolumeSlider
-from music_player.vlc_core import VLCCore, get_init_playlist
+from music_player.vlc_core import VLCCore
 
 
 def expanding_widget() -> QWidget:
@@ -136,12 +136,17 @@ class MainWindow(QMainWindow):
             self.shuffle_button.button_on()
             self.shuffle_indices(self.core.current_media_idx + 1)
         else:
-            current_music = self.core.current_music
-            self.core.list_indices = list(range(len(self.core.music_list)))
-            self.core.current_media_idx = self.core.music_list.index(current_music)
-
-            self.queue.initialize_queue()
             self.shuffle_button.button_off()
+            self.core.list_indices = list(range(len(self.core.music_list)))
+
+            # Get index of original playlist music that was most recently played, and start queue from there
+            last_playlist_music_played = next(
+                qe for qe in self.queue.queue_entries[self.core.current_media_idx :: -1] if not qe.manually_added
+            ).music
+            self.core.current_media_idx = self.core.music_list.index(last_playlist_music_played)
+
+            # Replace any music/media that was added manually with the original lists
+            self.load_media(self.core.current_playlist.file_paths, self.core.current_playlist.music_list)
         self.queue.update_first_queue_index()
 
     @Slot()
@@ -160,6 +165,21 @@ class MainWindow(QMainWindow):
                 self.repeat_button.setIcon(QIcon("../icons/repeat-1-button.svg"))
                 self.repeat_button.button_on()
                 self.core.list_player.set_playback_mode(vlc.PlaybackMode.repeat)  # pyright: ignore[reportAttributeAccessIssue]
+
+    def add_to_queue(self, music_df_index: int):
+        music = from_dict(Music, get_music_df().iloc[music_df_index].to_dict())
+        try:
+            list_index = self.core.music_list.index(music)
+        except ValueError:
+            self.core.music_list.append(music)
+            self.core.media_list.add_media(music.file_path)
+            self.core.list_player.set_media_list(self.core.media_list)
+            self.core.list_indices.insert(self.core.current_media_idx + 1, len(self.core.music_list) - 1)
+        else:  # Already queue, just need to reference its index
+            self.core.list_indices.insert(self.core.current_media_idx + 1, list_index)
+        self.queue.insert_queue_entry(
+            self.core.current_media_idx + 1, QueueEntryGraphicsItem(music, manually_added=True)
+        )
 
     @Slot()
     def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
@@ -185,21 +205,7 @@ class MainWindow(QMainWindow):
             self.queue.queue_entries[_list_index] = self.queue.queue_entries[list_index]
             self.queue.queue_entries[list_index] = temp
         self.core.jump_play_index(list_index)
-
-    def add_to_queue(self, music_df_index: int):
-        music = from_dict(Music, get_music_df().iloc[music_df_index].to_dict())
-        print(len(self.queue.current_entries))
-        try:
-            list_index = self.core.music_list.index(music)
-        except ValueError:
-            self.core.music_list.append(music)
-            self.core.media_list.add_media(music.file_path)
-            self.core.list_player.set_media_list(self.core.media_list)
-            self.core.list_indices.insert(self.core.current_media_idx + 1, len(self.core.music_list) - 1)
-        else:  # Already queue, just need to reference its index
-            self.core.list_indices.insert(self.core.current_media_idx + 1, list_index)
-        self.queue.insert_queue_entry(self.core.current_media_idx + 1, QueueEntryGraphicsItem(music))
-        print(len(self.queue.current_entries))
+        self.core.current_playlist = playlist
 
     def load_media(
         self,
@@ -270,7 +276,7 @@ class MainWindow(QMainWindow):
         self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
         main_ui.addWidget(self.playlist_view)
 
-        self.library = MusicLibrary(get_init_playlist())
+        self.library = MusicLibrary(self.core.current_playlist)
         self.library.signal.song_clicked.connect(self.play_playlist)
         self.library.customContextMenuRequested.connect(self.library_context_menu)
         main_ui.addWidget(self.library)
