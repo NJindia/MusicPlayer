@@ -172,6 +172,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
 class QueueEntryGraphicsView(QGraphicsView):
     def __init__(self):
         super().__init__()
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setScene(QGraphicsScene())
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

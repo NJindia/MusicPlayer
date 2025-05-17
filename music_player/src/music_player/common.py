@@ -84,7 +84,7 @@ class Playlist:
         self.save()
 
     def add_item(self, music_df_idx: int):
-        self.playlist_items.append(PlaylistItem(music_df_idx, datetime.now(tz=UTC)))
+        self.playlist_items.insert(0, PlaylistItem(music_df_idx, datetime.now(tz=UTC)))
         self.save()
 
 
