@@ -52,6 +52,7 @@ class Playlist:
     created: datetime | None
     last_played: datetime | None
     playlist_items: list[PlaylistItem]
+    playlist_path: Path
     # thumbnail: QPixmap | None = None
 
     @property
@@ -74,12 +75,20 @@ class Playlist:
             "playlist_items": [i.to_json() for i in self.playlist_items],
         }
 
+    def save(self):
+        with self.playlist_path.open("w") as file:
+            json.dump(self.to_json(), file)
+
+    def remove_item(self, item_index: int):
+        del self.playlist_items[item_index]
+        # self.save()
+
 
 @cache
 def get_playlist(playlist_path: Path) -> Playlist:
     with playlist_path.open("r") as f:
         return dacite.from_dict(
             Playlist,
-            json.load(f),
+            {"playlist_path": playlist_path, **json.load(f)},
             config=Config(type_hooks={datetime: lambda d: datetime.fromisoformat(d)}),
         )
