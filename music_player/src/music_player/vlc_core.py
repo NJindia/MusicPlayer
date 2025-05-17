@@ -14,10 +14,6 @@ def index_media_list(media_list: MediaList, media: Media) -> int:
     return next(i for i, m in enumerate(media_list) if m.get_mrl() == media.get_mrl())
 
 
-def get_init_playlist():
-    return get_playlist(Path("../playlists/playlist4.json"))
-
-
 # TODO REMOVE CLICKING ON SLIDER TO NUDGE
 class VLCCore:
     def on_playing(self, _: Event):
@@ -29,11 +25,11 @@ class VLCCore:
 
         self.list_player: MediaListPlayer = self.instance.media_list_player_new()
 
-        init_playlist: Playlist = get_init_playlist()
-        paths = init_playlist.file_paths
+        self.current_playlist: Playlist = get_playlist(Path("../playlists/playlist4.json"))
+        paths = self.current_playlist.file_paths
         self.media_list: MediaList = self.instance.media_list_new(paths)
         self.list_indices = list(range(len(paths)))
-        self.music_list: list[Music] = init_playlist.music_list
+        self.music_list: list[Music] = self.current_playlist.music_list
         self.current_media_idx: int = 0
         self.list_player.set_media_list(self.media_list)
 

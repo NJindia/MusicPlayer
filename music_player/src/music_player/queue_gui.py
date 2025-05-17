@@ -55,8 +55,9 @@ class HoverRect(QRectF):
 
 
 class QueueEntryGraphicsItem(QGraphicsItem):
-    def __init__(self, music: Music):
+    def __init__(self, music: Music, manually_added: bool = False):
         super().__init__()
+        self.manually_added = manually_added
         self.music = music
         self.signal = QueueSignal()
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
