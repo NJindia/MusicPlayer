@@ -75,4 +75,6 @@ class VLCCore:
 
     def next(self):
         self.current_media_idx += 1
+        if self.current_media_idx >= len(self.list_indices):
+            self.list_player.stop()
         self.list_player.play_item_at_index(self.list_indices[self.current_media_idx])

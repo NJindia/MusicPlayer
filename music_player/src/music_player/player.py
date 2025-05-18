@@ -246,6 +246,8 @@ class MainWindow(QMainWindow):
 
     def queue_context_menu(self, point: QPoint):
         item = cast(QueueEntryGraphicsItem, self.queue.itemAt(point))
+        if item is None:
+            return
         menu = QMenu(self)
 
         remove_from_queue_action = QAction("Remove from queue", self)
