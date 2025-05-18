@@ -8,7 +8,6 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     QPoint,
     QRect,
-    QObject,
     Signal,
     QEvent,
     Slot,
@@ -18,6 +17,7 @@ from PySide6.QtWidgets import QTableView, QSizePolicy, QStyledItemDelegate, QSty
 
 from music_player.common import Playlist
 from music_player.music_importer import get_music_df
+from music_player.signals import SharedSignals
 from music_player.utils import timestamp_to_str, datetime_to_age_string, datetime_to_date_str, get_pixmap
 
 PADDING = 5
@@ -26,11 +26,36 @@ ICON_SIZE = ROW_HEIGHT - PADDING * 2
 BUFFER_CHARS = {",", " ", "…"}
 
 
-class LibrarySignal(QObject):
-    song_clicked = Signal(Playlist, int)
+class AlbumItemDelegate(QStyledItemDelegate):
+    def __init__(self):
+        super().__init__()
 
-    def song_is_clicked(self, playlist: Playlist, playlist_index: int) -> None:
-        self.song_clicked.emit(playlist, playlist_index)
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
+        album_text: str = index.data(Qt.ItemDataRole.DisplayRole)
+        view: MusicLibrary = option.widget  # pyright: ignore[reportAttributeAccessIssue]
+        font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
+        font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
+        index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
+        text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
+
+        elided_text = font_metrics.elidedText(album_text, Qt.TextElideMode.ElideRight, text_rect.width())
+        elided_text_size = font_metrics.boundingRect(elided_text).size()
+        h_space = (text_rect.width() - elided_text_size.width()) - 2
+        v_space = (text_rect.height() - elided_text_size.height()) - 2
+        text_rect.adjust(0, v_space // 2, -h_space, -v_space // 2)
+
+        painter.save()
+        if text_rect.contains(view.current_hovered_pos):
+            view.hovered_text_rect = text_rect
+            view.hovered_data = album_text
+            font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
+            font.setUnderline(True)
+            painter.setFont(font)
+            view.setCursor(Qt.CursorShape.PointingHandCursor)
+        else:
+            view.setCursor(Qt.CursorShape.ArrowCursor)
+        painter.drawText(text_rect, option.displayAlignment | Qt.TextFlag.TextSingleLine, album_text)  # pyright: ignore[reportAttributeAccessIssue]
+        painter.restore()
 
 
 class ArtistsItemDelegate(QStyledItemDelegate):
@@ -40,10 +65,10 @@ class ArtistsItemDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
         artists: list[str] = index.data(Qt.ItemDataRole.DisplayRole)
 
-        font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
-        index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
         view: MusicLibrary = option.widget  # pyright: ignore[reportAttributeAccessIssue]
+        font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
         font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
+        index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
         text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
 
         text = ", ".join(artists)
@@ -74,6 +99,7 @@ class ArtistsItemDelegate(QStyledItemDelegate):
             if not hovered and artist_rect.contains(view.current_hovered_pos):
                 hovered = True
                 view.hovered_text_rect = artist_rect
+                view.hovered_data = artist
                 font.setUnderline(True)
                 painter.setFont(font)
             else:
@@ -132,6 +158,7 @@ class SongItemDelegate(QStyledItemDelegate):
 
         if text_rect.contains(view.current_hovered_pos):
             view.hovered_text_rect = text_rect
+            view.hovered_data = text
             font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
             font.setUnderline(True)
             painter.setFont(font)
@@ -156,7 +183,10 @@ class MusicTableModel(QAbstractTableModel):
 
     @property
     def display_df(self):
-        return self.music_data[["title", "artists", "album", "duration", "date added"]]
+        cols = ["title", "artists", "album", "duration"]
+        if self.view.playlist_mode:
+            cols.append("date added")
+        return self.music_data[cols]
 
     def rowCount(self, parent=None):
         """Returns number of rows in table."""
@@ -181,7 +211,7 @@ class MusicTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
         if role == Qt.ItemDataRole.ToolTipRole:
-            if index.column() == self.display_df.columns.get_loc("date added"):
+            if self.view.playlist_mode and index.column() == self.display_df.columns.get_loc("date added"):
                 return self.music_data["_date_added"].iloc[index.row()]
             data = self.data(index, Qt.ItemDataRole.DisplayRole)
             text = ", ".join(data) if index.column() == 1 else data
@@ -200,9 +230,15 @@ class MusicTableModel(QAbstractTableModel):
 
 
 class MusicLibrary(QTableView):
-    def __init__(self, playlist: Playlist):
+    song_clicked = Signal(Playlist, int)
+
+    def __init__(self, playlist: Playlist, shared_signals: SharedSignals):
         super().__init__()
+        self.playlist_mode: bool = True
         self.playlist = playlist
+        self.shared_signals = shared_signals
+        self.shared_signals.library_load_artist_signal.connect(self.load_artist)
+        self.shared_signals.library_load_album_signal.connect(self.load_album)
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setShowGrid(False)
@@ -224,17 +260,19 @@ class MusicLibrary(QTableView):
 
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
-        self.signal = LibrarySignal()
-
         self.song_delegate = SongItemDelegate()
         self.setItemDelegateForColumn(0, self.song_delegate)
         self.artists_delegate = ArtistsItemDelegate()
         self.setItemDelegateForColumn(1, self.artists_delegate)
+        self.album_delegate = AlbumItemDelegate()
+        self.setItemDelegateForColumn(2, self.album_delegate)
+
         self.model_ = MusicTableModel(self)
         self.load_playlist(self.playlist)
         self.setModel(self.model_)
 
         self.hovered_text_rect = QRect()
+        self.hovered_data: Any = None
         self.current_hovered_pos = QPoint()
 
     @Slot()
@@ -244,6 +282,7 @@ class MusicLibrary(QTableView):
 
     def load_playlist(self, playlist: Playlist):
         model = self.model_
+        self.playlist_mode = True
         playlist_df = model.get_table_df(playlist.indices)
         dates = [i.added_on for i in playlist.playlist_items]
         playlist_df["_date_added"] = [datetime_to_date_str(d) for d in dates]
@@ -253,6 +292,24 @@ class MusicLibrary(QTableView):
         model.endResetModel()
 
         self.playlist = playlist
+
+    @Slot()
+    def load_artist(self, artist: str):
+        model = self.model_
+        self.playlist_mode = False
+        artist_df = model.get_table_df().loc[get_music_df()["artists"].apply(lambda x: artist in x)]
+        model.beginResetModel()
+        model.music_data = artist_df
+        model.endResetModel()
+
+    @Slot()
+    def load_album(self, album: str):
+        model = self.model_
+        self.playlist_mode = False
+        album_df = model.get_table_df().loc[get_music_df()["album"] == album]
+        model.beginResetModel()
+        model.music_data = album_df
+        model.endResetModel()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.pos()
@@ -272,7 +329,11 @@ class MusicLibrary(QTableView):
                 index = self.indexAt(pos)
                 match index.column():
                     case 0:
-                        self.signal.song_is_clicked(self.playlist, index.row())
+                        self.song_clicked.emit(self.playlist, index.row())
+                    case 1:
+                        self.shared_signals.library_load_artist_signal.emit(self.hovered_data)
+                    case 2:
+                        self.shared_signals.library_load_album_signal.emit(self.hovered_data)
                     case _:
                         raise NotImplementedError
         super().mouseReleaseEvent(event)

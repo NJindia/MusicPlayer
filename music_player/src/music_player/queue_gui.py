@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QGraphicsSceneMouseEvent,
 )
 
+from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.constants import (
     QUEUE_ENTRY_HEIGHT,
@@ -55,11 +56,12 @@ class HoverRect(QRectF):
 
 
 class QueueEntryGraphicsItem(QGraphicsItem):
-    def __init__(self, music: Music, manually_added: bool = False):
+    def __init__(self, music: Music, shared_signals: SharedSignals, manually_added: bool = False):
         super().__init__()
         self.manually_added = manually_added
         self.music = music
         self.signal = QueueSignal()
+        self.shared_signals = shared_signals
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -154,11 +156,11 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         if self._song_text_rect.contains(event.pos()):
             self.signal.song_is_clicked(self)
         elif self._album_rect.contains(event.pos()):
-            print("TODO: GO TO ALBUM")
+            self.shared_signals.library_load_album_signal.emit(self.music.album)
         else:
-            for artist_rect in self._artist_rects:
+            for i, artist_rect in enumerate(self._artist_rects):
                 if artist_rect.contains(event.pos()):
-                    print("TODO: GO TO ARTIST")
+                    self.shared_signals.library_load_artist_signal.emit(self.music.artists[i])
                     break
         super().mouseReleaseEvent(event)
 
@@ -204,16 +206,17 @@ class QueueEntryGraphicsView(QGraphicsView):
 
 
 class QueueGraphicsView(QueueEntryGraphicsView):
-    def __init__(self, vlc_core: VLCCore):
+    def __init__(self, vlc_core: VLCCore, shared_signals: SharedSignals):
         super().__init__()
         self.core = vlc_core
+        self.shared_signals = shared_signals
         self.initialize_queue()
 
     def initialize_queue(self):
         self.queue_entries = []
         self.scene().clear()
         for i, list_index in enumerate(self.core.list_indices):
-            qe = QueueEntryGraphicsItem(self.core.music_list[list_index])
+            qe = QueueEntryGraphicsItem(self.core.music_list[list_index], self.shared_signals)
             qe.signal.song_clicked.connect(self.play_queue_song)
             self.scene().addItem(qe)
 

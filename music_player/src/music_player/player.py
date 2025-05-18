@@ -6,7 +6,7 @@ from typing import cast
 
 import numpy as np
 import vlc
-from PySide6.QtCore import Slot, Qt, QThread, Signal, QModelIndex, QPoint, SignalInstance
+from PySide6.QtCore import Slot, Qt, QThread, Signal, QModelIndex, QPoint
 from PySide6.QtGui import QIcon, QMouseEvent, QAction
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,6 +21,7 @@ from dacite import from_dict
 from vlc import EventType
 
 from music_player.common import Playlist
+from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.constants import QUEUE_ENTRY_WIDTH
 from music_player.library import MusicLibrary
@@ -36,16 +37,16 @@ from music_player.vlc_core import VLCCore
 
 
 class AddToQueueAction(QAction):
-    def __init__(self, selected_song_df_idx: int, signal: SignalInstance, parent: QWidget):
+    def __init__(self, selected_song_df_idx: int, signals: SharedSignals, parent: QWidget):
         super().__init__("Add to queue", parent)
-        self.triggered.connect(partial(signal.emit, selected_song_df_idx))
+        self.triggered.connect(partial(signals.add_to_queue_signal.emit, selected_song_df_idx))
 
 
 class AddToPlaylistMenu(QMenu):
-    def __init__(self, selected_song_idx: int, signal: SignalInstance, parent_menu: QMenu, parent: QWidget):
+    def __init__(self, selected_song_idx: int, shared_signals: SharedSignals, parent_menu: QMenu, parent: QWidget):
         super().__init__("Add to playlist", parent)
         self.parent_menu = parent_menu
-        self.signal = signal
+        self.signals = shared_signals
         self.playlist_tree_widget = PlaylistTreeWidget()
         self.playlist_tree_widget.tree_view.clicked.connect(
             partial(self.add_item_to_playlist_at_index, selected_song_idx)
@@ -58,19 +59,17 @@ class AddToPlaylistMenu(QMenu):
 
     def add_item_to_playlist_at_index(self, selected_song_idx: int, index: QModelIndex):
         playlist = self.playlist_tree_widget.item_at_index(index).playlist
-        self.signal.emit(selected_song_idx, playlist)
+        self.signals.add_to_playlist_signal.emit(selected_song_idx, playlist)
         self.parent_menu.close()
 
 
 class MainWindow(QMainWindow):
     media_changed_signal = Signal()
-    add_to_queue_signal = Signal(int)
-    add_to_playlist_signal = Signal(int, Playlist)
 
     @Slot()
     def media_changed_ui(self):
         self.queue.update_first_queue_index()
-        hist_entry = QueueEntryGraphicsItem(self.last_played_music)
+        hist_entry = QueueEntryGraphicsItem(self.last_played_music, self.shared_signals)
         hist_entry.signal.song_clicked.connect(partial(self.play_history_entry, hist_entry))
         self.history.insert_queue_entry(0, hist_entry)
 
@@ -147,7 +146,7 @@ class MainWindow(QMainWindow):
         else:  # Already queue, just need to reference its index
             self.core.list_indices.insert(self.core.current_media_idx + 1, list_index)
         self.queue.insert_queue_entry(
-            self.core.current_media_idx + 1, QueueEntryGraphicsItem(music, manually_added=True)
+            self.core.current_media_idx + 1, QueueEntryGraphicsItem(music, self.shared_signals, manually_added=True)
         )
 
     @Slot()
@@ -230,11 +229,11 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
 
         # Add to queue
-        add_to_queue_action = AddToQueueAction(selected_song_idx, self.add_to_queue_signal, self)
+        add_to_queue_action = AddToQueueAction(selected_song_idx, self.shared_signals, self)
         menu.addAction(add_to_queue_action)
 
         # Add to playlist
-        playlist_menu = AddToPlaylistMenu(selected_song_idx, self.add_to_playlist_signal, menu, self)
+        playlist_menu = AddToPlaylistMenu(selected_song_idx, self.shared_signals, menu, self)
         menu.addMenu(playlist_menu)
 
         # Remove from current playlist
@@ -255,7 +254,7 @@ class MainWindow(QMainWindow):
         menu.addAction(remove_from_queue_action)
 
         music_df_idx = get_music_df()[get_music_df()["file_path"] == item.music.file_path].index[0]
-        add_to_playlist_menu = AddToPlaylistMenu(music_df_idx, self.add_to_playlist_signal, menu, self)
+        add_to_playlist_menu = AddToPlaylistMenu(music_df_idx, self.shared_signals, menu, self)
         menu.addMenu(add_to_playlist_menu)
 
         menu.exec(self.queue.mapToGlobal(point))
@@ -269,10 +268,8 @@ class MainWindow(QMainWindow):
         self.media_changed_signal.connect(self.media_changed_ui)
         self.last_played_music = self.core.current_music  # TODO -> VLCCore?
 
-        self.add_to_queue_signal.connect(self.add_to_queue)
-        self.add_to_playlist_signal.connect(self.add_item_to_playlist)
-
         main_ui = QHBoxLayout()
+        self.shared_signals = SharedSignals()
 
         self.playlist_view = PlaylistTreeWidget()
         self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
@@ -280,13 +277,15 @@ class MainWindow(QMainWindow):
         self.playlist_view.tree_view.customContextMenuRequested.connect(self.playlist_view.playlist_context_menu)
         main_ui.addWidget(self.playlist_view)
 
-        self.library = MusicLibrary(self.core.current_playlist)
-        self.library.signal.song_clicked.connect(self.play_playlist)
+        self.library = MusicLibrary(self.core.current_playlist, self.shared_signals)
+        self.shared_signals.add_to_playlist_signal.connect(self.add_item_to_playlist)
+        self.library.song_clicked.connect(self.play_playlist)
         self.library.customContextMenuRequested.connect(self.library_context_menu)
         main_ui.addWidget(self.library)
 
         self.history = QueueEntryGraphicsView()
-        self.queue = QueueGraphicsView(self.core)
+        self.queue = QueueGraphicsView(self.core, self.shared_signals)
+        self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
         self.queue.customContextMenuRequested.connect(self.queue_context_menu)
 
         queue_tab = QTabWidget()
@@ -295,7 +294,7 @@ class MainWindow(QMainWindow):
         queue_tab.addTab(self.history, "History")
         main_ui.addWidget(queue_tab)
 
-        self.toolbar = MediaToolbar(self.core)
+        self.toolbar = MediaToolbar(self.core, self.shared_signals)
         self.toolbar.shuffle_button.toggled.connect(self.shuffle_button_toggled)
         self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.toolbar)
 
