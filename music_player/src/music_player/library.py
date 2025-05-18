@@ -23,6 +23,7 @@ from music_player.utils import timestamp_to_str, datetime_to_age_string, datetim
 PADDING = 5
 ROW_HEIGHT = 50
 ICON_SIZE = ROW_HEIGHT - PADDING * 2
+BUFFER_CHARS = {",", " ", "…"}
 
 
 class LibrarySignal(QObject):
@@ -32,10 +33,80 @@ class LibrarySignal(QObject):
         self.song_clicked.emit(playlist, playlist_index)
 
 
+class ArtistsItemDelegate(QStyledItemDelegate):
+    def __init__(self):
+        super().__init__()
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
+        artists: list[str] = index.data(Qt.ItemDataRole.DisplayRole)
+
+        font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
+        index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
+        view: MusicLibrary = option.widget  # pyright: ignore[reportAttributeAccessIssue]
+        font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
+        text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
+
+        text = ", ".join(artists)
+        elided_text = font_metrics.elidedText(text, Qt.TextElideMode.ElideRight, text_rect.width())
+        v_space = (text_rect.height() - font_metrics.boundingRect(elided_text).height()) - 2
+        text_rect.adjust(0, v_space // 2, 0, -v_space // 2)
+        text_flag = option.displayAlignment | Qt.TextFlag.TextSingleLine  # pyright: ignore[reportAttributeAccessIssue]
+
+        hovered: bool = False
+        unconsumed_start_idx: int = 0
+        for i, artist in enumerate(artists):
+            if unconsumed_start_idx == len(elided_text):
+                break
+
+            painter.save()
+
+            artist_text = (
+                artist
+                if artist in elided_text[unconsumed_start_idx:]
+                else elided_text[unconsumed_start_idx : len(elided_text) - 1]
+            )
+            unconsumed_start_idx += len(artist_text)
+            text_size = font_metrics.boundingRect(artist_text).size()
+            h_space = (text_rect.width() - text_size.width()) - 2
+            artist_rect = text_rect.adjusted(0, 0, -h_space, 0)
+            text_rect.setLeft(artist_rect.right() + 1)
+
+            if not hovered and artist_rect.contains(view.current_hovered_pos):
+                hovered = True
+                view.hovered_text_rect = artist_rect
+                font.setUnderline(True)
+                painter.setFont(font)
+            else:
+                font.setUnderline(False)
+                painter.setFont(font)
+
+            painter.drawText(artist_rect, text_flag, artist_text)
+            painter.restore()
+
+            if unconsumed_start_idx == len(elided_text):
+                break
+            if elided_text[unconsumed_start_idx] in [",", "…"]:  # Elide can cut off comma
+                buffer_text_idx = next(
+                    (
+                        i
+                        for i, c in enumerate(elided_text[unconsumed_start_idx:], start=unconsumed_start_idx)
+                        if c not in BUFFER_CHARS
+                    ),
+                    len(elided_text),
+                )
+                buffer_text = elided_text[unconsumed_start_idx:buffer_text_idx]
+                comma_text_width = font_metrics.boundingRect(buffer_text).width()
+                comma_rect = text_rect.adjusted(0, 0, -(text_rect.width() - comma_text_width - 2), 0)
+                unconsumed_start_idx += len(buffer_text)
+                painter.drawText(comma_rect, text_flag, buffer_text)
+                text_rect.setLeft(comma_rect.right())
+
+        view.setCursor(Qt.CursorShape.PointingHandCursor if hovered else Qt.CursorShape.ArrowCursor)
+
+
 class SongItemDelegate(QStyledItemDelegate):
     def __init__(self):
         super().__init__()
-        self.hovered_mouse_pos = QPoint()
 
     def paint(
         self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
@@ -112,10 +183,11 @@ class MusicTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.ToolTipRole:
             if index.column() == self.display_df.columns.get_loc("date added"):
                 return self.music_data["_date_added"].iloc[index.row()]
-            text = self.data(index, Qt.ItemDataRole.DisplayRole)
-            if self.view.font_metrics.horizontalAdvance(text) > self.view.columnWidth(index.column()) - ROW_HEIGHT:
+            data = self.data(index, Qt.ItemDataRole.DisplayRole)
+            text = ", ".join(data) if index.column() == 1 else data
+            column_width = self.view.columnWidth(index.column()) - (ROW_HEIGHT if index.column() == 0 else PADDING * 2)
+            if self.view.font_metrics.horizontalAdvance(text) > column_width:
                 return text
-            return None
         if role == Qt.ItemDataRole.DecorationRole and index.column() == 0:
             return get_pixmap(self.music_data["album_cover_bytes"].iloc[index.row()]).scaledToHeight(
                 ICON_SIZE, Qt.TransformationMode.SmoothTransformation
@@ -154,7 +226,10 @@ class MusicLibrary(QTableView):
 
         self.signal = LibrarySignal()
 
-        self.setItemDelegateForColumn(0, SongItemDelegate())
+        self.song_delegate = SongItemDelegate()
+        self.setItemDelegateForColumn(0, self.song_delegate)
+        self.artists_delegate = ArtistsItemDelegate()
+        self.setItemDelegateForColumn(1, self.artists_delegate)
         self.model_ = MusicTableModel(self)
         self.load_playlist(self.playlist)
         self.setModel(self.model_)

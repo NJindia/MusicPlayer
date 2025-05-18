@@ -75,6 +75,8 @@ class PlaylistTreeWidget(QWidget):
     @Slot()
     def playlist_context_menu(self, point: QPoint):
         playlist_index = self.tree_view.indexAt(point)
+        if not playlist_index.isValid():
+            return
         menu = QMenu(self.tree_view)
 
         rename_action = QAction("Rename", self.tree_view)
