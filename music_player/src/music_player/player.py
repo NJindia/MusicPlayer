@@ -24,8 +24,8 @@ from music_player.common import Playlist
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.constants import QUEUE_ENTRY_WIDTH
-from music_player.library import MusicLibrary
-from music_player.playlist import PlaylistTreeWidget, TreeModelItem
+from music_player.library import MusicLibraryWidget
+from music_player.playlist_tree import PlaylistTreeWidget, TreeModelItem
 from music_player.queue_gui import (
     QueueGraphicsView,
     QueueEntryGraphicsView,
@@ -163,24 +163,34 @@ class MainWindow(QMainWindow):
         self.core.list_player.play_item_at_index(0)
         self.queue.update_first_queue_index()
 
-    @Slot(Playlist, int)
+    @Slot()
+    def play_song_from_library(self, lib_index: int):
+        if self.library.playlist is not None:
+            self.play_playlist(self.library.playlist, lib_index)
+        else:
+            self.play_music(self.library.table_view.model_.music_data["file path"])
+
     def play_playlist(self, playlist: Playlist, playlist_index: int):
         playlist.last_played = datetime.now()  # TODO
-        self.load_media(playlist.file_paths, playlist.music_list)
-        list_index = playlist_index
+        self.play_music(playlist.file_paths, playlist.music_list, playlist_index)
+        self.core.current_playlist = playlist
+
+    @Slot()
+    def play_music(self, file_paths: list[Path], music_list: list[Music], list_index: int):
+        self.load_media(file_paths, music_list)
+        jump_index = list_index
         if self.toolbar.shuffle_button.isChecked():
-            list_index = 0
-            self.shuffle_indices(list_index)  # Shuffle all
+            jump_index = 0
+            self.shuffle_indices(jump_index)  # Shuffle all
             # Find index of song we want to play now in the shuffled list, then swap that with the shuffled 1st song
-            _list_index = self.core.list_indices.index(playlist_index)
-            self.core.list_indices[_list_index] = self.core.list_indices[list_index]
-            self.core.list_indices[list_index] = playlist_index
+            _list_index = self.core.list_indices.index(list_index)
+            self.core.list_indices[_list_index] = self.core.list_indices[jump_index]
+            self.core.list_indices[jump_index] = list_index
 
             temp = self.queue.queue_entries[_list_index]
-            self.queue.queue_entries[_list_index] = self.queue.queue_entries[list_index]
-            self.queue.queue_entries[list_index] = temp
-        self.core.jump_play_index(list_index)
-        self.core.current_playlist = playlist
+            self.queue.queue_entries[_list_index] = self.queue.queue_entries[jump_index]
+            self.queue.queue_entries[jump_index] = temp
+        self.core.jump_play_index(jump_index)
 
     def load_media(
         self,
@@ -215,16 +225,16 @@ class MainWindow(QMainWindow):
         if playlist is None:
             raise NotImplementedError
         playlist.add_item(music_df_idx)
-        if playlist.playlist_path == self.library.playlist.playlist_path:
+        if self.library.playlist and playlist.playlist_path == self.library.playlist.playlist_path:
             self.library.load_playlist(playlist)
 
     @Slot()
     def library_context_menu(self, point: QPoint):
-        index = self.library.indexAt(point)
+        index = self.library.table_view.indexAt(point)
         if not index.isValid():
             return
         row = index.row()
-        selected_song_idx = self.library.playlist.playlist_items[row].song_index
+        selected_song_idx = self.library.table_view.model_.music_data.index[row]
 
         menu = QMenu(self)
 
@@ -236,10 +246,11 @@ class MainWindow(QMainWindow):
         playlist_menu = AddToPlaylistMenu(selected_song_idx, self.shared_signals, menu, self)
         menu.addMenu(playlist_menu)
 
-        # Remove from current playlist
-        remove_from_curr_playlist_action = QAction("Remove from this playlist", self)
-        remove_from_curr_playlist_action.triggered.connect(partial(self.library.remove_item_from_playlist, row))
-        menu.addAction(remove_from_curr_playlist_action)
+        if self.library.playlist:
+            # Remove from current playlist
+            remove_from_curr_playlist_action = QAction("Remove from this playlist", self)
+            remove_from_curr_playlist_action.triggered.connect(partial(self.library.remove_item_from_playlist, row))
+            menu.addAction(remove_from_curr_playlist_action)
 
         chosen_action = menu.exec(self.library.mapToGlobal(point))
 
@@ -277,10 +288,12 @@ class MainWindow(QMainWindow):
         self.playlist_view.tree_view.customContextMenuRequested.connect(self.playlist_view.playlist_context_menu)
         main_ui.addWidget(self.playlist_view)
 
-        self.library = MusicLibrary(self.core.current_playlist, self.shared_signals)
+        self.library = MusicLibraryWidget(self.core.current_playlist, self.shared_signals)
         self.shared_signals.add_to_playlist_signal.connect(self.add_item_to_playlist)
-        self.library.song_clicked.connect(self.play_playlist)
-        self.library.customContextMenuRequested.connect(self.library_context_menu)
+
+        self.library.table_view.song_clicked.connect(self.play_playlist)
+        self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
+
         main_ui.addWidget(self.library)
 
         self.history = QueueEntryGraphicsView()

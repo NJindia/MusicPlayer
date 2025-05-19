@@ -12,8 +12,17 @@ from PySide6.QtCore import (
     QEvent,
     Slot,
 )
-from PySide6.QtGui import QFontMetrics, QFont, QPainter, QMouseEvent
-from PySide6.QtWidgets import QTableView, QSizePolicy, QStyledItemDelegate, QStyleOptionViewItem
+from PySide6.QtGui import QFontMetrics, QFont, QPainter, QMouseEvent, QPixmap
+from PySide6.QtWidgets import (
+    QTableView,
+    QSizePolicy,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+)
 
 from music_player.common import Playlist
 from music_player.music_importer import get_music_df
@@ -32,8 +41,7 @@ class AlbumItemDelegate(QStyledItemDelegate):
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
         album_text: str = index.data(Qt.ItemDataRole.DisplayRole)
-        view: MusicLibrary = option.widget  # pyright: ignore[reportAttributeAccessIssue]
-        font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
+        view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
         font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
         index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
         text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
@@ -65,7 +73,7 @@ class ArtistsItemDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
         artists: list[str] = index.data(Qt.ItemDataRole.DisplayRole)
 
-        view: MusicLibrary = option.widget  # pyright: ignore[reportAttributeAccessIssue]
+        view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
         font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
         font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
         index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
@@ -149,7 +157,7 @@ class SongItemDelegate(QStyledItemDelegate):
         text_rect.setLeft(icon_rect.right() + 5)
 
         font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
-        view: MusicLibrary = option.widget  # pyright: ignore[reportAttributeAccessIssue]
+        view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
         text = font_metrics.elidedText(text, Qt.TextElideMode.ElideRight, view.columnWidth(index.column()) - ROW_HEIGHT)
         text_size = font_metrics.boundingRect(text).size()
         h_space = (text_rect.width() - text_size.width()) - 2
@@ -171,7 +179,7 @@ class SongItemDelegate(QStyledItemDelegate):
 
 
 class MusicTableModel(QAbstractTableModel):
-    def __init__(self, parent: "MusicLibrary"):
+    def __init__(self, parent: "MusicLibraryTable"):
         super(MusicTableModel, self).__init__(parent)
         self.music_data: pd.DataFrame = pd.DataFrame()
         self.view = parent
@@ -183,9 +191,7 @@ class MusicTableModel(QAbstractTableModel):
 
     @property
     def display_df(self):
-        cols = ["title", "artists", "album", "duration"]
-        if self.view.playlist_mode:
-            cols.append("date added")
+        cols = [c for c in ["title", "artists", "album", "duration", "date added"] if c in self.music_data.columns]
         return self.music_data[cols]
 
     def rowCount(self, parent=None):
@@ -211,7 +217,8 @@ class MusicTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
         if role == Qt.ItemDataRole.ToolTipRole:
-            if self.view.playlist_mode and index.column() == self.display_df.columns.get_loc("date added"):
+            display_cols = self.display_df.columns
+            if "date added" in display_cols and index.column() == display_cols.get_loc("date added"):
                 return self.music_data["_date_added"].iloc[index.row()]
             data = self.data(index, Qt.ItemDataRole.DisplayRole)
             text = ", ".join(data) if index.column() == 1 else data
@@ -229,16 +236,81 @@ class MusicTableModel(QAbstractTableModel):
         return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
 
-class MusicLibrary(QTableView):
-    song_clicked = Signal(Playlist, int)
-
+class MusicLibraryWidget(QWidget):
     def __init__(self, playlist: Playlist, shared_signals: SharedSignals):
         super().__init__()
-        self.playlist_mode: bool = True
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.playlist: Playlist | None = playlist
+
+        shared_signals.library_load_artist_signal.connect(self.load_artist)
+        shared_signals.library_load_album_signal.connect(self.load_album)
+
+        header_widget = QWidget()
+        header_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        header_widget.setFixedHeight(100)
+        header_layout = QHBoxLayout()
+        header_widget.setLayout(header_layout)
+
+        self.header_img = QLabel()
+        self.header_img.setPixmap(
+            QPixmap("../icons/folder.svg").scaledToHeight(100, Qt.TransformationMode.SmoothTransformation)
+        )
+        header_layout.addWidget(self.header_img)
+
+        self.table_view = MusicLibraryTable(shared_signals, self)
+        self.load_playlist(self.playlist)
+
+        layout = QVBoxLayout()
+        layout.addWidget(header_widget)
+        layout.addWidget(self.table_view)
+        self.setLayout(layout)
+
+    @Slot()
+    def remove_item_from_playlist(self, item_index: int):
+        assert self.playlist is not None
+        self.playlist.remove_item(item_index)
+        self.load_playlist(self.playlist)
+
+    def load_playlist(self, playlist: Playlist):
+        # TODO LOAD IMG
         self.playlist = playlist
+
+        model = self.table_view.model_
+        playlist_df = model.get_table_df(playlist.indices)
+        dates = [i.added_on for i in playlist.playlist_items]
+        playlist_df["_date_added"] = [datetime_to_date_str(d) for d in dates]
+        playlist_df["date added"] = [datetime_to_age_string(d) for d in dates]
+        model.beginResetModel()
+        model.music_data = playlist_df
+        model.endResetModel()
+
+    @Slot()
+    def load_artist(self, artist: str):
+        # TODO LOAD IMG
+        self.playlist = None
+        model = self.table_view.model_
+        artist_df = model.get_table_df().loc[get_music_df()["artists"].apply(lambda x: artist in x)]
+        model.beginResetModel()
+        model.music_data = artist_df
+        model.endResetModel()
+
+    @Slot()
+    def load_album(self, album: str):
+        # TODO LOAD IMG
+        self.playlist = None
+        model = self.table_view.model_
+        album_df = model.get_table_df().loc[get_music_df()["album"] == album]
+        model.beginResetModel()
+        model.music_data = album_df
+        model.endResetModel()
+
+
+class MusicLibraryTable(QTableView):
+    song_clicked = Signal(Playlist, int)
+
+    def __init__(self, shared_signals: SharedSignals, parent: MusicLibraryWidget):
+        super().__init__(parent)
         self.shared_signals = shared_signals
-        self.shared_signals.library_load_artist_signal.connect(self.load_artist)
-        self.shared_signals.library_load_album_signal.connect(self.load_album)
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setShowGrid(False)
@@ -268,48 +340,11 @@ class MusicLibrary(QTableView):
         self.setItemDelegateForColumn(2, self.album_delegate)
 
         self.model_ = MusicTableModel(self)
-        self.load_playlist(self.playlist)
         self.setModel(self.model_)
 
         self.hovered_text_rect = QRect()
         self.hovered_data: Any = None
         self.current_hovered_pos = QPoint()
-
-    @Slot()
-    def remove_item_from_playlist(self, item_index: int):
-        self.playlist.remove_item(item_index)
-        self.load_playlist(self.playlist)
-
-    def load_playlist(self, playlist: Playlist):
-        model = self.model_
-        self.playlist_mode = True
-        playlist_df = model.get_table_df(playlist.indices)
-        dates = [i.added_on for i in playlist.playlist_items]
-        playlist_df["_date_added"] = [datetime_to_date_str(d) for d in dates]
-        playlist_df["date added"] = [datetime_to_age_string(d) for d in dates]
-        model.beginResetModel()
-        model.music_data = playlist_df
-        model.endResetModel()
-
-        self.playlist = playlist
-
-    @Slot()
-    def load_artist(self, artist: str):
-        model = self.model_
-        self.playlist_mode = False
-        artist_df = model.get_table_df().loc[get_music_df()["artists"].apply(lambda x: artist in x)]
-        model.beginResetModel()
-        model.music_data = artist_df
-        model.endResetModel()
-
-    @Slot()
-    def load_album(self, album: str):
-        model = self.model_
-        self.playlist_mode = False
-        album_df = model.get_table_df().loc[get_music_df()["album"] == album]
-        model.beginResetModel()
-        model.music_data = album_df
-        model.endResetModel()
 
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.pos()
@@ -329,7 +364,7 @@ class MusicLibrary(QTableView):
                 index = self.indexAt(pos)
                 match index.column():
                     case 0:
-                        self.song_clicked.emit(self.playlist, index.row())
+                        self.song_clicked.emit(self.parent().playlist, index.row())
                     case 1:
                         self.shared_signals.library_load_artist_signal.emit(self.hovered_data)
                     case 2:
