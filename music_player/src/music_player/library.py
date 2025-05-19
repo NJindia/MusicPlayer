@@ -1,4 +1,4 @@
-from typing import Any, Sequence
+from typing import Any
 
 import pandas as pd
 from PySide6.QtCore import (
@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 from music_player.common import Playlist
 from music_player.music_importer import get_music_df
 from music_player.signals import SharedSignals
-from music_player.utils import timestamp_to_str, datetime_to_age_string, datetime_to_date_str, get_pixmap
+from music_player.utils import datetime_to_age_string, datetime_to_date_str, get_pixmap
 
 PADDING = 5
 ROW_HEIGHT = 50
@@ -184,11 +184,6 @@ class MusicTableModel(QAbstractTableModel):
         self.music_data: pd.DataFrame = pd.DataFrame()
         self.view = parent
 
-    def get_table_df(self, indices: Sequence[int] | None = None) -> pd.DataFrame:
-        df = (get_music_df().iloc[indices] if indices is not None else get_music_df()).copy()
-        df["duration"] = df["duration_timestamp"].round().apply(timestamp_to_str)
-        return df[["title", "artists", "album", "duration", "album_cover_bytes"]]
-
     @property
     def display_df(self):
         cols = [c for c in ["title", "artists", "album", "duration", "date added"] if c in self.music_data.columns]
@@ -276,7 +271,7 @@ class MusicLibraryWidget(QWidget):
         self.playlist = playlist
 
         model = self.table_view.model_
-        playlist_df = model.get_table_df(playlist.indices)
+        playlist_df = get_music_df().iloc[playlist.indices].copy()
         dates = [i.added_on for i in playlist.playlist_items]
         playlist_df["_date_added"] = [datetime_to_date_str(d) for d in dates]
         playlist_df["date added"] = [datetime_to_age_string(d) for d in dates]
@@ -289,9 +284,8 @@ class MusicLibraryWidget(QWidget):
         # TODO LOAD IMG
         self.playlist = None
         model = self.table_view.model_
-        artist_df = model.get_table_df().loc[get_music_df()["artists"].apply(lambda x: artist in x)]
         model.beginResetModel()
-        model.music_data = artist_df
+        model.music_data = get_music_df().loc[get_music_df()["artists"].apply(lambda x: artist in x)]
         model.endResetModel()
 
     @Slot()
@@ -299,14 +293,13 @@ class MusicLibraryWidget(QWidget):
         # TODO LOAD IMG
         self.playlist = None
         model = self.table_view.model_
-        album_df = model.get_table_df().loc[get_music_df()["album"] == album]
         model.beginResetModel()
-        model.music_data = album_df
+        model.music_data = get_music_df().loc[get_music_df()["album"] == album]
         model.endResetModel()
 
 
 class MusicLibraryTable(QTableView):
-    song_clicked = Signal(Playlist, int)
+    song_clicked = Signal(int)
 
     def __init__(self, shared_signals: SharedSignals, parent: MusicLibraryWidget):
         super().__init__(parent)
@@ -364,7 +357,7 @@ class MusicLibraryTable(QTableView):
                 index = self.indexAt(pos)
                 match index.column():
                     case 0:
-                        self.song_clicked.emit(self.parent().playlist, index.row())
+                        self.song_clicked.emit(index.row())
                     case 1:
                         self.shared_signals.library_load_artist_signal.emit(self.hovered_data)
                     case 2:

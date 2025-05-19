@@ -5,9 +5,10 @@ from functools import cache
 from pathlib import Path
 
 import dacite
-from dacite import Config, from_dict
+import pandas as pd
+from dacite import Config
 
-from music_player.music_importer import get_music_df, Music
+from music_player.music_importer import get_music_df
 
 
 @dataclass
@@ -33,13 +34,8 @@ class Playlist:
         return [i.song_index for i in self.playlist_items]
 
     @property
-    def file_paths(self) -> list[Path]:
-        music_df = get_music_df().iloc[self.indices]
-        return music_df["file_path"].to_list()
-
-    @property
-    def music_list(self) -> list[Music]:
-        return [from_dict(Music, d) for d in get_music_df().iloc[self.indices].to_dict(orient="records")]
+    def dataframe(self) -> pd.DataFrame:
+        return get_music_df().iloc[self.indices]
 
     def to_json(self):
         return {

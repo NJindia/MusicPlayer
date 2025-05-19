@@ -1,10 +1,10 @@
 import sys
 from datetime import datetime
 from functools import partial
-from pathlib import Path
 from typing import cast
 
 import numpy as np
+import pandas as pd
 import vlc
 from PySide6.QtCore import Slot, Qt, QThread, Signal, QModelIndex, QPoint
 from PySide6.QtGui import QIcon, QMouseEvent, QAction
@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QWidgetAction,
 )
-from dacite import from_dict
 from vlc import EventType
 
 from music_player.common import Playlist
@@ -31,7 +30,7 @@ from music_player.queue_gui import (
     QueueEntryGraphicsView,
     QueueEntryGraphicsItem,
 )
-from music_player.music_importer import Music, get_music_df
+from music_player.music_importer import get_music_df
 from music_player.toolbar import MediaToolbar
 from music_player.vlc_core import VLCCore
 
@@ -121,28 +120,30 @@ class MainWindow(QMainWindow):
             self.shuffle_indices(self.core.current_media_idx + 1)
         else:
             self.toolbar.shuffle_button.button_off()
-            self.core.list_indices = list(range(len(self.core.music_list)))
+            self.core.list_indices = list(range(len(self.core.current_music_df)))
 
             # Get index of original playlist music that was most recently played, and start queue from there
             last_playlist_music_played = next(
                 qe for qe in self.queue.queue_entries[self.core.current_media_idx :: -1] if not qe.manually_added
             ).music
-            self.core.current_media_idx = self.core.music_list.index(last_playlist_music_played)
+            self.core.current_media_idx = self.core.current_music_df[
+                self.core.current_music_df == last_playlist_music_played
+            ].index[0]
 
             # Replace any music/media that was added manually with the original lists
-            self.load_media(self.core.current_playlist.file_paths, self.core.current_playlist.music_list)
+            self.load_media(self.core.current_playlist.dataframe)
         self.queue.update_first_queue_index()
 
     @Slot(int)
     def add_to_queue(self, music_df_index: int):
-        music = from_dict(Music, get_music_df().iloc[music_df_index].to_dict())
+        music = get_music_df().iloc[music_df_index]
         try:
-            list_index = self.core.music_list.index(music)
+            list_index = self.core.current_music_df == music
         except ValueError:
-            self.core.music_list.append(music)
+            self.core.current_music_df.iloc[len(self.core.current_music_df) - 1] = music
             self.core.media_list.add_media(music.file_path)
             self.core.list_player.set_media_list(self.core.media_list)
-            self.core.list_indices.insert(self.core.current_media_idx + 1, len(self.core.music_list) - 1)
+            self.core.list_indices.insert(self.core.current_media_idx + 1, len(self.core.current_music_df) - 1)
         else:  # Already queue, just need to reference its index
             self.core.list_indices.insert(self.core.current_media_idx + 1, list_index)
         self.queue.insert_queue_entry(
@@ -159,7 +160,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
         self.core.current_media_idx = 0
-        self.load_media([queue_entry.music.file_path], [queue_entry.music])
+        self.load_media(queue_entry.music.to_frame())
         self.core.list_player.play_item_at_index(0)
         self.queue.update_first_queue_index()
 
@@ -168,16 +169,16 @@ class MainWindow(QMainWindow):
         if self.library.playlist is not None:
             self.play_playlist(self.library.playlist, lib_index)
         else:
-            self.play_music(self.library.table_view.model_.music_data["file path"])
+            self.play_music(self.library.table_view.model_.music_data["file_path"].to_list(), lib_index)
 
     def play_playlist(self, playlist: Playlist, playlist_index: int):
         playlist.last_played = datetime.now()  # TODO
-        self.play_music(playlist.file_paths, playlist.music_list, playlist_index)
+        self.play_music(playlist.dataframe, playlist_index)
         self.core.current_playlist = playlist
 
     @Slot()
-    def play_music(self, file_paths: list[Path], music_list: list[Music], list_index: int):
-        self.load_media(file_paths, music_list)
+    def play_music(self, music_df: pd.DataFrame, list_index: int):
+        self.load_media(music_df)
         jump_index = list_index
         if self.toolbar.shuffle_button.isChecked():
             jump_index = 0
@@ -192,19 +193,15 @@ class MainWindow(QMainWindow):
             self.queue.queue_entries[jump_index] = temp
         self.core.jump_play_index(jump_index)
 
-    def load_media(
-        self,
-        file_paths: list[Path] | list[vlc.Media],
-        music_list: list[Music],
-    ):
+    def load_media(self, music_df: pd.DataFrame):
         """Set a new MediaList, and all the other fields that would also need to be set to work properly.
 
         If queue_entries is None, it will wipe the queue and initialize a new one from self.core.indices"""
-        assert len(file_paths) == len(music_list)
+        file_paths = music_df["file_path"].to_list()
         self.core.media_list = self.core.instance.media_list_new(file_paths)
         self.core.list_player.set_media_list(self.core.media_list)
-        self.core.music_list = music_list
-        self.core.list_indices = list(range(len(music_list)))
+        self.core.current_music_df = music_df
+        self.core.list_indices = list(range(len(music_df)))
         self.queue.initialize_queue()
 
     @Slot()
@@ -277,7 +274,7 @@ class MainWindow(QMainWindow):
         self.media_changed: bool = False
         self.setWindowTitle("Media Player")
         self.media_changed_signal.connect(self.media_changed_ui)
-        self.last_played_music = self.core.current_music  # TODO -> VLCCore?
+        self.last_played_music: pd.Series = self.core.current_music  # TODO -> VLCCore?
 
         main_ui = QHBoxLayout()
         self.shared_signals = SharedSignals()
@@ -291,7 +288,7 @@ class MainWindow(QMainWindow):
         self.library = MusicLibraryWidget(self.core.current_playlist, self.shared_signals)
         self.shared_signals.add_to_playlist_signal.connect(self.add_item_to_playlist)
 
-        self.library.table_view.song_clicked.connect(self.play_playlist)
+        self.library.table_view.song_clicked.connect(self.play_song_from_library)
         self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
 
         main_ui.addWidget(self.library)
