@@ -2,9 +2,10 @@ import itertools
 from pathlib import Path
 from typing import cast, Literal, get_args
 
+import pandas as pd
 from vlc import Instance, MediaPlayer, EventType, Event, MediaList, MediaListPlayer, Media
 
-from music_player.music_importer import Music
+from music_player.music_importer import get_music_df
 from music_player.common import get_playlist, Playlist
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
@@ -26,10 +27,10 @@ class VLCCore:
         self.list_player: MediaListPlayer = self.instance.media_list_player_new()
 
         self.current_playlist: Playlist = get_playlist(Path("../playlists/playlist4.json"))
-        paths = self.current_playlist.file_paths
+        paths = get_music_df().iloc[self.current_playlist.indices]["file_path"].to_list()
         self.media_list: MediaList = self.instance.media_list_new(paths)
         self.list_indices = list(range(len(paths)))
-        self.music_list: list[Music] = self.current_playlist.music_list
+        self.current_music_df: pd.DataFrame = get_music_df().iloc[self.current_playlist.indices]
         self.current_media_idx: int = 0
         self.list_player.set_media_list(self.media_list)
 
@@ -49,8 +50,8 @@ class VLCCore:
         assert self.repeat_state == "NO_REPEAT"  # Should always start here TODO (for now)
 
     @property
-    def current_music(self) -> Music:
-        return self.music_list[self.list_indices[self.current_media_idx]]
+    def current_music(self) -> pd.Series:
+        return self.current_music_df.iloc[self.list_indices[self.current_media_idx]]
 
     @property
     def current_media(self) -> Media:

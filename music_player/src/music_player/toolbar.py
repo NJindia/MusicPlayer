@@ -1,5 +1,6 @@
 from functools import cache, partial
 
+import pandas as pd
 import vlc
 from PySide6.QtCore import Qt, Slot, QSize
 from PySide6.QtGui import QIcon, QPixmap, QTransform
@@ -21,7 +22,6 @@ from music_player.utils import timestamp_to_str
 from music_player.vlc_core import VLCCore
 
 
-from music_player.music_importer import Music
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 
@@ -33,11 +33,13 @@ def expanding_widget() -> QWidget:
 
 
 class AlbumButton(QToolButton):
-    def __init__(self, metadata: Music, shared_signals: SharedSignals, height_linewidth: tuple[int, int] | None = None):
+    def __init__(
+        self, music: pd.Series, shared_signals: SharedSignals, height_linewidth: tuple[int, int] | None = None
+    ):
         super().__init__()
-        self.clicked.connect(partial(shared_signals.library_load_album_signal.emit, metadata.album))
-        if metadata.album_cover_bytes is not None:
-            self.setIcon(QIcon(get_pixmap(metadata.album_cover_bytes)))
+        self.clicked.connect(partial(shared_signals.library_load_album_signal.emit, music["album"]))
+        if music["album_cover_bytes"] is not None:
+            self.setIcon(QIcon(get_pixmap(music["album_cover_bytes"])))
         if height_linewidth is not None:
             height = height_linewidth[0] - height_linewidth[1] * 2
             button_size = QSize(height, height)

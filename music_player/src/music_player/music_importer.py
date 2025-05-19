@@ -12,6 +12,8 @@ from dacite.cache import cache
 
 from pandas import DataFrame
 
+from music_player.utils import timestamp_to_str
+
 
 class NotAcceptedFileTypeError(ValueError):
     pass
@@ -84,7 +86,9 @@ def load_from_sources():
 
 @cache
 def get_music_df() -> DataFrame:
-    return DataFrame.from_records(asdict(m) for m in load_from_sources())
+    df = DataFrame.from_records(asdict(m) for m in load_from_sources())
+    df["duration"] = df["duration_timestamp"].round().apply(timestamp_to_str)
+    return df
 
 
 if __name__ == "__main__":
