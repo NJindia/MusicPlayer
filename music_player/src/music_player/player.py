@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 from vlc import EventType
 
-from music_player.common import Playlist
+from music_player.playlist import Playlist
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.constants import QUEUE_ENTRY_WIDTH

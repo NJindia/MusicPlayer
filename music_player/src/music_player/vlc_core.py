@@ -6,7 +6,7 @@ import pandas as pd
 from vlc import Instance, MediaPlayer, EventType, Event, MediaList, MediaListPlayer, Media
 
 from music_player.music_importer import get_music_df
-from music_player.common import get_playlist, Playlist
+from music_player.playlist import get_playlist, Playlist
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
 
