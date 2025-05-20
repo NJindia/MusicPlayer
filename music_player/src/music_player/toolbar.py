@@ -134,6 +134,7 @@ class VolumeSlider(QHBoxLayout):
         self.volume_slider.setValue(current_volume)
         self.volume_slider.setMaximum(100)
         self.volume_slider.valueChanged.connect(self.update_volume)
+        self.volume_slider.setStyleSheet("QSlider { background: transparent; }")
 
         self.volume_button: QToolButton = QToolButton()
         self.volume_button.setCheckable(True)

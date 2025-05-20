@@ -263,7 +263,10 @@ class MusicLibraryWidget(QWidget):
 
     def __init__(self, playlist: Playlist, shared_signals: SharedSignals):
         super().__init__()
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setStyleSheet("""QWidget {
+            margin: 0px;
+            border: none;
+        }""")
         self.playlist: Playlist | None = playlist
 
         shared_signals.library_load_artist_signal.connect(self.load_artist)
@@ -390,15 +393,23 @@ class MusicLibraryTable(QTableView):
         self.setShowGrid(False)
         self.setMouseTracking(True)
         self.setWordWrap(False)
+
         self.setStyleSheet("""
+            QTableView {
+                background: transparent;
+                border: none;
+            }
             QTableView::item {
-                padding: 0px;
-                padding-left: 0px;
-                margin-left: 0px;
+                background: transparent;
             }""")
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
+        self.verticalHeader().setVisible(False)
         self.horizontalHeader().setSectionsClickable(False)
+        self.horizontalHeader().setStyleSheet("""
+            QHeaderView::section { background: transparent; }
+            QHeaderView { background: transparent; }
+        """)
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.setFont(QFont())

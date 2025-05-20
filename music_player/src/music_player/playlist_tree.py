@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import cast
 
 from PySide6.QtCore import Qt, QModelIndex, QPoint, Slot
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction
-from PySide6.QtWidgets import QTreeView, QSizePolicy, QWidget, QVBoxLayout, QMenu
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont
+from PySide6.QtWidgets import QTreeView, QWidget, QVBoxLayout, QMenu
 
 from music_player.playlist import Playlist, get_playlist
 
@@ -12,19 +12,25 @@ from music_player.playlist import Playlist, get_playlist
 class TreeModelItem(QStandardItem):
     def __init__(self, text: str, playlist: Playlist | None) -> None:
         super().__init__(text)
+        font = QFont()
+        font.setPointSize(14)
+        self.setFont(font)
         self.setEditable(False)
         self.playlist = playlist
         if self.playlist is None:
             self.setIcon(QIcon("../icons/folder.svg"))
         else:
-            self.setIcon(QIcon("../icons/music-playlist2.svg"))
+            self.setIcon(QIcon(self.playlist.thumbnail_pixmap))
 
 
 class PlaylistTreeWidget(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setStyleSheet("""QWidget {
+            margin: 0px;
+            border: none;
+        }""")
+        self.setMaximumWidth(400)
         self.tree_view = QTreeView()
         self.tree_view.setUniformRowHeights(True)
         self.tree_view.setExpandsOnDoubleClick(True)
