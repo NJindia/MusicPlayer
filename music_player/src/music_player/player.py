@@ -3,6 +3,7 @@ from datetime import datetime
 from functools import partial
 from typing import cast
 
+import qdarktheme
 import numpy as np
 import pandas as pd
 import vlc
@@ -22,7 +23,6 @@ from vlc import EventType
 from music_player.playlist import Playlist
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
-from music_player.constants import QUEUE_ENTRY_WIDTH
 from music_player.library import MusicLibraryWidget
 from music_player.playlist_tree import PlaylistTreeWidget, TreeModelItem
 from music_player.queue_gui import (
@@ -46,7 +46,7 @@ class AddToPlaylistMenu(QMenu):
         super().__init__("Add to playlist", parent)
         self.parent_menu = parent_menu
         self.signals = shared_signals
-        self.playlist_tree_widget = PlaylistTreeWidget()
+        self.playlist_tree_widget = PlaylistTreeWidget(self)
         self.playlist_tree_widget.tree_view.clicked.connect(
             partial(self.add_item_to_playlist_at_index, selected_song_idx)
         )
@@ -279,7 +279,7 @@ class MainWindow(QMainWindow):
         main_ui = QHBoxLayout()
         self.shared_signals = SharedSignals()
 
-        self.playlist_view = PlaylistTreeWidget()
+        self.playlist_view = PlaylistTreeWidget(self)
         self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
         self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
         self.playlist_view.tree_view.customContextMenuRequested.connect(self.playlist_view.playlist_context_menu)
@@ -287,10 +287,8 @@ class MainWindow(QMainWindow):
 
         self.library = MusicLibraryWidget(self.core.current_playlist, self.shared_signals)
         self.shared_signals.add_to_playlist_signal.connect(self.add_item_to_playlist)
-
         self.library.table_view.song_clicked.connect(self.play_song_from_library)
         self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
-
         main_ui.addWidget(self.library)
 
         self.history = QueueEntryGraphicsView()
@@ -299,9 +297,10 @@ class MainWindow(QMainWindow):
         self.queue.customContextMenuRequested.connect(self.queue_context_menu)
 
         queue_tab = QTabWidget()
-        queue_tab.setFixedWidth(QUEUE_ENTRY_WIDTH * 1.25)  # TODO int
+        queue_tab.setMaximumWidth(450)
         queue_tab.addTab(self.queue, "Queue")
         queue_tab.addTab(self.history, "History")
+        # queue_tab.setStyleSheet("background: green")
         main_ui.addWidget(queue_tab)
 
         self.toolbar = MediaToolbar(self.core, self.shared_signals)
@@ -309,6 +308,11 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.toolbar)
 
         w = QWidget()
+        main_ui.setSpacing(0)
+        main_ui.setContentsMargins(0, 0, 0, 0)
+        main_ui.setStretch(0, 1)
+        main_ui.setStretch(1, 2)
+        main_ui.setStretch(2, 1)
         w.setLayout(main_ui)
         self.setCentralWidget(w)
 
@@ -341,6 +345,7 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     core = VLCCore()
     app = QApplication(sys.argv)
+    qdarktheme.setup_theme()
     window = MainWindow(core)
     window.show()
     sys.exit(app.exec())

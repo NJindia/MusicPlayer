@@ -2,9 +2,6 @@ import pandas as pd
 from PySide6.QtCore import Qt, Slot, Signal, QRectF, QObject
 from PySide6.QtGui import (
     QPainter,
-    QColor,
-    QBrush,
-    QPen,
     QFont,
     QFontMetricsF,
 )
@@ -14,7 +11,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QGraphicsView,
     QGraphicsScene,
-    QSizePolicy,
     QGraphicsItem,
     QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
@@ -26,7 +22,6 @@ from music_player.constants import (
     QUEUE_ENTRY_HEIGHT,
     QUEUE_ENTRY_WIDTH,
     QUEUE_ENTRY_SPACING,
-    QUEUE_WIDTH,
 )
 from music_player.vlc_core import VLCCore
 
@@ -93,9 +88,6 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         return self._bounding_rect
 
     def paint(self, painter: QPainter, option, widget=None):
-        bg_color = QColor("#e6e6f0") if self._hovered else QColor("#1b4af5")
-        painter.setBrush(QBrush(bg_color))
-        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.boundingRect(), 4, 4)
 
         if self.music["album_cover_bytes"] is not None:
@@ -108,7 +100,6 @@ class QueueEntryGraphicsItem(QGraphicsItem):
 
         self._song_font.setUnderline(self._song_text_rect.hovered)
         painter.setFont(self._song_font)
-        painter.setPen(QPen(Qt.GlobalColor.black))
         # painter.drawRect(self._song_text_rect)  # TODO REMOVE
         painter.drawText(
             self._song_text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, self.music["title"]
@@ -178,10 +169,9 @@ class QueueEntryGraphicsView(QGraphicsView):
         super().__init__()
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setScene(QGraphicsScene())
+        self.setStyleSheet("QueueEntryGraphicsView {border: none; margin: 0px;}")
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        self.setFixedWidth(int(QUEUE_WIDTH * 1.1))
         self.queue_entries: list[QueueEntryGraphicsItem] = []
 
     @property
