@@ -6,9 +6,11 @@ from pathlib import Path
 
 import dacite
 import pandas as pd
+from PySide6.QtGui import QPixmap
 from dacite import Config
 
 from music_player.music_importer import get_music_df
+from music_player.utils import get_pixmap
 
 
 @dataclass
@@ -27,7 +29,13 @@ class Playlist:
     last_played: datetime | None
     playlist_items: list[PlaylistItem]
     playlist_path: Path
-    # thumbnail: QPixmap | None = None
+    thumbnail: bytes | None = None
+
+    @property
+    def thumbnail_pixmap(self) -> QPixmap:
+        if self.thumbnail is None:
+            return QPixmap("../icons/folder.svg")
+        return get_pixmap(self.thumbnail)
 
     @property
     def indices(self) -> list[int]:

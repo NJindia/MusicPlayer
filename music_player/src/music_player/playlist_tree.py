@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, QModelIndex, QPoint, Slot
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction
 from PySide6.QtWidgets import QTreeView, QSizePolicy, QWidget, QVBoxLayout, QMenu
 
-from music_player.common import Playlist, get_playlist
+from music_player.playlist import Playlist, get_playlist
 
 
 class TreeModelItem(QStandardItem):

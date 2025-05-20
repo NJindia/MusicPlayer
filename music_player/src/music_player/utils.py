@@ -37,17 +37,17 @@ def datetime_to_date_str(dt: datetime) -> str:
 def datetime_to_age_string(dt: datetime) -> str:
     td = datetime.now(tz=UTC) - dt
     if td.seconds < 60:
-        return f"{td.seconds} second{'s' if td.seconds > 1 else ''} ago"
+        return f"{td.seconds} second{'s'[: td.seconds ^ 1]} ago"
     elif (mins := round(td.seconds / 60)) < 60:
-        return f"{mins} minute{'s' if mins > 1 else ''} ago"
+        return f"{mins} minute{'s'[: mins ^ 1]} ago"
     elif td.days < 1:
         hour = round(td.seconds / 60 / 60)
-        return f"{hour} hour{'s' if hour > 1 else ''} ago"
+        return f"{hour} hour{'s'[: hour ^ 1]} ago"
     elif td.days < 7:
-        return f"{td.days} day{'s' if td.days > 1 else ''} ago"
+        return f"{td.days} day{'s'[: td.days ^ 1]} ago"
     elif td.days <= 28:
         week = td.days // 7
-        return f"{week} week{'s' if week > 1 else ''} ago"
+        return f"{week} week{'s'[: week ^ 1]} ago"
     else:
         return datetime_to_date_str(dt)
 

@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QGraphicsOpacityEffect,
 )
-from typing_extensions import Literal
+from typing import Literal
 
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD
 from music_player.utils import timestamp_to_str

@@ -12,7 +12,7 @@ from PySide6.QtCore import (
     QEvent,
     Slot,
 )
-from PySide6.QtGui import QFontMetrics, QFont, QPainter, QMouseEvent, QPixmap
+from PySide6.QtGui import QFontMetrics, QFont, QPainter, QMouseEvent
 from PySide6.QtWidgets import (
     QTableView,
     QSizePolicy,
@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QLabel,
 )
 
-from music_player.common import Playlist
+from music_player.playlist import Playlist
 from music_player.music_importer import get_music_df
 from music_player.signals import SharedSignals
 from music_player.utils import datetime_to_age_string, datetime_to_date_str, get_pixmap
@@ -33,6 +33,22 @@ PADDING = 5
 ROW_HEIGHT = 50
 ICON_SIZE = ROW_HEIGHT - PADDING * 2
 BUFFER_CHARS = {",", " ", "…"}
+
+
+def _get_total_length_string(music_df: pd.DataFrame) -> str:
+    total_timestamp = round(sum(music_df["duration_timestamp"]))
+    components: list[str] = []
+    for item in ["second", "minute", "hour", "day"]:
+        num = total_timestamp % 60
+        if not num:
+            break
+        components.insert(0, f"{num} {item}{'s'[: num ^ 1]}")
+        total_timestamp = total_timestamp // 60
+    return " ".join(components)
+
+
+def _get_meta_text(music_df: pd.DataFrame) -> str:
+    return f"{len(music_df)} Track{'s'[: len(music_df) ^ 1]}, {_get_total_length_string(music_df)}"
 
 
 class AlbumItemDelegate(QStyledItemDelegate):
@@ -231,7 +247,20 @@ class MusicTableModel(QAbstractTableModel):
         return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
 
+class TextLabel(QLabel):
+    def __init__(self, font_size: int):
+        super().__init__()
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+        type_font = QFont()
+        type_font.setBold(True)
+        type_font.setPointSize(font_size)
+        self.setFont(type_font)
+
+
 class MusicLibraryWidget(QWidget):
+    header_img_size = 140
+    header_padding = 5
+
     def __init__(self, playlist: Playlist, shared_signals: SharedSignals):
         super().__init__()
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -242,15 +271,33 @@ class MusicLibraryWidget(QWidget):
 
         header_widget = QWidget()
         header_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        header_widget.setFixedHeight(100)
+        header_widget.setFixedHeight(self.header_img_size + self.header_padding * 2)
         header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(
+            self.header_padding, self.header_padding, self.header_padding, self.header_padding
+        )
         header_widget.setLayout(header_layout)
+        # header_widget.setStyleSheet("""QWidget { background: transparent; }""")
 
         self.header_img = QLabel()
-        self.header_img.setPixmap(
-            QPixmap("../icons/folder.svg").scaledToHeight(100, Qt.TransformationMode.SmoothTransformation)
-        )
         header_layout.addWidget(self.header_img)
+
+        header_text_layout = QVBoxLayout()
+        header_text_layout.addStretch()
+        header_layout.addLayout(header_text_layout)
+        header_layout.addStretch()
+
+        self.header_label_type = TextLabel(10)
+        header_text_layout.addWidget(self.header_label_type)
+
+        self.header_label_title = TextLabel(20)
+        header_text_layout.addWidget(self.header_label_title)
+
+        self.header_label_subtitle = TextLabel(12)
+        header_text_layout.addWidget(self.header_label_subtitle)
+
+        self.header_label_meta = TextLabel(12)
+        header_text_layout.addWidget(self.header_label_meta)
 
         self.table_view = MusicLibraryTable(shared_signals, self)
         self.load_playlist(self.playlist)
@@ -267,14 +314,26 @@ class MusicLibraryWidget(QWidget):
         self.load_playlist(self.playlist)
 
     def load_playlist(self, playlist: Playlist):
-        # TODO LOAD IMG
-        self.playlist = playlist
-
-        model = self.table_view.model_
         playlist_df = get_music_df().iloc[playlist.indices].copy()
         dates = [i.added_on for i in playlist.playlist_items]
         playlist_df["_date_added"] = [datetime_to_date_str(d) for d in dates]
         playlist_df["date added"] = [datetime_to_age_string(d) for d in dates]
+
+        self.header_img.setPixmap(
+            playlist.thumbnail_pixmap.scaled(
+                self.header_img_size,
+                self.header_img_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.header_label_type.setText("Playlist")
+        self.header_label_title.setText(playlist.title)
+        self.header_label_subtitle.setVisible(False)
+        self.header_label_meta.setText(_get_meta_text(playlist_df))
+
+        self.playlist = playlist
+        model = self.table_view.model_
         model.beginResetModel()
         model.music_data = playlist_df
         model.endResetModel()
@@ -282,19 +341,41 @@ class MusicLibraryWidget(QWidget):
     @Slot()
     def load_artist(self, artist: str):
         # TODO LOAD IMG
+        artist_df = get_music_df().loc[get_music_df()["artists"].apply(lambda x: artist in x)]
+        self.header_label_type.setText("Artist")
+        self.header_label_title.setText(artist)
+        self.header_label_subtitle.setVisible(False)
+        self.header_label_meta.setText(_get_meta_text(artist_df))
+
         self.playlist = None
         model = self.table_view.model_
         model.beginResetModel()
-        model.music_data = get_music_df().loc[get_music_df()["artists"].apply(lambda x: artist in x)]
+        model.music_data = artist_df
         model.endResetModel()
 
     @Slot()
     def load_album(self, album: str):
-        # TODO LOAD IMG
         self.playlist = None
+        album_df = get_music_df().loc[get_music_df()["album"] == album]
+        assert len(set(album_df["album_cover_bytes"])) == 1
+        assert len(set(album_df["album_artist"])) == 1  # TODO HANDLE THIS
+        self.header_img.setPixmap(
+            get_pixmap(album_df.iloc[0]["album_cover_bytes"]).scaled(
+                self.header_img_size,
+                self.header_img_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.header_label_type.setText("Album")
+        self.header_label_title.setText(album)
+        self.header_label_subtitle.setVisible(True)
+        self.header_label_subtitle.setText(album_df.iloc[0]["album_artist"])
+        self.header_label_meta.setText(_get_meta_text(album_df))
+
         model = self.table_view.model_
         model.beginResetModel()
-        model.music_data = get_music_df().loc[get_music_df()["album"] == album]
+        model.music_data = album_df
         model.endResetModel()
 
 
