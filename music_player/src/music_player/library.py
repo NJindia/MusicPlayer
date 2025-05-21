@@ -429,7 +429,7 @@ class MusicLibraryTable(QTableView):
         super().__init__(parent)
         self.shared_signals = shared_signals
 
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self.setShowGrid(False)
         self.setMouseTracking(True)
         self.setWordWrap(False)
@@ -477,14 +477,14 @@ class MusicLibraryTable(QTableView):
 
     def adjust_height_to_content(self):
         if self.model_.rowCount() == 0:
-            self.setFixedHeight(self.horizontalHeader().height() + 2)
+            self.setMinimumHeight(self.horizontalHeader().height() + 2)
             return
         total_height = (
             2
             + self.horizontalHeader().height()
             + sum(self.verticalHeader().sectionSize(row) for row in range(self.model_.rowCount()))
         )
-        self.setFixedHeight(total_height)
+        self.setMinimumHeight(total_height)
 
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.pos()

@@ -4,7 +4,7 @@ from typing import cast
 
 from PySide6.QtCore import Qt, QModelIndex, QPoint, Slot
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont
-from PySide6.QtWidgets import QTreeView, QWidget, QVBoxLayout, QMenu
+from PySide6.QtWidgets import QTreeView, QWidget, QVBoxLayout, QMenu, QLabel
 
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.playlist import Playlist, get_playlist
@@ -45,7 +45,15 @@ class PlaylistTreeWidget(QWidget):
         self.model.itemChanged.connect(self.update_playlist)
         self.initialize_model(Path("../playlists"), self.model)
 
+        label = QLabel("Playlists", self)
+        label_font = QFont()
+        label_font.setPointSize(20)
+        label_font.setBold(True)
+        label.setFont(label_font)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+
         layout = QVBoxLayout()
+        layout.addWidget(label)
         layout.addWidget(self.tree_view)
         self.setLayout(layout)
 
