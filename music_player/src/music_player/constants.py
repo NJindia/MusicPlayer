@@ -8,3 +8,5 @@ QUEUE_SPACING = 6
 
 SKIP_BACK_SECOND_THRESHOLD = 5
 """Number of seconds into a track that pressing the rewind button will skip back to the previous track."""
+
+MAX_SIDE_BAR_WIDTH = 450

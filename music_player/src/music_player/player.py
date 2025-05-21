@@ -20,10 +20,11 @@ from PySide6.QtWidgets import (
 )
 from vlc import EventType
 
+from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.playlist import Playlist
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
-from music_player.library import MusicLibraryWidget
+from music_player.library import MusicLibraryWidget, MusicLibraryScrollArea
 from music_player.playlist_tree import PlaylistTreeWidget, TreeModelItem
 from music_player.queue_gui import (
     QueueGraphicsView,
@@ -283,13 +284,15 @@ class MainWindow(QMainWindow):
         self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
         self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
         self.playlist_view.tree_view.customContextMenuRequested.connect(self.playlist_view.playlist_context_menu)
-        main_ui.addWidget(self.playlist_view)
+        main_ui.addWidget(self.playlist_view, 1)
 
         self.library = MusicLibraryWidget(self.core.current_playlist, self.shared_signals)
         self.shared_signals.add_to_playlist_signal.connect(self.add_item_to_playlist)
         self.library.table_view.song_clicked.connect(self.play_song_from_library)
         self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
-        main_ui.addWidget(self.library)
+        scroll_area = MusicLibraryScrollArea(self.library)
+
+        main_ui.addWidget(scroll_area, 2)
 
         self.history = QueueEntryGraphicsView()
         self.queue = QueueGraphicsView(self.core, self.shared_signals)
@@ -297,11 +300,11 @@ class MainWindow(QMainWindow):
         self.queue.customContextMenuRequested.connect(self.queue_context_menu)
 
         queue_tab = QTabWidget()
-        queue_tab.setMaximumWidth(450)
+        queue_tab.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
         queue_tab.addTab(self.queue, "Queue")
         queue_tab.addTab(self.history, "History")
         # queue_tab.setStyleSheet("background: green")
-        main_ui.addWidget(queue_tab)
+        main_ui.addWidget(queue_tab, 1)
 
         self.toolbar = MediaToolbar(self.core, self.shared_signals)
         self.toolbar.shuffle_button.toggled.connect(self.shuffle_button_toggled)
@@ -310,9 +313,6 @@ class MainWindow(QMainWindow):
         w = QWidget()
         main_ui.setSpacing(0)
         main_ui.setContentsMargins(0, 0, 0, 0)
-        main_ui.setStretch(0, 1)
-        main_ui.setStretch(1, 2)
-        main_ui.setStretch(2, 1)
         w.setLayout(main_ui)
         self.setCentralWidget(w)
 
