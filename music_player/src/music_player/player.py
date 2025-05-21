@@ -128,7 +128,7 @@ class MainWindow(QMainWindow):
                 qe for qe in self.queue.queue_entries[self.core.current_media_idx :: -1] if not qe.manually_added
             ).music
             self.core.current_media_idx = self.core.current_music_df[
-                self.core.current_music_df == last_playlist_music_played
+                (self.core.current_music_df == last_playlist_music_played).all(axis=1)
             ].index[0]
 
             # Replace any music/media that was added manually with the original lists

@@ -4,6 +4,7 @@ from PySide6.QtGui import (
     QPainter,
     QFont,
     QFontMetricsF,
+    QResizeEvent,
 )
 from PySide6.QtWidgets import (
     QWidget,
@@ -20,7 +21,6 @@ from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.constants import (
     QUEUE_ENTRY_HEIGHT,
-    QUEUE_ENTRY_WIDTH,
     QUEUE_ENTRY_SPACING,
 )
 from music_player.vlc_core import VLCCore
@@ -61,20 +61,23 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._hovered = False
-        self._bounding_rect = QRectF(0, 0, QUEUE_ENTRY_WIDTH, QUEUE_ENTRY_HEIGHT)
-        album_size = self.boundingRect().height() - 2 * QUEUE_ENTRY_SPACING
+
+        self._bounding_rect = QRectF(0, 0, 0, QUEUE_ENTRY_HEIGHT)
+
+        album_size = QUEUE_ENTRY_HEIGHT - 2 * QUEUE_ENTRY_SPACING
         self._album_rect = QRectF(QUEUE_ENTRY_SPACING, QUEUE_ENTRY_SPACING, album_size, album_size)
 
         self._song_font = QFont()
-        padding_left = self.boundingRect().height()  # Space for album + spacing
+        self._song_font_metrics = QFontMetricsF(self._song_font)
+        text_padding_left = QUEUE_ENTRY_HEIGHT  # Space for album + spacing
 
-        font_rect = QFontMetricsF(self._song_font).boundingRect(self.music["title"])
+        font_rect = self._song_font_metrics.boundingRect(self.music["title"])
         song_width, song_height = font_rect.width() + 2, font_rect.height() + 2
-        self._song_text_rect = HoverRect(padding_left, QUEUE_ENTRY_SPACING, song_width, song_height)
+        self._song_text_rect = HoverRect(text_padding_left, QUEUE_ENTRY_SPACING, song_width, song_height)
 
         self._artist_font = QFont()
         self._artist_rects: list[HoverRect] = []
-        curr_start = padding_left
+        curr_start = text_padding_left
         for i, artist in enumerate(self.music["artists"]):
             text = artist if i == len(self.music["artists"]) - 1 else f"{artist},"
             font_rect = QFontMetricsF(self._artist_font).boundingRect(text)
@@ -87,9 +90,11 @@ class QueueEntryGraphicsItem(QGraphicsItem):
     def boundingRect(self):
         return self._bounding_rect
 
-    def paint(self, painter: QPainter, option, widget=None):
-        painter.drawRoundedRect(self.boundingRect(), 4, 4)
+    def resize(self, resize_event: QResizeEvent) -> None:
+        self._bounding_rect.setWidth(resize_event.size().width())
 
+    def paint(self, painter: QPainter, option, widget=None):
+        # Paint album art
         if self.music["album_cover_bytes"] is not None:
             pixmap = get_pixmap(self.music["album_cover_bytes"]).scaled(
                 self._album_rect.size().toSize(),
@@ -98,13 +103,17 @@ class QueueEntryGraphicsItem(QGraphicsItem):
             )
             painter.drawPixmap(self._album_rect.topLeft(), pixmap)
 
-        self._song_font.setUnderline(self._song_text_rect.hovered)
-        painter.setFont(self._song_font)
-        # painter.drawRect(self._song_text_rect)  # TODO REMOVE
-        painter.drawText(
-            self._song_text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, self.music["title"]
+        # Paint song name rect
+        available_width = self.boundingRect().width() - QUEUE_ENTRY_HEIGHT - QUEUE_ENTRY_SPACING
+        elided_text = self._song_font_metrics.elidedText(
+            self.music["title"], Qt.TextElideMode.ElideRight, available_width
         )
+        self._song_text_rect.setWidth(self._song_font_metrics.horizontalAdvance(elided_text))
+        self._song_font.setUnderline(self._song_text_rect.hovered)  # TODO THIS SEEMS OFF
+        painter.setFont(self._song_font)
+        painter.drawText(self._song_text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_text)
 
+        # Paint artist name rect(s)
         for i, (artist, artist_rect) in enumerate(zip(self.music["artists"], self._artist_rects, strict=True)):
             self._artist_font.setUnderline(artist_rect.hovered)
             painter.setFont(self._artist_font)
@@ -159,7 +168,6 @@ class QueueEntryGraphicsItem(QGraphicsItem):
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
-            print("CLICKED ENTRY")
             self.signal.song_is_clicked(self)
         super().mouseDoubleClickEvent(event)
 
@@ -195,6 +203,11 @@ class QueueEntryGraphicsView(QGraphicsView):
     @staticmethod
     def get_y_pos(index: int) -> float:
         return QUEUE_ENTRY_SPACING + index * (QUEUE_ENTRY_SPACING + QUEUE_ENTRY_HEIGHT)
+
+    def resizeEvent(self, event: QResizeEvent):
+        super().resizeEvent(event)
+        for entry in self.queue_entries:
+            entry.resize(event)
 
 
 class QueueGraphicsView(QueueEntryGraphicsView):
