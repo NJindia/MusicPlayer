@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt, QModelIndex, QPoint, Slot
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont
 from PySide6.QtWidgets import QTreeView, QWidget, QVBoxLayout, QMenu
 
+from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.playlist import Playlist, get_playlist
 
 
@@ -30,7 +31,7 @@ class PlaylistTreeWidget(QWidget):
             margin: 0px;
             border: none;
         }""")
-        self.setMaximumWidth(400)
+        self.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
         self.tree_view = QTreeView()
         self.tree_view.setUniformRowHeights(True)
         self.tree_view.setExpandsOnDoubleClick(True)

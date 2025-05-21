@@ -11,6 +11,7 @@ from PySide6.QtCore import (
     Signal,
     QEvent,
     Slot,
+    QObject,
 )
 from PySide6.QtGui import QFontMetrics, QFont, QPainter, QMouseEvent
 from PySide6.QtWidgets import (
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
+    QScrollArea,
 )
 
 from music_player.playlist import Playlist
@@ -257,6 +259,44 @@ class TextLabel(QLabel):
         self.setFont(type_font)
 
 
+class MusicLibraryScrollArea(QScrollArea):
+    def __init__(self, library: "MusicLibraryWidget"):
+        super().__init__()
+        self.library = library
+        self.setStyleSheet("QScrollArea { border: 1px solid black; }")
+        self.setWidgetResizable(True)
+        self.setWidget(self.library)
+
+        self.header = self.library.table_view.horizontalHeader()
+        self.original_header_rect = self.header.rect()
+        self.verticalScrollBar().valueChanged.connect(self.update_header)
+
+    def _detach_header(self):
+        if self.header.parent() is not self:
+            header_height = self.header.height()
+            self.header.setParent(self)
+            self.setViewportMargins(0, header_height, 0, 0)
+            self.header.setGeometry(
+                0, 0, max(0, self.viewport().width() - self.verticalScrollBar().width()), header_height
+            )
+            self.header.show()
+            self.header.raise_()
+
+    def _attach_header(self):
+        if self.header.parent() is self:
+            self.header.setParent(self.library.table_view)
+            self.library.table_view.setHorizontalHeader(self.header)
+            self.setViewportMargins(0, 0, 0, 0)
+            self.header.show()
+
+    @Slot()
+    def update_header(self):
+        if self.verticalScrollBar().value() > self.library.header_widget.height():  # Header is somewhat or fully hidden
+            self._detach_header()
+        else:
+            self._attach_header()
+
+
 class MusicLibraryWidget(QWidget):
     header_img_size = 140
     header_padding = 5
@@ -272,14 +312,14 @@ class MusicLibraryWidget(QWidget):
         shared_signals.library_load_artist_signal.connect(self.load_artist)
         shared_signals.library_load_album_signal.connect(self.load_album)
 
-        header_widget = QWidget()
-        header_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        header_widget.setFixedHeight(self.header_img_size + self.header_padding * 2)
+        self.header_widget = QWidget()
+        self.header_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.header_widget.setFixedHeight(self.header_img_size + self.header_padding * 2)
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(
             self.header_padding, self.header_padding, self.header_padding, self.header_padding
         )
-        header_widget.setLayout(header_layout)
+        self.header_widget.setLayout(header_layout)
         # header_widget.setStyleSheet("""QWidget { background: transparent; }""")
 
         self.header_img = QLabel()
@@ -306,7 +346,7 @@ class MusicLibraryWidget(QWidget):
         self.load_playlist(self.playlist)
 
         layout = QVBoxLayout()
-        layout.addWidget(header_widget)
+        layout.addWidget(self.header_widget)
         layout.addWidget(self.table_view)
         self.setLayout(layout)
 
@@ -389,20 +429,21 @@ class MusicLibraryTable(QTableView):
         super().__init__(parent)
         self.shared_signals = shared_signals
 
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setShowGrid(False)
         self.setMouseTracking(True)
         self.setWordWrap(False)
 
         self.setStyleSheet("""
             QTableView {
-                background: transparent;
+                background: black;
                 border: none;
             }
             QTableView::item {
                 background: transparent;
             }""")
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
         self.verticalHeader().setVisible(False)
         self.horizontalHeader().setSectionsClickable(False)
@@ -426,10 +467,24 @@ class MusicLibraryTable(QTableView):
 
         self.model_ = MusicTableModel(self)
         self.setModel(self.model_)
+        self.model_.modelReset.connect(self.adjust_height_to_content)
 
         self.hovered_text_rect = QRect()
         self.hovered_data: Any = None
         self.current_hovered_pos = QPoint()
+        self.viewport().installEventFilter(self)
+        self.adjust_height_to_content()
+
+    def adjust_height_to_content(self):
+        if self.model_.rowCount() == 0:
+            self.setFixedHeight(self.horizontalHeader().height() + 2)
+            return
+        total_height = (
+            2
+            + self.horizontalHeader().height()
+            + sum(self.verticalHeader().sectionSize(row) for row in range(self.model_.rowCount()))
+        )
+        self.setFixedHeight(total_height)
 
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.pos()
@@ -463,3 +518,9 @@ class MusicLibraryTable(QTableView):
         self.hovered_text_rect = QRect()
         self.viewport().update()
         super().leaveEvent(event)
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if obj is self.viewport() and event.type() == QEvent.Type.Wheel:
+            event.ignore()  # Pass wheel events up to the parent
+            return True  # Event handled
+        return super().eventFilter(obj, event)
