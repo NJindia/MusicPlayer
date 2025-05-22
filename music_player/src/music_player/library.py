@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
 )
 
+from music_player.common import paint_artists
 from music_player.playlist import Playlist
 from music_player.music_importer import get_music_df
 from music_player.signals import SharedSignals
@@ -34,7 +35,6 @@ from music_player.utils import datetime_to_age_string, datetime_to_date_str, get
 PADDING = 5
 ROW_HEIGHT = 50
 ICON_SIZE = ROW_HEIGHT - PADDING * 2
-BUFFER_CHARS = {",", " ", "…"}
 
 
 def _get_total_length_string(music_df: pd.DataFrame) -> str:
@@ -89,71 +89,23 @@ class ArtistsItemDelegate(QStyledItemDelegate):
         super().__init__()
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
-        artists: list[str] = index.data(Qt.ItemDataRole.DisplayRole)
-
-        view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
-        font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
-        font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
         index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
+        view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
         text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
 
-        text = ", ".join(artists)
-        elided_text = font_metrics.elidedText(text, Qt.TextElideMode.ElideRight, text_rect.width())
-        v_space = (text_rect.height() - font_metrics.boundingRect(elided_text).height()) - 2
-        text_rect.adjust(0, v_space // 2, 0, -v_space // 2)
-        text_flag = option.displayAlignment | Qt.TextFlag.TextSingleLine  # pyright: ignore[reportAttributeAccessIssue]
+        hovered_tup, _ = paint_artists(
+            index.data(Qt.ItemDataRole.DisplayRole),
+            painter,
+            option,
+            text_rect,
+            option.font,  # pyright: ignore[reportAttributeAccessIssue]
+            lambda r: r.contains(view.current_hovered_pos),
+        )
+        if hovered_tup:
+            view.hovered_text_rect = hovered_tup[0]
+            view.hovered_data = hovered_tup[1]
 
-        hovered: bool = False
-        unconsumed_start_idx: int = 0
-        for i, artist in enumerate(artists):
-            if unconsumed_start_idx == len(elided_text):
-                break
-
-            painter.save()
-
-            artist_text = (
-                artist
-                if artist in elided_text[unconsumed_start_idx:]
-                else elided_text[unconsumed_start_idx : len(elided_text) - 1]
-            )
-            unconsumed_start_idx += len(artist_text)
-            text_size = font_metrics.boundingRect(artist_text).size()
-            h_space = (text_rect.width() - text_size.width()) - 2
-            artist_rect = text_rect.adjusted(0, 0, -h_space, 0)
-            text_rect.setLeft(artist_rect.right() + 1)
-
-            if not hovered and artist_rect.contains(view.current_hovered_pos):
-                hovered = True
-                view.hovered_text_rect = artist_rect
-                view.hovered_data = artist
-                font.setUnderline(True)
-                painter.setFont(font)
-            else:
-                font.setUnderline(False)
-                painter.setFont(font)
-
-            painter.drawText(artist_rect, text_flag, artist_text)
-            painter.restore()
-
-            if unconsumed_start_idx == len(elided_text):
-                break
-            if elided_text[unconsumed_start_idx] in [",", "…"]:  # Elide can cut off comma
-                buffer_text_idx = next(
-                    (
-                        i
-                        for i, c in enumerate(elided_text[unconsumed_start_idx:], start=unconsumed_start_idx)
-                        if c not in BUFFER_CHARS
-                    ),
-                    len(elided_text),
-                )
-                buffer_text = elided_text[unconsumed_start_idx:buffer_text_idx]
-                comma_text_width = font_metrics.boundingRect(buffer_text).width()
-                comma_rect = text_rect.adjusted(0, 0, -(text_rect.width() - comma_text_width - 2), 0)
-                unconsumed_start_idx += len(buffer_text)
-                painter.drawText(comma_rect, text_flag, buffer_text)
-                text_rect.setLeft(comma_rect.right())
-
-        view.setCursor(Qt.CursorShape.PointingHandCursor if hovered else Qt.CursorShape.ArrowCursor)
+        view.setCursor(Qt.CursorShape.PointingHandCursor if hovered_tup else Qt.CursorShape.ArrowCursor)
 
 
 class SongItemDelegate(QStyledItemDelegate):

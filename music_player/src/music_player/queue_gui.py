@@ -1,10 +1,10 @@
 import pandas as pd
-from PySide6.QtCore import Qt, Slot, Signal, QRectF, QObject
+from PySide6.QtCore import Qt, Slot, Signal, QRectF, QObject, QRect
 from PySide6.QtGui import (
     QPainter,
     QFont,
-    QFontMetricsF,
     QResizeEvent,
+    QFontMetrics,
 )
 from PySide6.QtWidgets import (
     QWidget,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QGraphicsSceneMouseEvent,
 )
 
+from music_player.common import paint_artists
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.constants import (
@@ -44,12 +45,6 @@ class QueueSignal(QObject):
         self.song_clicked.emit(queue_entry)
 
 
-class HoverRect(QRectF):
-    def __init__(self, left: float, top: float, width: float, height: float) -> None:
-        super().__init__(left, top, width, height)
-        self.hovered: bool = False
-
-
 class QueueEntryGraphicsItem(QGraphicsItem):
     def __init__(self, music: pd.Series, shared_signals: SharedSignals, manually_added: bool = False):
         super().__init__()
@@ -61,6 +56,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         self.setAcceptHoverEvents(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._hovered = False
+        self._hovered_text_rect = QRectF()
 
         self._bounding_rect = QRectF(0, 0, 0, QUEUE_ENTRY_HEIGHT)
 
@@ -68,24 +64,18 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         self._album_rect = QRectF(QUEUE_ENTRY_SPACING, QUEUE_ENTRY_SPACING, album_size, album_size)
 
         self._song_font = QFont()
-        self._song_font_metrics = QFontMetricsF(self._song_font)
+        self._song_font_metrics = QFontMetrics(self._song_font)
         text_padding_left = QUEUE_ENTRY_HEIGHT  # Space for album + spacing
 
         font_rect = self._song_font_metrics.boundingRect(self.music["title"])
         song_width, song_height = font_rect.width() + 2, font_rect.height() + 2
-        self._song_text_rect = HoverRect(text_padding_left, QUEUE_ENTRY_SPACING, song_width, song_height)
+        self._song_text_rect = QRectF(text_padding_left, QUEUE_ENTRY_SPACING, song_width, song_height)
 
         self._artist_font = QFont()
-        self._artist_rects: list[HoverRect] = []
-        curr_start = text_padding_left
-        for i, artist in enumerate(self.music["artists"]):
-            text = artist if i == len(self.music["artists"]) - 1 else f"{artist},"
-            font_rect = QFontMetricsF(self._artist_font).boundingRect(text)
-            text_width, text_height = font_rect.width() + 2, font_rect.height() + 2
-            self._artist_rects.append(
-                HoverRect(curr_start, song_height + QUEUE_ENTRY_SPACING * 2, text_width, text_height)
-            )
-            curr_start += text_width + QUEUE_ENTRY_SPACING
+        self._artists_bounding_rect = QRect(
+            text_padding_left, song_height + QUEUE_ENTRY_SPACING * 2, 0, QFontMetrics(self._artist_font).height() + 2
+        )
+        self._artist_rects: list[QRect] = []
 
     def boundingRect(self):
         return self._bounding_rect
@@ -104,53 +94,49 @@ class QueueEntryGraphicsItem(QGraphicsItem):
             painter.drawPixmap(self._album_rect.topLeft(), pixmap)
 
         # Paint song name rect
-        available_width = self.boundingRect().width() - QUEUE_ENTRY_HEIGHT - QUEUE_ENTRY_SPACING
+        available_width = int(self.boundingRect().width() - QUEUE_ENTRY_HEIGHT - QUEUE_ENTRY_SPACING)
         elided_text = self._song_font_metrics.elidedText(
             self.music["title"], Qt.TextElideMode.ElideRight, available_width
         )
         self._song_text_rect.setWidth(self._song_font_metrics.horizontalAdvance(elided_text))
-        self._song_font.setUnderline(self._song_text_rect.hovered)  # TODO THIS SEEMS OFF
+        self._song_font.setUnderline(self._song_text_rect == self._hovered_text_rect)
         painter.setFont(self._song_font)
         painter.drawText(self._song_text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_text)
 
         # Paint artist name rect(s)
-        for i, (artist, artist_rect) in enumerate(zip(self.music["artists"], self._artist_rects, strict=True)):
-            self._artist_font.setUnderline(artist_rect.hovered)
-            painter.setFont(self._artist_font)
-            # painter.drawRect(artist_rect)
-            text = artist if i == len(self._artist_rects) - 1 else f"{artist}, "
-            painter.drawText(artist_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom, text)
+        self._artists_bounding_rect.setWidth(available_width)
+        _, self._artist_rects = paint_artists(
+            self.music["artists"],
+            painter,
+            option,
+            QRect(self._artists_bounding_rect),
+            QFont(self._artist_font),
+            lambda r: r == self._hovered_text_rect,
+        )
+
+    def _update_hover_text_rect(self, event: QGraphicsSceneHoverEvent):
+        self._hovered_text_rect = (
+            self._song_text_rect
+            if self._song_text_rect.contains(event.pos())
+            else next((r for r in self._artist_rects if r.contains(event.pos().toPoint())), QRectF())
+        )
 
     def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent):
         self._hovered = True
-        if self._song_text_rect.contains(event.pos()):
-            self._song_text_rect.hovered = True
-        for artist_rect in self._artist_rects:
-            if artist_rect.contains(event.pos()):
-                artist_rect.hovered = True
-            else:
-                artist_rect.hovered = False
+        self._update_hover_text_rect(event)
         self.update()
         super().hoverEnterEvent(event)
 
     def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent):
-        if self._song_text_rect.contains(event.pos()):
-            self._song_text_rect.hovered = True
-        else:
-            self._song_text_rect.hovered = False
-        for artist_rect in self._artist_rects:
-            if artist_rect.contains(event.pos()):
-                artist_rect.hovered = True
-            else:
-                artist_rect.hovered = False
-        self.update()
+        previous_hovered = self._hovered_text_rect
+        self._update_hover_text_rect(event)
+        if previous_hovered != self._hovered_text_rect:
+            self.update()
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent):
         self._hovered = False
-        self._song_text_rect.hovered = False
-        for artist_rect in self._artist_rects:
-            artist_rect.hovered = False
+        self._hovered_text_rect = QRectF()
         self.update()
         super().hoverLeaveEvent(event)
 
@@ -161,7 +147,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
             self.shared_signals.library_load_album_signal.emit(self.music["album"])
         else:
             for i, artist_rect in enumerate(self._artist_rects):
-                if artist_rect.contains(event.pos()):
+                if artist_rect.contains(event.pos().toPoint()):
                     self.shared_signals.library_load_artist_signal.emit(self.music["artists"][i])
                     break
         super().mouseReleaseEvent(event)
