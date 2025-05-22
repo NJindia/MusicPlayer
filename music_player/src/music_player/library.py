@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QScrollArea,
+    QHeaderView,
 )
 
 from music_player.common import paint_artists
@@ -200,6 +201,15 @@ class MusicTableModel(QAbstractTableModel):
         """Returns flags for given index."""
         return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
+    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
+        self.beginResetModel()
+        self.music_data = (
+            self.music_data.sort_values(self.music_data.columns[column], ascending=order == Qt.SortOrder.AscendingOrder)
+            if column != -1
+            else self.music_data.sort_index()
+        )
+        self.endResetModel()
+
 
 class TextLabel(QLabel):
     def __init__(self, font_size: int):
@@ -374,6 +384,22 @@ class MusicLibraryWidget(QWidget):
         model.endResetModel()
 
 
+class TableHeader(QHeaderView):
+    def __init__(self):
+        super().__init__(Qt.Orientation.Horizontal)
+        self.setSectionsClickable(True)
+        self.setStyleSheet("""
+            QHeaderView::section { background: transparent; }
+            QHeaderView { background: transparent; }
+        """)
+        self.setSortIndicatorClearable(True)
+        self.setSortIndicatorShown(True)
+        self.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        return
+
+
 class MusicLibraryTable(QTableView):
     song_clicked = Signal(int)
 
@@ -385,6 +411,8 @@ class MusicLibraryTable(QTableView):
         self.setShowGrid(False)
         self.setMouseTracking(True)
         self.setWordWrap(False)
+        self.setSortingEnabled(True)
+        self.setCornerButtonEnabled(False)
 
         self.setStyleSheet("""
             QTableView {
@@ -396,13 +424,9 @@ class MusicLibraryTable(QTableView):
             }""")
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalHeader(TableHeader())
         self.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
         self.verticalHeader().setVisible(False)
-        self.horizontalHeader().setSectionsClickable(False)
-        self.horizontalHeader().setStyleSheet("""
-            QHeaderView::section { background: transparent; }
-            QHeaderView { background: transparent; }
-        """)
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.setFont(QFont())
