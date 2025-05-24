@@ -12,8 +12,9 @@ from PySide6.QtCore import (
     QEvent,
     Slot,
     QObject,
+    QTimer,
 )
-from PySide6.QtGui import QFontMetrics, QFont, QPainter, QMouseEvent
+from PySide6.QtGui import QFontMetrics, QFont, QPainter, QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QTableView,
     QSizePolicy,
@@ -157,7 +158,7 @@ class MusicTableModel(QAbstractTableModel):
 
     @property
     def display_df(self):
-        cols = [c for c in ["title", "artists", "album", "duration", "date added"] if c in self.music_data.columns]
+        cols = [c for c in ["title", "artists", "album", "date added", "duration"] if c in self.music_data.columns]
         return self.music_data[cols]
 
     def rowCount(self, parent=None):
@@ -202,9 +203,20 @@ class MusicTableModel(QAbstractTableModel):
         return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
     def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
+        # TODO: Sort by artist list
+        sort_column = self.display_df.columns[column]
+        match sort_column:
+            case "duration":
+                sort_key = "duration_timestamp"
+            case "date added":
+                sort_key = "_date_added"
+            case _:
+                sort_key = sort_column
         self.beginResetModel()
         self.music_data = (
-            self.music_data.sort_values(self.music_data.columns[column], ascending=order == Qt.SortOrder.AscendingOrder)
+            self.music_data.sort_values(
+                sort_column, ascending=order == Qt.SortOrder.AscendingOrder, key=lambda _: self.music_data[sort_key]
+            )
             if column != -1
             else self.music_data.sort_index()
         )
@@ -385,16 +397,64 @@ class MusicLibraryWidget(QWidget):
 
 
 class TableHeader(QHeaderView):
+    minimum_section_size = 100
+
     def __init__(self):
         super().__init__(Qt.Orientation.Horizontal)
         self.setSectionsClickable(True)
         self.setStyleSheet("""
-            QHeaderView::section { background: transparent; }
-            QHeaderView { background: transparent; }
+            QHeaderView::section { background: red; }
+            QHeaderView { background: blue; }
         """)
         self.setSortIndicatorClearable(True)
         self.setSortIndicatorShown(True)
         self.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+        self.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.setMinimumSectionSize(self.minimum_section_size)
+        self.sectionResized.connect(self._resize)
+        self._resizing_section_logical_index = -1
+        self._initial_mouse_pos = QPoint()
+        self._initial_section_size = 0
+        self._initial_next_section_size = 0
+
+    def _resize(self, logical_index: int, old_size: int, new_size: int):
+        self.blockSignals(True)
+        # Check if there's a next section to resize
+        if logical_index + 1 < self.count():
+            next_section_current_size = self.sectionSize(logical_index + 1)
+            next_section_new_size = next_section_current_size - (new_size - old_size)
+
+            # Prevent the next section from shrinking below minimum
+            if next_section_new_size < self.minimum_section_size:
+                # Set next section size to minimum width and give remaining space to current section
+                new_size = old_size + next_section_current_size - self.minimum_section_size
+                next_section_new_size = self.minimum_section_size
+            if next_section_new_size != next_section_current_size:  # Only resize if necessary
+                self.resizeSection(logical_index + 1, next_section_new_size)
+        else:
+            print("USEFUL!")  # TODO NOT USEFUL?!
+
+        # The max size for the current section is total header width - the sum of all subsequent sections
+        max_size = self.width() - sum(self.sectionSize(i) for i in range(logical_index + 1, self.count()))
+
+        # Ensure the current section doesn't grow beyond the available space and doesn't shrink below its own minimum
+        clamped_new_size = max(min(new_size, max_size), self.minimum_section_size)
+        if clamped_new_size != self.sectionSize(logical_index):  # Only resize if necessary
+            self.resizeSection(logical_index, clamped_new_size)
+        self.blockSignals(False)
+
+        self.viewport().update()
+
+    def resizeEvent(self, event: QResizeEvent):
+        super().resizeEvent(event)
+        available_space = self.width() - (self.count() - 3) * 100
+        col_width = max(available_space // 3, self.minimum_section_size)
+        self.blockSignals(True)
+        for column in [1, 2]:
+            available_space -= col_width
+            self.resizeSection(column, col_width)  # TODO KEEP RELATIVE WIDTHS
+        self.resizeSection(0, available_space)
+        self.blockSignals(False)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         return
@@ -425,6 +485,7 @@ class MusicLibraryTable(QTableView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalHeader(TableHeader())
+
         self.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
         self.verticalHeader().setVisible(False)
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
@@ -444,6 +505,20 @@ class MusicLibraryTable(QTableView):
         self.model_ = MusicTableModel(self)
         self.setModel(self.model_)
         self.model_.modelReset.connect(self.adjust_height_to_content)
+
+        QTimer.singleShot(
+            0,
+            lambda: self.horizontalHeader().setSectionResizeMode(
+                self.model().columnCount() - 1, QHeaderView.ResizeMode.Fixed
+            ),
+        )
+        # QTimer.singleShot(0, lambda:self.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch) )
+        QTimer.singleShot(
+            0,
+            lambda: self.horizontalHeader().setSectionResizeMode(
+                self.model().columnCount() - 2, QHeaderView.ResizeMode.Fixed
+            ),
+        )
 
         self.hovered_text_rect = QRect()
         self.hovered_data: Any = None

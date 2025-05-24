@@ -81,6 +81,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         return self._bounding_rect
 
     def resize(self, resize_event: QResizeEvent) -> None:
+        self.prepareGeometryChange()
         self._bounding_rect.setWidth(resize_event.size().width())
 
     def paint(self, painter: QPainter, option, widget=None):
