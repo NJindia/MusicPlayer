@@ -1,5 +1,6 @@
-from typing import Any
+from typing import Any, cast
 
+import numpy as np
 import pandas as pd
 from PySide6.QtCore import (
     QAbstractTableModel,
@@ -12,7 +13,6 @@ from PySide6.QtCore import (
     QEvent,
     Slot,
     QObject,
-    QTimer,
 )
 from PySide6.QtGui import QFontMetrics, QFont, QPainter, QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
@@ -26,7 +26,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QScrollArea,
     QHeaderView,
+    QStyle,
 )
+from qdarktheme.qtpy.QtWidgets import QApplication
 
 from music_player.common import paint_artists
 from music_player.playlist import Playlist
@@ -37,6 +39,9 @@ from music_player.utils import datetime_to_age_string, datetime_to_date_str, get
 PADDING = 5
 ROW_HEIGHT = 50
 ICON_SIZE = ROW_HEIGHT - PADDING * 2
+ALBUM_COL_IDX = 2
+DATE_ADDED_COL_IDX = 3
+DURATION_COL_IDX = 4
 
 
 def _get_total_length_string(music_df: pd.DataFrame) -> str:
@@ -158,8 +163,11 @@ class MusicTableModel(QAbstractTableModel):
 
     @property
     def display_df(self):
-        cols = [c for c in ["title", "artists", "album", "date added", "duration"] if c in self.music_data.columns]
-        return self.music_data[cols]
+        display_df = pd.DataFrame()
+        cols = self.music_data.columns
+        for col in ["title", "artists", "album", "date added", "duration"]:
+            display_df[col] = self.music_data[col] if col in cols else None
+        return display_df
 
     def rowCount(self, parent=None):
         """Returns number of rows in table."""
@@ -226,20 +234,45 @@ class MusicTableModel(QAbstractTableModel):
 class TextLabel(QLabel):
     def __init__(self, font_size: int):
         super().__init__()
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setMargin(0)
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         type_font = QFont()
         type_font.setBold(True)
         type_font.setPointSize(font_size)
+        self.original_text = ""
         self.setFont(type_font)
+        self.setStyleSheet("QLabel { padding: 0px; margin: 0px; } ")
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._elide_text()
+
+    def _elide_text(self):
+        current_width = self.contentsRect().width()
+        if current_width > 0:
+            elided_text = self.fontMetrics().elidedText(self.original_text, Qt.TextElideMode.ElideRight, current_width)
+            assert self.fontMetrics().horizontalAdvance(elided_text) <= current_width
+            if self.text() != elided_text:
+                super().setText(elided_text)
+
+    def setText(self, text: str):
+        self.original_text = text
+        self._elide_text()
 
 
 class MusicLibraryScrollArea(QScrollArea):
     def __init__(self, library: "MusicLibraryWidget"):
         super().__init__()
         self.library = library
-        self.setStyleSheet("QScrollArea { border: 1px solid black; }")
+        self.setStyleSheet("QScrollArea { padding: 0px; margin: 0px; border: none; }")
         self.setWidgetResizable(True)
         self.setWidget(self.library)
+
+        self.setMinimumWidth(500 + QApplication.style().pixelMetric(QStyle.PM_ScrollBarExtent))  # pyright: ignore[reportAttributeAccessIssue]
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.header = self.library.table_view.horizontalHeader()
         self.original_header_rect = self.header.rect()
@@ -270,6 +303,10 @@ class MusicLibraryScrollArea(QScrollArea):
         else:
             self._attach_header()
 
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.library.setMaximumWidth(event.size().width())
+
 
 class MusicLibraryWidget(QWidget):
     header_img_size = 140
@@ -277,14 +314,12 @@ class MusicLibraryWidget(QWidget):
 
     def __init__(self, playlist: Playlist, shared_signals: SharedSignals):
         super().__init__()
-        self.setStyleSheet("""QWidget {
-            margin: 0px;
-            border: none;
-        }""")
+        self.setStyleSheet("QWidget { margin: 0px; border: none; }")
         self.playlist: Playlist | None = playlist
 
         shared_signals.library_load_artist_signal.connect(self.load_artist)
         shared_signals.library_load_album_signal.connect(self.load_album)
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Expanding)
 
         self.header_widget = QWidget()
         self.header_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -294,15 +329,13 @@ class MusicLibraryWidget(QWidget):
             self.header_padding, self.header_padding, self.header_padding, self.header_padding
         )
         self.header_widget.setLayout(header_layout)
-        # header_widget.setStyleSheet("""QWidget { background: transparent; }""")
 
         self.header_img = QLabel()
         header_layout.addWidget(self.header_img)
 
         header_text_layout = QVBoxLayout()
+        header_text_layout.setContentsMargins(0, 0, 0, 0)
         header_text_layout.addStretch()
-        header_layout.addLayout(header_text_layout)
-        header_layout.addStretch()
 
         self.header_label_type = TextLabel(10)
         header_text_layout.addWidget(self.header_label_type)
@@ -316,12 +349,15 @@ class MusicLibraryWidget(QWidget):
         self.header_label_meta = TextLabel(12)
         header_text_layout.addWidget(self.header_label_meta)
 
+        header_layout.addLayout(header_text_layout)
+
         self.table_view = MusicLibraryTable(shared_signals, self)
         self.load_playlist(self.playlist)
 
         layout = QVBoxLayout()
         layout.addWidget(self.header_widget)
         layout.addWidget(self.table_view)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
     @Slot()
@@ -335,7 +371,6 @@ class MusicLibraryWidget(QWidget):
         dates = [i.added_on for i in playlist.playlist_items]
         playlist_df["_date_added"] = [datetime_to_date_str(d) for d in dates]
         playlist_df["date added"] = [datetime_to_age_string(d) for d in dates]
-
         self.header_img.setPixmap(
             playlist.thumbnail_pixmap.scaled(
                 self.header_img_size,
@@ -348,6 +383,7 @@ class MusicLibraryWidget(QWidget):
         self.header_label_title.setText(playlist.title)
         self.header_label_subtitle.setVisible(False)
         self.header_label_meta.setText(_get_meta_text(playlist_df))
+        self.table_view.show_date_added()
 
         self.playlist = playlist
         model = self.table_view.model_
@@ -363,6 +399,7 @@ class MusicLibraryWidget(QWidget):
         self.header_label_title.setText(artist)
         self.header_label_subtitle.setVisible(False)
         self.header_label_meta.setText(_get_meta_text(artist_df))
+        self.table_view.hide_date_added()
 
         self.playlist = None
         model = self.table_view.model_
@@ -389,6 +426,7 @@ class MusicLibraryWidget(QWidget):
         self.header_label_subtitle.setVisible(True)
         self.header_label_subtitle.setText(album_df.iloc[0]["album_artist"])
         self.header_label_meta.setText(_get_meta_text(album_df))
+        self.table_view.hide_date_added()
 
         model = self.table_view.model_
         model.beginResetModel()
@@ -403,8 +441,8 @@ class TableHeader(QHeaderView):
         super().__init__(Qt.Orientation.Horizontal)
         self.setSectionsClickable(True)
         self.setStyleSheet("""
-            QHeaderView::section { background: red; }
-            QHeaderView { background: blue; }
+            QHeaderView::section { background: grey; }
+            QHeaderView { background: transparent; }
         """)
         self.setSortIndicatorClearable(True)
         self.setSortIndicatorShown(True)
@@ -412,49 +450,55 @@ class TableHeader(QHeaderView):
         self.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.setMinimumSectionSize(self.minimum_section_size)
         self.sectionResized.connect(self._resize)
-        self._resizing_section_logical_index = -1
-        self._initial_mouse_pos = QPoint()
-        self._initial_section_size = 0
-        self._initial_next_section_size = 0
 
     def _resize(self, logical_index: int, old_size: int, new_size: int):
         self.blockSignals(True)
         # Check if there's a next section to resize
-        if logical_index + 1 < self.count():
-            next_section_current_size = self.sectionSize(logical_index + 1)
+        next_section_idx = next(
+            (i for i in range(logical_index + 1, self.count()) if not self.isSectionHidden(i)), None
+        )
+        if next_section_idx is not None:
+            next_section_current_size = self.sectionSize(next_section_idx)
             next_section_new_size = next_section_current_size - (new_size - old_size)
-
             # Prevent the next section from shrinking below minimum
             if next_section_new_size < self.minimum_section_size:
                 # Set next section size to minimum width and give remaining space to current section
                 new_size = old_size + next_section_current_size - self.minimum_section_size
                 next_section_new_size = self.minimum_section_size
-            if next_section_new_size != next_section_current_size:  # Only resize if necessary
-                self.resizeSection(logical_index + 1, next_section_new_size)
+            self._resize_section_if_needed(next_section_idx, next_section_new_size, next_section_current_size)
         else:
             print("USEFUL!")  # TODO NOT USEFUL?!
 
         # The max size for the current section is total header width - the sum of all subsequent sections
-        max_size = self.width() - sum(self.sectionSize(i) for i in range(logical_index + 1, self.count()))
+        max_size = self.width() - (
+            0
+            if next_section_idx is None
+            else sum(self.sectionSize(i) for i in range(next_section_idx, self.count()) if not self.isSectionHidden(i))
+        )
 
         # Ensure the current section doesn't grow beyond the available space and doesn't shrink below its own minimum
-        clamped_new_size = max(min(new_size, max_size), self.minimum_section_size)
-        if clamped_new_size != self.sectionSize(logical_index):  # Only resize if necessary
-            self.resizeSection(logical_index, clamped_new_size)
+        self._resize_section_if_needed(logical_index, max(min(new_size, max_size), self.minimum_section_size))
         self.blockSignals(False)
-
-        self.viewport().update()
 
     def resizeEvent(self, event: QResizeEvent):
         super().resizeEvent(event)
-        available_space = self.width() - (self.count() - 3) * 100
-        col_width = max(available_space // 3, self.minimum_section_size)
+        self.resize_sections()
+
+    def resize_sections(self):
+        available_space = self.width() - (self.count() - self.hiddenSectionCount() - 3) * self.minimum_section_size
+        sizes = np.asarray([self.sectionSize(i) for i in range(3)])
+        col12_widths = [max(int(available_space * sizes[i] / sum(sizes)), self.minimum_section_size) for i in (1, 2)]
+        col_widths = [available_space - sum(col12_widths), *col12_widths]
         self.blockSignals(True)
-        for column in [1, 2]:
-            available_space -= col_width
-            self.resizeSection(column, col_width)  # TODO KEEP RELATIVE WIDTHS
-        self.resizeSection(0, available_space)
+        for column in range(3):
+            self._resize_section_if_needed(column, col_widths[column])
+        self._resize_section_if_needed(DATE_ADDED_COL_IDX, self.minimum_section_size)
+        self._resize_section_if_needed(DURATION_COL_IDX, self.minimum_section_size)
         self.blockSignals(False)
+
+    def _resize_section_if_needed(self, logical_index: int, new_size: int, old_size: int | None = None):
+        if (self.sectionSize(logical_index) if old_size is None else old_size) != new_size:
+            self.resizeSection(logical_index, new_size)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         return
@@ -475,13 +519,9 @@ class MusicLibraryTable(QTableView):
         self.setCornerButtonEnabled(False)
 
         self.setStyleSheet("""
-            QTableView {
-                background: black;
-                border: none;
-            }
-            QTableView::item {
-                background: transparent;
-            }""")
+            QTableView { background: black; border: none; }
+            QTableView::item { background: transparent; }
+        """)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalHeader(TableHeader())
@@ -506,20 +546,9 @@ class MusicLibraryTable(QTableView):
         self.setModel(self.model_)
         self.model_.modelReset.connect(self.adjust_height_to_content)
 
-        QTimer.singleShot(
-            0,
-            lambda: self.horizontalHeader().setSectionResizeMode(
-                self.model().columnCount() - 1, QHeaderView.ResizeMode.Fixed
-            ),
-        )
-        # QTimer.singleShot(0, lambda:self.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch) )
-        QTimer.singleShot(
-            0,
-            lambda: self.horizontalHeader().setSectionResizeMode(
-                self.model().columnCount() - 2, QHeaderView.ResizeMode.Fixed
-            ),
-        )
-
+        self.horizontalHeader().setSectionResizeMode(DATE_ADDED_COL_IDX, QHeaderView.ResizeMode.Fixed)
+        self.horizontalHeader().setSectionResizeMode(DURATION_COL_IDX, QHeaderView.ResizeMode.Fixed)
+        self.horizontalHeader().setSectionResizeMode(ALBUM_COL_IDX, QHeaderView.ResizeMode.Fixed)
         self.hovered_text_rect = QRect()
         self.hovered_data: Any = None
         self.current_hovered_pos = QPoint()
@@ -575,3 +604,19 @@ class MusicLibraryTable(QTableView):
             event.ignore()  # Pass wheel events up to the parent
             return True  # Event handled
         return super().eventFilter(obj, event)
+
+    def hide_date_added(self):
+        header = cast(TableHeader, self.horizontalHeader())
+        if not header.isSectionHidden(DATE_ADDED_COL_IDX):
+            header.hideSection(DATE_ADDED_COL_IDX)
+            header.resize_sections()
+        if self.horizontalHeader().visualIndex(DATE_ADDED_COL_IDX) == DATE_ADDED_COL_IDX:  # It's in it's right spot
+            self.horizontalHeader().moveSection(DATE_ADDED_COL_IDX, DURATION_COL_IDX)
+
+    def show_date_added(self):
+        header = cast(TableHeader, self.horizontalHeader())
+        if header.isSectionHidden(DATE_ADDED_COL_IDX):
+            header.showSection(DATE_ADDED_COL_IDX)
+            header.resize_sections()
+        if (date_index := header.visualIndex(DATE_ADDED_COL_IDX)) != DATE_ADDED_COL_IDX:
+            header.moveSection(date_index, DATE_ADDED_COL_IDX)

@@ -217,7 +217,7 @@ class MediaToolbar(QToolBar):
         media_control_widget = QWidget()
         media_control_vbox = QVBoxLayout(media_control_widget)
 
-        media_control_widget.setStyleSheet("QWidget { background: transparent; }")  # Make the container transparent
+        media_control_widget.setStyleSheet("QWidget { background: transparent; }")
 
         ### MEDIA PLAYBACK BUTTONS
         media_control_button_hbox = QHBoxLayout()

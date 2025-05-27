@@ -27,10 +27,7 @@ class TreeModelItem(QStandardItem):
 class PlaylistTreeWidget(QWidget):
     def __init__(self, parent: QWidget):
         super().__init__(parent)
-        self.setStyleSheet("""QWidget {
-            margin: 0px;
-            border: none;
-        }""")
+        self.setStyleSheet("QWidget { margin: 0px; border: none; }")
         self.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
         self.tree_view = QTreeView()
         self.tree_view.setUniformRowHeights(True)
