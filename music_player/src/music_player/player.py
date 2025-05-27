@@ -303,7 +303,6 @@ class MainWindow(QMainWindow):
         queue_tab.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
         queue_tab.addTab(self.queue, "Queue")
         queue_tab.addTab(self.history, "History")
-        # queue_tab.setStyleSheet("background: green")
         main_ui.addWidget(queue_tab, 1)
 
         self.toolbar = MediaToolbar(self.core, self.shared_signals)
