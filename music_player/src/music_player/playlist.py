@@ -35,7 +35,7 @@ class Playlist:
     def thumbnail_pixmap(self) -> QPixmap:
         if self.thumbnail is None:
             return QPixmap("../icons/folder.svg")
-        return get_pixmap(self.thumbnail)
+        return get_pixmap(self.thumbnail, None)
 
     @property
     def indices(self) -> list[int]:

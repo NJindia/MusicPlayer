@@ -87,11 +87,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
     def paint(self, painter: QPainter, option, widget=None):
         # Paint album art
         if self.music["album_cover_bytes"] is not None:
-            pixmap = get_pixmap(self.music["album_cover_bytes"]).scaled(
-                self._album_rect.size().toSize(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+            pixmap = get_pixmap(self.music["album_cover_bytes"], self._album_rect.size().toSize().height())
             painter.drawPixmap(self._album_rect.topLeft(), pixmap)
 
         # Paint song name rect

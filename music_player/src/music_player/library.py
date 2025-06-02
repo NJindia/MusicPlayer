@@ -127,15 +127,15 @@ class MusicTableModel(QAbstractTableModel):
     def __init__(self, parent: "MusicLibraryTable"):
         super(MusicTableModel, self).__init__(parent)
         self.music_data: pd.DataFrame = pd.DataFrame()
+        self.display_df: pd.DataFrame = pd.DataFrame()
         self.view = parent
+        self.modelReset.connect(self.set_display_df)
 
-    @property
-    def display_df(self):
-        display_df = pd.DataFrame()
+    def set_display_df(self):
+        self.display_df = pd.DataFrame()
         cols = self.music_data.columns
         for col in ["title", "artists", "album", "date added", "duration"]:
-            display_df[col] = self.music_data[col] if col in cols else None
-        return display_df
+            self.display_df[col] = self.music_data[col] if col in cols else None
 
     def rowCount(self, parent=None):
         """Returns number of rows in table."""
@@ -156,7 +156,7 @@ class MusicTableModel(QAbstractTableModel):
         if not index.isValid():
             return None
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
-            return self.display_df.iloc[index.row()].iloc[index.column()]
+            return self.display_df.iloc[index.row(), index.column()]
         if role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
         if role == Qt.ItemDataRole.ToolTipRole:
@@ -169,9 +169,7 @@ class MusicTableModel(QAbstractTableModel):
             if self.view.font_metrics.horizontalAdvance(text) > column_width:
                 return text
         if role == Qt.ItemDataRole.DecorationRole and index.column() == 0:
-            return get_pixmap(self.music_data["album_cover_bytes"].iloc[index.row()]).scaledToHeight(
-                ICON_SIZE, Qt.TransformationMode.SmoothTransformation
-            )
+            return get_pixmap(self.music_data["album_cover_bytes"].iloc[index.row()], ICON_SIZE)
         return None
 
     def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
@@ -381,14 +379,7 @@ class MusicLibraryWidget(QWidget):
         album_df = get_music_df().loc[get_music_df()["album"] == album]
         assert len(set(album_df["album_cover_bytes"])) == 1
         assert len(set(album_df["album_artist"])) == 1  # TODO HANDLE THIS
-        self.header_img.setPixmap(
-            get_pixmap(album_df.iloc[0]["album_cover_bytes"]).scaled(
-                self.header_img_size,
-                self.header_img_size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        )
+        self.header_img.setPixmap(get_pixmap(album_df.iloc[0]["album_cover_bytes"], self.header_img_size))
         self.header_label_type.setText("Album")
         self.header_label_title.setText(album)
         self.header_label_subtitle.setVisible(True)

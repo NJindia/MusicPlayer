@@ -1,7 +1,6 @@
 from datetime import datetime, date, UTC
-from typing import cast
 
-from PySide6.QtGui import QPixmap, QPixmapCache, QImage
+from PySide6.QtGui import QPixmap, QPixmapCache, QImage, Qt
 
 
 def length_timestamp_to_seconds(length_timestamp: str) -> int:
@@ -52,9 +51,12 @@ def datetime_to_age_string(dt: datetime) -> str:
         return datetime_to_date_str(dt)
 
 
-def get_pixmap(cover_bytes: bytes) -> QPixmap:
-    pixmap = cast(QPixmap | None, QPixmapCache.find(str(cover_bytes)))  # pyright: ignore [reportCallIssue]
-    if pixmap is None:
+def get_pixmap(cover_bytes: bytes, height: int | None) -> QPixmap:
+    pixmap = QPixmap()
+    key = f"{cover_bytes}_{height}"
+    if not QPixmapCache.find(key, pixmap):
         pixmap = QPixmap.fromImage(QImage.fromData(cover_bytes))
-        QPixmapCache.insert(str(cover_bytes), pixmap)
+        if height is not None:
+            pixmap = pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
+        QPixmapCache.insert(key, pixmap)
     return pixmap

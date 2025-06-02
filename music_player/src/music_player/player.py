@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         current_music = self.core.current_music
         self.toolbar.song_label.setText(f"{current_music.title}\n{', '.join(current_music.artists)}")
         if current_music.album_cover_bytes is not None:
-            self.toolbar.album_button.setIcon(QIcon(get_pixmap(current_music.album_cover_bytes)))
+            self.toolbar.album_button.setIcon(QIcon(get_pixmap(current_music.album_cover_bytes, None)))
 
         # when VLC emits the MediaPlayerEnded event, it does in a separate thread
         if QThread.currentThread().isMainThread():

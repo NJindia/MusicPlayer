@@ -33,18 +33,15 @@ def expanding_widget() -> QWidget:
 
 
 class AlbumButton(QToolButton):
-    def __init__(
-        self, music: pd.Series, shared_signals: SharedSignals, height_linewidth: tuple[int, int] | None = None
-    ):
+    def __init__(self, music: pd.Series, shared_signals: SharedSignals, height_linewidth: tuple[int, int]):
         super().__init__()
         self.clicked.connect(partial(shared_signals.library_load_album_signal.emit, music["album"]))
+        height = height_linewidth[0] - height_linewidth[1] * 2
         if music["album_cover_bytes"] is not None:
-            self.setIcon(QIcon(get_pixmap(music["album_cover_bytes"])))
-        if height_linewidth is not None:
-            height = height_linewidth[0] - height_linewidth[1] * 2
-            button_size = QSize(height, height)
-            self.setFixedSize(button_size)
-            self.setIconSize(button_size)
+            self.setIcon(QIcon(get_pixmap(music["album_cover_bytes"], height)))
+        button_size = QSize(height, height)
+        self.setFixedSize(button_size)
+        self.setIconSize(button_size)
 
 
 class OpacityButton(QToolButton):
