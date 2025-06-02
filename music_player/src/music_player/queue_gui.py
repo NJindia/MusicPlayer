@@ -46,7 +46,9 @@ class QueueSignal(QObject):
 
 
 class QueueEntryGraphicsItem(QGraphicsItem):
-    def __init__(self, music: pd.Series, shared_signals: SharedSignals, manually_added: bool = False):
+    def __init__(
+        self, music: pd.Series, shared_signals: SharedSignals, manually_added: bool = False, start_width: int = 0
+    ) -> None:
         super().__init__()
         self.manually_added = manually_added
         self.music = music
@@ -58,7 +60,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         self._hovered = False
         self._hovered_text_rect = QRectF()
 
-        self._bounding_rect = QRectF(0, 0, 0, QUEUE_ENTRY_HEIGHT)
+        self._bounding_rect = QRectF(0, 0, start_width, QUEUE_ENTRY_HEIGHT)
 
         album_size = QUEUE_ENTRY_HEIGHT - 2 * QUEUE_ENTRY_SPACING
         self._album_rect = QRectF(QUEUE_ENTRY_SPACING, QUEUE_ENTRY_SPACING, album_size, album_size)
@@ -177,6 +179,7 @@ class QueueEntryGraphicsView(QGraphicsView):
 
         assert all(e in self.scene().items() for e in self.current_entries)
         self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(self.scene().items())))  # Update scene size
+        self.viewport().update()
 
     def insert_queue_entry(self, queue_index: int, entry: QueueEntryGraphicsItem) -> None:
         self.queue_entries.insert(queue_index, entry)

@@ -30,6 +30,7 @@ class VLCCore:
         paths = get_music_df().iloc[self.current_playlist.indices]["file_path"].to_list()
         self.media_list: MediaList = self.instance.media_list_new(paths)
         self.list_indices = list(range(len(paths)))
+        """The ordered list of indices in BOTH the `current_music_df` and `media_list` to play"""
         self.current_music_df: pd.DataFrame = get_music_df().iloc[self.current_playlist.indices]
         self.current_media_idx: int = 0
         self.list_player.set_media_list(self.media_list)

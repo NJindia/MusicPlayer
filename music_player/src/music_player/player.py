@@ -71,7 +71,9 @@ class MainWindow(QMainWindow):
     @Slot()
     def media_changed_ui(self):
         self.queue.update_first_queue_index()
-        hist_entry = QueueEntryGraphicsItem(self.last_played_music, self.shared_signals)
+        hist_entry = QueueEntryGraphicsItem(
+            self.last_played_music, self.shared_signals, start_width=self.history.viewport().width()
+        )
         hist_entry.signal.song_clicked.connect(partial(self.play_history_entry, hist_entry))
         self.history.insert_queue_entry(0, hist_entry)
 
@@ -142,7 +144,7 @@ class MainWindow(QMainWindow):
         for music_df_index in music_df_indices:
             music = get_music_df().iloc[music_df_index]
             try:
-                list_index = self.core.current_music_df[(self.core.current_music_df == music).all(axis=1)].index[0]
+                list_index = np.where((self.core.current_music_df == music).all(axis=1))[0][0]
             except IndexError:
                 self.core.current_music_df.iloc[len(self.core.current_music_df) - 1] = music
                 self.core.media_list.add_media(music.file_path)
@@ -151,11 +153,13 @@ class MainWindow(QMainWindow):
                 self.core.current_music_df = pd.concat(
                     [self.core.current_music_df, music.to_frame().T], ignore_index=True
                 )
-                self.core.list_indices.insert(self.core.current_media_idx + 1, len(self.core.current_music_df) - 1)
-            else:  # Already queue, just need to reference its index
-                self.core.list_indices.insert(self.core.current_media_idx + 1, list_index)
+                list_index = len(self.core.current_music_df) - 1
+            self.core.list_indices.insert(self.core.current_media_idx + 1, list_index)
             self.queue.insert_queue_entry(
-                self.core.current_media_idx + 1, QueueEntryGraphicsItem(music, self.shared_signals, manually_added=True)
+                self.core.current_media_idx + 1,
+                QueueEntryGraphicsItem(
+                    music, self.shared_signals, manually_added=True, start_width=self.queue.viewport().width()
+                ),
             )
 
     @Slot()
@@ -209,7 +213,7 @@ class MainWindow(QMainWindow):
         self.core.media_list = self.core.instance.media_list_new(file_paths)
         self.core.list_player.set_media_list(self.core.media_list)
         self.core.current_music_df = music_df
-        self.core.list_indices = list(range(len(music_df)))
+        self.core.list_indices = list(range(len(self.core.current_music_df)))
         self.queue.initialize_queue()
 
     @Slot()

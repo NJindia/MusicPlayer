@@ -463,8 +463,6 @@ class TableHeader(QHeaderView):
         logical_index = self.logicalIndexAt(event.pos())
         if logical_index == -1:
             return
-        print(f"LOGICAL INDEX: {logical_index}")
-
         target_order = (
             Qt.SortOrder.AscendingOrder
             if self.sortIndicatorSection() != logical_index
