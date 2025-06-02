@@ -460,39 +460,22 @@ class TableHeader(QHeaderView):
             self.resizeSection(logical_index, new_size)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        return
+        logical_index = self.logicalIndexAt(event.pos())
+        if logical_index == -1:
+            return
+        print(f"LOGICAL INDEX: {logical_index}")
+
+        target_order = (
+            Qt.SortOrder.AscendingOrder
+            if self.sortIndicatorSection() != logical_index
+            else (Qt.SortOrder.DescendingOrder if self.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder else None)
+        )
+        args = (-1, Qt.SortOrder.AscendingOrder) if target_order is None else (logical_index, target_order)
+        self.setSortIndicator(*args)
 
 
 class MusicLibraryTable(QTableView):
     song_clicked = Signal(int)
-
-    def get_text_rect_tups_for_index(self, index: QModelIndex | QPersistentModelIndex) -> list[tuple[QRect, str, str]]:
-        column = index.column()
-        index_rect = self.visualRect(index)
-        font_metrics = self.fontMetrics()
-        match column:
-            case 0:  # SongItem
-                text_rect = index_rect.adjusted(ICON_SIZE + PADDING, PADDING, -PADDING, -PADDING)
-
-            case 1:  # ArtistsItem
-                artists = index.data(Qt.ItemDataRole.DisplayRole)
-                text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
-                return get_artist_text_rect_text_tups(artists, text_rect, font_metrics)
-
-            case 2:  # AlbumItem
-                text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
-
-            case _:
-                return [(QRect(), "", "")]
-
-        font_metrics = self.fontMetrics()
-        original_text = index.data(Qt.ItemDataRole.DisplayRole)
-        text = font_metrics.elidedText(original_text, Qt.TextElideMode.ElideRight, text_rect.width())
-        text_size = font_metrics.boundingRect(text).size()
-        h_space = (text_rect.width() - text_size.width()) - 2
-        v_space = (text_rect.height() - text_size.height()) - 2
-        text_rect.adjust(0, v_space // 2, -h_space, -v_space // 2)
-        return [(text_rect, original_text, text)]
 
     def __init__(self, shared_signals: SharedSignals, parent: MusicLibraryWidget):
         super().__init__(parent)
@@ -542,6 +525,34 @@ class MusicLibraryTable(QTableView):
 
         self.viewport().installEventFilter(self)
         self.adjust_height_to_content()
+
+    def get_text_rect_tups_for_index(self, index: QModelIndex | QPersistentModelIndex) -> list[tuple[QRect, str, str]]:
+        column = index.column()
+        index_rect = self.visualRect(index)
+        font_metrics = self.fontMetrics()
+        match column:
+            case 0:  # SongItem
+                text_rect = index_rect.adjusted(ICON_SIZE + PADDING, PADDING, -PADDING, -PADDING)
+
+            case 1:  # ArtistsItem
+                artists = index.data(Qt.ItemDataRole.DisplayRole)
+                text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
+                return get_artist_text_rect_text_tups(artists, text_rect, font_metrics)
+
+            case 2:  # AlbumItem
+                text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
+
+            case _:
+                return [(QRect(), "", "")]
+
+        font_metrics = self.fontMetrics()
+        original_text = index.data(Qt.ItemDataRole.DisplayRole)
+        text = font_metrics.elidedText(original_text, Qt.TextElideMode.ElideRight, text_rect.width())
+        text_size = font_metrics.boundingRect(text).size()
+        h_space = (text_rect.width() - text_size.width()) - 2
+        v_space = (text_rect.height() - text_size.height()) - 2
+        text_rect.adjust(0, v_space // 2, -h_space, -v_space // 2)
+        return [(text_rect, original_text, text)]
 
     def adjust_height_to_content(self):
         if self.model_.rowCount() == 0:
