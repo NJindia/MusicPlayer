@@ -106,7 +106,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
 
         # Paint artist name rect(s)
         self._artists_bounding_rect.setWidth(available_width)
-        _, self._artist_rects = paint_artists(
+        self._artist_rects = paint_artists(
             self.music["artists"],
             painter,
             option,

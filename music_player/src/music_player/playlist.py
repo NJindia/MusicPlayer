@@ -56,8 +56,8 @@ class Playlist:
         with self.playlist_path.open("w") as file:
             json.dump(self.to_json(), file)
 
-    def remove_item(self, item_index: int):
-        del self.playlist_items[item_index]
+    def remove_items(self, item_indices: list[int]):
+        self.playlist_items = [item for i, item in enumerate(self.playlist_items) if i not in item_indices]
         self.save()
 
     def add_item(self, music_df_idx: int):

@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 )
 from qdarktheme.qtpy.QtWidgets import QApplication
 
-from music_player.common import paint_artists
+from music_player.common import paint_artists, get_artist_text_rect_text_tups, text_is_buffer
 from music_player.playlist import Playlist
 from music_player.music_importer import get_music_df
 from music_player.signals import SharedSignals
@@ -65,28 +65,14 @@ class AlbumItemDelegate(QStyledItemDelegate):
         super().__init__()
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
-        album_text: str = index.data(Qt.ItemDataRole.DisplayRole)
         view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
-        font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
-        index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
-        text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
-
-        elided_text = font_metrics.elidedText(album_text, Qt.TextElideMode.ElideRight, text_rect.width())
-        elided_text_size = font_metrics.boundingRect(elided_text).size()
-        h_space = (text_rect.width() - elided_text_size.width()) - 2
-        v_space = (text_rect.height() - elided_text_size.height()) - 2
-        text_rect.adjust(0, v_space // 2, -h_space, -v_space // 2)
+        text_rect, _, album_text = view.get_text_rect_tups_for_index(index)[0]
 
         painter.save()
-        if text_rect.contains(view.current_hovered_pos):
-            view.hovered_text_rect = text_rect
-            view.hovered_data = album_text
+        if view.hovered_text_rect == text_rect:
             font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
             font.setUnderline(True)
             painter.setFont(font)
-            view.setCursor(Qt.CursorShape.PointingHandCursor)
-        else:
-            view.setCursor(Qt.CursorShape.ArrowCursor)
         painter.drawText(text_rect, option.displayAlignment | Qt.TextFlag.TextSingleLine, album_text)  # pyright: ignore[reportAttributeAccessIssue]
         painter.restore()
 
@@ -100,19 +86,14 @@ class ArtistsItemDelegate(QStyledItemDelegate):
         view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
         text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
 
-        hovered_tup, _ = paint_artists(
+        paint_artists(
             index.data(Qt.ItemDataRole.DisplayRole),
             painter,
             option,
             text_rect,
             option.font,  # pyright: ignore[reportAttributeAccessIssue]
-            lambda r: r.contains(view.current_hovered_pos),
+            lambda r: r == view.hovered_text_rect,
         )
-        if hovered_tup:
-            view.hovered_text_rect = hovered_tup[0]
-            view.hovered_data = hovered_tup[1]
-
-        view.setCursor(Qt.CursorShape.PointingHandCursor if hovered_tup else Qt.CursorShape.ArrowCursor)
 
 
 class SongItemDelegate(QStyledItemDelegate):
@@ -124,33 +105,20 @@ class SongItemDelegate(QStyledItemDelegate):
     ) -> None:
         painter.save()
 
-        text = index.data(Qt.ItemDataRole.DisplayRole)
         pixmap = index.data(Qt.ItemDataRole.DecorationRole)
+
+        view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
 
         index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
         icon_rect = QRect(index_rect.topLeft() + QPoint(0, PADDING), pixmap.size())
         painter.drawPixmap(icon_rect, pixmap)
-        text_rect = index_rect.adjusted(0, PADDING, -PADDING, -PADDING)
-        text_rect.setLeft(icon_rect.right() + 5)
+        text_rect, _, elided_text = view.get_text_rect_tups_for_index(index)[0]
 
-        font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
-        view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
-        text = font_metrics.elidedText(text, Qt.TextElideMode.ElideRight, view.columnWidth(index.column()) - ROW_HEIGHT)
-        text_size = font_metrics.boundingRect(text).size()
-        h_space = (text_rect.width() - text_size.width()) - 2
-        v_space = (text_rect.height() - text_size.height()) - 2
-        text_rect.adjust(0, v_space // 2, -h_space, -v_space // 2)
-
-        if text_rect.contains(view.current_hovered_pos):
-            view.hovered_text_rect = text_rect
-            view.hovered_data = text
+        if view.hovered_text_rect == text_rect:
             font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
             font.setUnderline(True)
             painter.setFont(font)
-            view.setCursor(Qt.CursorShape.PointingHandCursor)
-        else:
-            view.setCursor(Qt.CursorShape.ArrowCursor)
-        painter.drawText(text_rect, option.displayAlignment | Qt.TextFlag.TextSingleLine, text)  # pyright: ignore[reportAttributeAccessIssue]
+        painter.drawText(text_rect, option.displayAlignment | Qt.TextFlag.TextSingleLine, elided_text)  # pyright: ignore[reportAttributeAccessIssue]
 
         painter.restore()
 
@@ -361,9 +329,9 @@ class MusicLibraryWidget(QWidget):
         self.setLayout(layout)
 
     @Slot()
-    def remove_item_from_playlist(self, item_index: int):
+    def remove_items_from_playlist(self, item_indices: list[int]):
         assert self.playlist is not None
-        self.playlist.remove_item(item_index)
+        self.playlist.remove_items(item_indices)
         self.load_playlist(self.playlist)
 
     def load_playlist(self, playlist: Playlist):
@@ -507,6 +475,34 @@ class TableHeader(QHeaderView):
 class MusicLibraryTable(QTableView):
     song_clicked = Signal(int)
 
+    def get_text_rect_tups_for_index(self, index: QModelIndex | QPersistentModelIndex) -> list[tuple[QRect, str, str]]:
+        column = index.column()
+        index_rect = self.visualRect(index)
+        font_metrics = self.fontMetrics()
+        match column:
+            case 0:  # SongItem
+                text_rect = index_rect.adjusted(ICON_SIZE + PADDING, PADDING, -PADDING, -PADDING)
+
+            case 1:  # ArtistsItem
+                artists = index.data(Qt.ItemDataRole.DisplayRole)
+                text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
+                return get_artist_text_rect_text_tups(artists, text_rect, font_metrics)
+
+            case 2:  # AlbumItem
+                text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
+
+            case _:
+                return [(QRect(), "", "")]
+
+        font_metrics = self.fontMetrics()
+        original_text = index.data(Qt.ItemDataRole.DisplayRole)
+        text = font_metrics.elidedText(original_text, Qt.TextElideMode.ElideRight, text_rect.width())
+        text_size = font_metrics.boundingRect(text).size()
+        h_space = (text_rect.width() - text_size.width()) - 2
+        v_space = (text_rect.height() - text_size.height()) - 2
+        text_rect.adjust(0, v_space // 2, -h_space, -v_space // 2)
+        return [(text_rect, original_text, text)]
+
     def __init__(self, shared_signals: SharedSignals, parent: MusicLibraryWidget):
         super().__init__(parent)
         self.shared_signals = shared_signals
@@ -549,9 +545,10 @@ class MusicLibraryTable(QTableView):
         self.horizontalHeader().setSectionResizeMode(DATE_ADDED_COL_IDX, QHeaderView.ResizeMode.Fixed)
         self.horizontalHeader().setSectionResizeMode(DURATION_COL_IDX, QHeaderView.ResizeMode.Fixed)
         self.horizontalHeader().setSectionResizeMode(ALBUM_COL_IDX, QHeaderView.ResizeMode.Fixed)
+
         self.hovered_text_rect = QRect()
         self.hovered_data: Any = None
-        self.current_hovered_pos = QPoint()
+
         self.viewport().installEventFilter(self)
         self.adjust_height_to_content()
 
@@ -571,10 +568,16 @@ class MusicLibraryTable(QTableView):
         index = self.indexAt(pos)
         if not index.isValid():
             return
-        if not self.hovered_text_rect.contains(pos):
-            self.current_hovered_pos = pos
+        for rect, data, shown_text in self.get_text_rect_tups_for_index(index):
+            if not text_is_buffer(shown_text) and rect.contains(pos):
+                self.hovered_text_rect, self.hovered_data = rect, data
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
+                break
+        else:
             self.hovered_text_rect = QRect()
-            self.viewport().update(self.visualRect(index))
+            self.hovered_data = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.viewport().update(self.visualRect(index))
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
@@ -596,6 +599,7 @@ class MusicLibraryTable(QTableView):
     def leaveEvent(self, event: QEvent) -> None:
         self.current_hovered_pos = QPoint()
         self.hovered_text_rect = QRect()
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         self.viewport().update()
         super().leaveEvent(event)
 

@@ -37,19 +37,21 @@ from music_player.vlc_core import VLCCore
 
 
 class AddToQueueAction(QAction):
-    def __init__(self, selected_song_df_idx: int, signals: SharedSignals, parent: QWidget):
+    def __init__(self, selected_song_df_indices: list[int], signals: SharedSignals, parent: QWidget):
         super().__init__("Add to queue", parent)
-        self.triggered.connect(partial(signals.add_to_queue_signal.emit, selected_song_df_idx))
+        self.triggered.connect(partial(signals.add_to_queue_signal.emit, selected_song_df_indices))
 
 
 class AddToPlaylistMenu(QMenu):
-    def __init__(self, selected_song_idx: int, shared_signals: SharedSignals, parent_menu: QMenu, parent: QWidget):
+    def __init__(
+        self, selected_song_indices: list[int], shared_signals: SharedSignals, parent_menu: QMenu, parent: QWidget
+    ):
         super().__init__("Add to playlist", parent)
         self.parent_menu = parent_menu
         self.signals = shared_signals
         self.playlist_tree_widget = PlaylistTreeWidget(self)
         self.playlist_tree_widget.tree_view.clicked.connect(
-            partial(self.add_item_to_playlist_at_index, selected_song_idx)
+            partial(self.add_items_to_playlist_at_index, selected_song_indices)
         )
         widget_action = QWidgetAction(self)
         widget_action.setDefaultWidget(self.playlist_tree_widget)
@@ -57,9 +59,9 @@ class AddToPlaylistMenu(QMenu):
         new_playlist_action.triggered.connect(lambda: print("TODO NEW PLAYLIST"))
         self.addActions([widget_action, new_playlist_action])
 
-    def add_item_to_playlist_at_index(self, selected_song_idx: int, index: QModelIndex):
+    def add_items_to_playlist_at_index(self, selected_song_indices: list[int], index: QModelIndex):
         playlist = self.playlist_tree_widget.item_at_index(index).playlist
-        self.signals.add_to_playlist_signal.emit(selected_song_idx, playlist)
+        self.signals.add_to_playlist_signal.emit(selected_song_indices, playlist)
         self.parent_menu.close()
 
 
@@ -135,21 +137,26 @@ class MainWindow(QMainWindow):
             self.load_media(self.core.current_playlist.dataframe)
         self.queue.update_first_queue_index()
 
-    @Slot(int)
-    def add_to_queue(self, music_df_index: int):
-        music = get_music_df().iloc[music_df_index]
-        try:
-            list_index = self.core.current_music_df == music
-        except ValueError:
-            self.core.current_music_df.iloc[len(self.core.current_music_df) - 1] = music
-            self.core.media_list.add_media(music.file_path)
-            self.core.list_player.set_media_list(self.core.media_list)
-            self.core.list_indices.insert(self.core.current_media_idx + 1, len(self.core.current_music_df) - 1)
-        else:  # Already queue, just need to reference its index
-            self.core.list_indices.insert(self.core.current_media_idx + 1, list_index)
-        self.queue.insert_queue_entry(
-            self.core.current_media_idx + 1, QueueEntryGraphicsItem(music, self.shared_signals, manually_added=True)
-        )
+    @Slot()
+    def add_to_queue(self, music_df_indices: list[int]):
+        for music_df_index in music_df_indices:
+            music = get_music_df().iloc[music_df_index]
+            try:
+                list_index = self.core.current_music_df[(self.core.current_music_df == music).all(axis=1)].index[0]
+            except IndexError:
+                self.core.current_music_df.iloc[len(self.core.current_music_df) - 1] = music
+                self.core.media_list.add_media(music.file_path)
+                self.core.list_player.set_media_list(self.core.media_list)
+                print(len(self.core.current_music_df), len(self.core.current_music_df) - 1, music.file_path)
+                self.core.current_music_df = pd.concat(
+                    [self.core.current_music_df, music.to_frame().T], ignore_index=True
+                )
+                self.core.list_indices.insert(self.core.current_media_idx + 1, len(self.core.current_music_df) - 1)
+            else:  # Already queue, just need to reference its index
+                self.core.list_indices.insert(self.core.current_media_idx + 1, list_index)
+            self.queue.insert_queue_entry(
+                self.core.current_media_idx + 1, QueueEntryGraphicsItem(music, self.shared_signals, manually_added=True)
+            )
 
     @Slot()
     def remove_from_queue(self, item: QueueEntryGraphicsItem):
@@ -219,38 +226,42 @@ class MainWindow(QMainWindow):
             raise NotImplementedError
         self.play_playlist(playlist, 0)
 
-    def add_item_to_playlist(self, music_df_idx: int, playlist: Playlist | None):
+    def add_items_to_playlist(self, music_df_indices: list[int], playlist: Playlist | None):
         if playlist is None:
             raise NotImplementedError
-        playlist.add_item(music_df_idx)
+        for i in music_df_indices:
+            playlist.add_item(i)
         if self.library.playlist and playlist.playlist_path == self.library.playlist.playlist_path:
             self.library.load_playlist(playlist)
 
     @Slot()
     def library_context_menu(self, point: QPoint):
-        index = self.library.table_view.indexAt(point)
-        if not index.isValid():
-            return
-        row = index.row()
-        selected_song_idx = self.library.table_view.model_.music_data.index[row]
-
+        indices = self.library.table_view.selectionModel().selectedRows()
+        if not indices:
+            index = self.library.table_view.indexAt(point)
+            if not index.isValid():
+                return
+            rows = [index.row()]
+        else:
+            rows = [i.row() for i in indices]
+        selected_song_indices = [int(self.library.table_view.model_.music_data.index[row]) for row in rows[::-1]]
         menu = QMenu(self)
 
         # Add to queue
-        add_to_queue_action = AddToQueueAction(selected_song_idx, self.shared_signals, self)
+        add_to_queue_action = AddToQueueAction(selected_song_indices, self.shared_signals, self)
         menu.addAction(add_to_queue_action)
 
         # Add to playlist
-        playlist_menu = AddToPlaylistMenu(selected_song_idx, self.shared_signals, menu, self)
+        playlist_menu = AddToPlaylistMenu(selected_song_indices, self.shared_signals, menu, self)
         menu.addMenu(playlist_menu)
 
         if self.library.playlist:
             # Remove from current playlist
             remove_from_curr_playlist_action = QAction("Remove from this playlist", self)
-            remove_from_curr_playlist_action.triggered.connect(partial(self.library.remove_item_from_playlist, row))
+            remove_from_curr_playlist_action.triggered.connect(partial(self.library.remove_items_from_playlist, rows))
             menu.addAction(remove_from_curr_playlist_action)
 
-        chosen_action = menu.exec(self.library.mapToGlobal(point))
+        chosen_action = menu.exec(self.library.table_view.mapToGlobal(point))
 
     def queue_context_menu(self, point: QPoint):
         item = cast(QueueEntryGraphicsItem, self.queue.itemAt(point))
@@ -287,7 +298,7 @@ class MainWindow(QMainWindow):
         main_ui.addWidget(self.playlist_view, 1)
 
         self.library = MusicLibraryWidget(self.core.current_playlist, self.shared_signals)
-        self.shared_signals.add_to_playlist_signal.connect(self.add_item_to_playlist)
+        self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_playlist)
         self.library.table_view.song_clicked.connect(self.play_song_from_library)
         self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
         scroll_area = MusicLibraryScrollArea(self.library)
