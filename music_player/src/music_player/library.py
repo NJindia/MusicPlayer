@@ -1,3 +1,4 @@
+import re
 from typing import Any, cast
 
 import numpy as np
@@ -27,6 +28,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QHeaderView,
     QStyle,
+    QPushButton,
+    QLineEdit,
 )
 from qdarktheme.qtpy.QtWidgets import QApplication
 
@@ -124,18 +127,25 @@ class SongItemDelegate(QStyledItemDelegate):
 
 
 class MusicTableModel(QAbstractTableModel):
+    re_pattern = re.compile(r"[\W_]+")
+
     def __init__(self, parent: "MusicLibraryTable"):
         super(MusicTableModel, self).__init__(parent)
         self.music_data: pd.DataFrame = pd.DataFrame()
         self.display_df: pd.DataFrame = pd.DataFrame()
+        self.search_df: pd.DataFrame = pd.DataFrame()
         self.view = parent
-        self.modelReset.connect(self.set_display_df)
+        self.modelReset.connect(self.update_dfs)
 
-    def set_display_df(self):
+    def update_dfs(self):
         self.display_df = pd.DataFrame()
         cols = self.music_data.columns
         for col in ["title", "artists", "album", "date added", "duration"]:
             self.display_df[col] = self.music_data[col] if col in cols else None
+
+        self.search_df = self.music_data[["title", "artists", "album"]].apply(
+            lambda col: col.astype(str).str.lower().replace(self.re_pattern, "", regex=True)
+        )
 
     def rowCount(self, parent=None):
         """Returns number of rows in table."""
@@ -274,10 +284,58 @@ class MusicLibraryScrollArea(QScrollArea):
         self.library.setMaximumWidth(event.size().width())
 
 
-class MusicLibraryWidget(QWidget):
+class LibraryHeaderWidget(QWidget):
     header_img_size = 140
     header_padding = 5
 
+    def __init__(self, library: "MusicLibraryWidget"):
+        super().__init__()
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(self.header_img_size + self.header_padding * 2)
+
+        self.header_img = QLabel()
+
+        header_text_layout = QVBoxLayout()
+        header_text_layout.setContentsMargins(0, 0, 0, 0)
+        header_text_layout.addStretch()
+
+        self.header_label_type = TextLabel(10)
+        self.header_label_title = TextLabel(20)
+        self.header_label_subtitle = TextLabel(12)
+        self.header_label_meta = TextLabel(12)
+
+        header_text_layout.addWidget(self.header_label_type)
+        header_text_layout.addWidget(self.header_label_title)
+        header_text_layout.addWidget(self.header_label_subtitle)
+        header_text_layout.addWidget(self.header_label_meta)
+
+        header_meta_layout = QHBoxLayout()
+        header_meta_layout.addWidget(self.header_img)
+        header_meta_layout.addLayout(header_text_layout)
+
+        play_button = QPushButton("Play")
+        play_shuffled_button = QPushButton("Shuffle")
+
+        search_bar = QLineEdit()
+        search_bar.textChanged.connect(library.filter)
+        search_bar.setClearButtonEnabled(True)
+
+        header_interactive_layout = QHBoxLayout()
+        header_interactive_layout.addWidget(play_button)
+        header_interactive_layout.addWidget(play_shuffled_button)
+        header_interactive_layout.addStretch()
+        header_interactive_layout.addWidget(search_bar)
+
+        header_layout = QVBoxLayout()
+        header_layout.setContentsMargins(
+            self.header_padding, self.header_padding, self.header_padding, self.header_padding
+        )
+        header_layout.addLayout(header_meta_layout)
+        header_layout.addLayout(header_interactive_layout)
+        self.setLayout(header_layout)
+
+
+class MusicLibraryWidget(QWidget):
     def __init__(self, playlist: Playlist, shared_signals: SharedSignals):
         super().__init__()
         self.setStyleSheet("QWidget { margin: 0px; border: none; }")
@@ -287,36 +345,7 @@ class MusicLibraryWidget(QWidget):
         shared_signals.library_load_album_signal.connect(self.load_album)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Expanding)
 
-        self.header_widget = QWidget()
-        self.header_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.header_widget.setFixedHeight(self.header_img_size + self.header_padding * 2)
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(
-            self.header_padding, self.header_padding, self.header_padding, self.header_padding
-        )
-        self.header_widget.setLayout(header_layout)
-
-        self.header_img = QLabel()
-        header_layout.addWidget(self.header_img)
-
-        header_text_layout = QVBoxLayout()
-        header_text_layout.setContentsMargins(0, 0, 0, 0)
-        header_text_layout.addStretch()
-
-        self.header_label_type = TextLabel(10)
-        header_text_layout.addWidget(self.header_label_type)
-
-        self.header_label_title = TextLabel(20)
-        header_text_layout.addWidget(self.header_label_title)
-
-        self.header_label_subtitle = TextLabel(12)
-        header_text_layout.addWidget(self.header_label_subtitle)
-
-        self.header_label_meta = TextLabel(12)
-        header_text_layout.addWidget(self.header_label_meta)
-
-        header_layout.addLayout(header_text_layout)
-
+        self.header_widget = LibraryHeaderWidget(self)
         self.table_view = MusicLibraryTable(shared_signals, self)
         self.load_playlist(self.playlist)
 
@@ -325,6 +354,20 @@ class MusicLibraryWidget(QWidget):
         layout.addWidget(self.table_view)
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
+
+    @Slot()
+    def filter(self, text: str):
+        cleaned_text = re.sub(self.table_view.model_.re_pattern, "", text).lower()
+        good_series = self.table_view.model_.search_df.apply(lambda col: col.str.contains(cleaned_text)).any(axis=1)
+        good_rows = np.where(good_series)[0]
+        bad_rows = np.where(~good_series)[0]
+        for row in bad_rows:
+            if not self.table_view.isRowHidden(row):
+                self.table_view.hideRow(row)
+        for row in good_rows:
+            if self.table_view.isRowHidden(row):
+                self.table_view.showRow(row)
+        self.table_view.adjust_height_to_content()
 
     @Slot()
     def remove_items_from_playlist(self, item_indices: list[int]):
@@ -337,18 +380,18 @@ class MusicLibraryWidget(QWidget):
         dates = [i.added_on for i in playlist.playlist_items]
         playlist_df["_date_added"] = [datetime_to_date_str(d) for d in dates]
         playlist_df["date added"] = [datetime_to_age_string(d) for d in dates]
-        self.header_img.setPixmap(
+        self.header_widget.header_img.setPixmap(
             playlist.thumbnail_pixmap.scaled(
-                self.header_img_size,
-                self.header_img_size,
+                self.header_widget.header_img_size,
+                self.header_widget.header_img_size,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
-        self.header_label_type.setText("Playlist")
-        self.header_label_title.setText(playlist.title)
-        self.header_label_subtitle.setVisible(False)
-        self.header_label_meta.setText(_get_meta_text(playlist_df))
+        self.header_widget.header_label_type.setText("Playlist")
+        self.header_widget.header_label_title.setText(playlist.title)
+        self.header_widget.header_label_subtitle.setVisible(False)
+        self.header_widget.header_label_meta.setText(_get_meta_text(playlist_df))
         self.table_view.show_date_added()
 
         self.playlist = playlist
@@ -361,10 +404,10 @@ class MusicLibraryWidget(QWidget):
     def load_artist(self, artist: str):
         # TODO LOAD IMG
         artist_df = get_music_df().loc[get_music_df()["artists"].apply(lambda x: artist in x)]
-        self.header_label_type.setText("Artist")
-        self.header_label_title.setText(artist)
-        self.header_label_subtitle.setVisible(False)
-        self.header_label_meta.setText(_get_meta_text(artist_df))
+        self.header_widget.header_label_type.setText("Artist")
+        self.header_widget.header_label_title.setText(artist)
+        self.header_widget.header_label_subtitle.setVisible(False)
+        self.header_widget.header_label_meta.setText(_get_meta_text(artist_df))
         self.table_view.hide_date_added()
 
         self.playlist = None
@@ -379,12 +422,14 @@ class MusicLibraryWidget(QWidget):
         album_df = get_music_df().loc[get_music_df()["album"] == album]
         assert len(set(album_df["album_cover_bytes"])) == 1
         assert len(set(album_df["album_artist"])) == 1  # TODO HANDLE THIS
-        self.header_img.setPixmap(get_pixmap(album_df.iloc[0]["album_cover_bytes"], self.header_img_size))
-        self.header_label_type.setText("Album")
-        self.header_label_title.setText(album)
-        self.header_label_subtitle.setVisible(True)
-        self.header_label_subtitle.setText(album_df.iloc[0]["album_artist"])
-        self.header_label_meta.setText(_get_meta_text(album_df))
+        self.header_widget.header_img.setPixmap(
+            get_pixmap(album_df.iloc[0]["album_cover_bytes"], self.header_widget.header_img_size)
+        )
+        self.header_widget.header_label_type.setText("Album")
+        self.header_widget.header_label_title.setText(album)
+        self.header_widget.header_label_subtitle.setVisible(True)
+        self.header_widget.header_label_subtitle.setText(album_df.iloc[0]["album_artist"])
+        self.header_widget.header_label_meta.setText(_get_meta_text(album_df))
         self.table_view.hide_date_added()
 
         model = self.table_view.model_
