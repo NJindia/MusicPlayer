@@ -1,8 +1,8 @@
 from typing import Callable
 
 from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QPainter, QFont, QFontMetrics
-from PySide6.QtWidgets import QStyleOptionViewItem, QStyleOptionGraphicsItem
+from PySide6.QtGui import QPainter, QFont, QFontMetrics, QAction
+from PySide6.QtWidgets import QStyleOptionViewItem, QStyleOptionGraphicsItem, QWidget
 
 BUFFER_CHARS = {",", " ", "…"}
 
@@ -81,3 +81,15 @@ def paint_artists(
 
 def text_is_buffer(text: str) -> bool:
     return not bool(len(set(text) - set(BUFFER_CHARS)))
+
+
+class NewPlaylistAction(QAction):
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__("New playlist", parent)
+        self.triggered.connect(lambda: print("TODO NEW PLAYLIST"))
+
+
+class NewFolderAction(QAction):
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__("New folder", parent)
+        self.triggered.connect(lambda: print("TODO NEW FOLDER"))

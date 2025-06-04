@@ -291,7 +291,6 @@ class LibraryHeaderWidget(QWidget):
     def __init__(self, library: "MusicLibraryWidget"):
         super().__init__()
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(self.header_img_size + self.header_padding * 2)
 
         self.header_img = QLabel()
 
@@ -319,6 +318,7 @@ class LibraryHeaderWidget(QWidget):
         search_bar = QLineEdit()
         search_bar.textChanged.connect(library.filter)
         search_bar.setClearButtonEnabled(True)
+        search_bar.setPlaceholderText("Search")
 
         header_interactive_layout = QHBoxLayout()
         header_interactive_layout.addWidget(play_button)
@@ -369,25 +369,12 @@ class MusicLibraryWidget(QWidget):
                 self.table_view.showRow(row)
         self.table_view.adjust_height_to_content()
 
-    @Slot()
-    def remove_items_from_playlist(self, item_indices: list[int]):
-        assert self.playlist is not None
-        self.playlist.remove_items(item_indices)
-        self.load_playlist(self.playlist)
-
     def load_playlist(self, playlist: Playlist):
         playlist_df = get_music_df().iloc[playlist.indices].copy()
         dates = [i.added_on for i in playlist.playlist_items]
         playlist_df["_date_added"] = [datetime_to_date_str(d) for d in dates]
         playlist_df["date added"] = [datetime_to_age_string(d) for d in dates]
-        self.header_widget.header_img.setPixmap(
-            playlist.thumbnail_pixmap.scaled(
-                self.header_widget.header_img_size,
-                self.header_widget.header_img_size,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-        )
+        self.header_widget.header_img.setPixmap(playlist.get_thumbnail_pixmap(self.header_widget.header_img_size))
         self.header_widget.header_label_type.setText("Playlist")
         self.header_widget.header_label_title.setText(playlist.title)
         self.header_widget.header_label_subtitle.setVisible(False)

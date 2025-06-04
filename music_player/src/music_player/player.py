@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 from vlc import EventType
 
+from music_player.common import NewPlaylistAction
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.playlist import Playlist
 from music_player.signals import SharedSignals
@@ -49,14 +50,13 @@ class AddToPlaylistMenu(QMenu):
         super().__init__("Add to playlist", parent)
         self.parent_menu = parent_menu
         self.signals = shared_signals
-        self.playlist_tree_widget = PlaylistTreeWidget(self)
+        self.playlist_tree_widget = PlaylistTreeWidget(self, is_main_view=False)
         self.playlist_tree_widget.tree_view.clicked.connect(
             partial(self.add_items_to_playlist_at_index, selected_song_indices)
         )
         widget_action = QWidgetAction(self)
         widget_action.setDefaultWidget(self.playlist_tree_widget)
-        new_playlist_action = QAction("New playlist", self)
-        new_playlist_action.triggered.connect(lambda: print("TODO NEW PLAYLIST"))
+        new_playlist_action = NewPlaylistAction(self)
         self.addActions([widget_action, new_playlist_action])
 
     def add_items_to_playlist_at_index(self, selected_song_indices: list[int], index: QModelIndex):
@@ -225,11 +225,12 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def double_click_tree_view_item(self, index: QModelIndex) -> None:
-        playlist = cast(TreeModelItem, self.playlist_view.model.itemFromIndex(index)).playlist
+        playlist = cast(TreeModelItem, self.playlist_view.model_.itemFromIndex(index)).playlist
         if playlist is None:
             raise NotImplementedError
         self.play_playlist(playlist, 0)
 
+    @Slot()
     def add_items_to_playlist(self, music_df_indices: list[int], playlist: Playlist | None):
         if playlist is None:
             raise NotImplementedError
@@ -237,6 +238,14 @@ class MainWindow(QMainWindow):
             playlist.add_item(i)
         if self.library.playlist and playlist.playlist_path == self.library.playlist.playlist_path:
             self.library.load_playlist(playlist)
+        self.playlist_view.refresh_playlist_thumbnail(playlist)
+
+    @Slot()
+    def remove_items_from_playlist(self, item_indices: list[int]):
+        assert self.library.playlist is not None
+        self.library.playlist.remove_items(item_indices)
+        self.library.load_playlist(self.library.playlist)
+        self.playlist_view.refresh_playlist_thumbnail(self.library.playlist)
 
     @Slot()
     def library_context_menu(self, point: QPoint):
@@ -262,7 +271,7 @@ class MainWindow(QMainWindow):
         if self.library.playlist:
             # Remove from current playlist
             remove_from_curr_playlist_action = QAction("Remove from this playlist", self)
-            remove_from_curr_playlist_action.triggered.connect(partial(self.library.remove_items_from_playlist, rows))
+            remove_from_curr_playlist_action.triggered.connect(partial(self.remove_items_from_playlist, rows))
             menu.addAction(remove_from_curr_playlist_action)
 
         chosen_action = menu.exec(self.library.table_view.mapToGlobal(point))
@@ -295,7 +304,7 @@ class MainWindow(QMainWindow):
         main_ui = QHBoxLayout()
         self.shared_signals = SharedSignals()
 
-        self.playlist_view = PlaylistTreeWidget(self)
+        self.playlist_view = PlaylistTreeWidget(self, is_main_view=True)
         self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
         self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
         self.playlist_view.tree_view.customContextMenuRequested.connect(self.playlist_view.playlist_context_menu)
