@@ -2,7 +2,7 @@ from typing import Callable
 
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QPainter, QFont, QFontMetrics, QAction
-from PySide6.QtWidgets import QStyleOptionViewItem, QStyleOptionGraphicsItem, QWidget
+from PySide6.QtWidgets import QStyleOptionViewItem, QStyleOptionGraphicsItem, QWidget, QDialog
 
 BUFFER_CHARS = {",", " ", "…"}
 
@@ -83,10 +83,18 @@ def text_is_buffer(text: str) -> bool:
     return not bool(len(set(text) - set(BUFFER_CHARS)))
 
 
+class NewPlaylistDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("New Playlist")
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+
+
 class NewPlaylistAction(QAction):
     def __init__(self, parent: QWidget) -> None:
         super().__init__("New playlist", parent)
-        self.triggered.connect(lambda: print("TODO NEW PLAYLIST"))
+        dialog = NewPlaylistDialog()
+        self.triggered.connect(lambda: dialog.exec())
 
 
 class NewFolderAction(QAction):

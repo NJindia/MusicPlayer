@@ -12,9 +12,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QHBoxLayout,
-    QPushButton,
     QStyledItemDelegate,
     QStyleOptionViewItem,
+    QToolButton,
 )
 
 from music_player.common import NewPlaylistAction, NewFolderAction
@@ -71,7 +71,6 @@ class PlaylistTreeWidget(QWidget):
         self.tree_view.setAnimated(True)
         self.tree_view.setSortingEnabled(False)
         self.tree_view.setHeaderHidden(True)
-        self.tree_view.setStyleSheet("QWidget { margin: 0px; border: 1px solid red; }")
         self.tree_view.setIconSize(QSize(PLAYLIST_ROW_HEIGHT, PLAYLIST_ROW_HEIGHT))
         delegate = TreeItemDelegate()
         self.tree_view.setItemDelegate(delegate)
@@ -127,7 +126,14 @@ class PlaylistTreeWidget(QWidget):
             label.setFont(label_font)
             label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
 
-            new_button = QPushButton("New", self)
+            new_button = QToolButton(self)
+            new_button.setText("+ New")
+            new_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            new_button.setStyleSheet("QToolButton::menu-indicator { image: none; }")
+
+            menu = QMenu(self)
+            menu.addActions([NewPlaylistAction(self), NewFolderAction(self)])
+            new_button.setMenu(menu)
 
             header_layout = QHBoxLayout()
             header_layout.addWidget(label)
