@@ -2,9 +2,10 @@ from functools import partial, cache
 from pathlib import Path
 from typing import cast, Iterator
 
-from PySide6.QtCore import Qt, QModelIndex, QPoint, Slot, QSize, QPersistentModelIndex
+from PySide6.QtCore import Qt, QModelIndex, QPoint, Slot, QSize, QPersistentModelIndex, QSortFilterProxyModel
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont, QPixmap
 from PySide6.QtWidgets import (
+    QMainWindow,
     QTreeView,
     QWidget,
     QVBoxLayout,
@@ -17,9 +18,10 @@ from PySide6.QtWidgets import (
     QToolButton,
 )
 
-from music_player.common import NewPlaylistAction, NewFolderAction
+from music_player.common_gui import NewPlaylistAction, NewFolderAction
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.playlist import Playlist, get_playlist
+from music_player.signals import SharedSignals
 
 PLAYLIST_ROW_HEIGHT = 50
 
@@ -39,14 +41,16 @@ def get_folder_pixmap(height: int) -> QPixmap:
 
 
 class TreeModelItem(QStandardItem):
-    def __init__(self, text: str, playlist: Playlist | None) -> None:
-        super().__init__(text)
+    def __init__(self, path: Path, playlist: Playlist | None) -> None:
+        super().__init__(path.stem)
         font = QFont()
         font.setPointSize(14)
         self.setFont(font)
         self.setEditable(False)
         self.playlist = playlist
+        self.path = path
         self.update_icon()
+        self.setData(path.stem, Qt.ItemDataRole.DisplayRole)
 
     def update_icon(self):
         self.setIcon(
@@ -59,9 +63,12 @@ class TreeModelItem(QStandardItem):
 
 
 class PlaylistTreeWidget(QWidget):
-    def __init__(self, parent: QWidget, *, is_main_view: bool):
+    default_playlist_path = Path("../playlists")
+
+    def __init__(self, parent: QWidget, main_window: QMainWindow, signals: SharedSignals, *, is_main_view: bool):
         super().__init__(parent)
         self.is_main_view = is_main_view
+        self.signals = signals
 
         self.setStyleSheet("QWidget { margin: 0px; border: none; }")
         self.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
@@ -79,15 +86,18 @@ class PlaylistTreeWidget(QWidget):
 
         self.model_: QStandardItemModel = QStandardItemModel()
         self.model_.itemChanged.connect(self.update_playlist)
-        self.initialize_model(Path("../playlists"), self.model_)
+        self._initialize_model()
 
         layout = QVBoxLayout()
-        for widget in self.header_widgets():
+        for widget in self.header_widgets(main_window):
             layout.addWidget(widget)
         layout.addWidget(self.tree_view)
         self.setLayout(layout)
 
-        self.tree_view.setModel(self.model_)
+        self.proxy_model = QSortFilterProxyModel()
+        self.proxy_model.setSourceModel(self.model_)
+        self.proxy_model.setSortRole(Qt.ItemDataRole.DisplayRole)
+        self.tree_view.setModel(self.proxy_model)
 
     def _recursive_traverse(
         self, parent_item: QStandardItem, *, get_non_leaf: bool
@@ -104,7 +114,7 @@ class PlaylistTreeWidget(QWidget):
 
     def filter(self, text: str):
         if text == "":  # Revert back to original nested view
-            self.tree_view.setModel(self.model_)
+            self.proxy_model.setSourceModel(self.model_)
             return
         # Flatten and list each item in single column
         traversed_tups = self._recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=self.is_main_view)
@@ -113,10 +123,10 @@ class PlaylistTreeWidget(QWidget):
         search_model = QStandardItemModel()
         search_model.itemChanged.connect(self.update_playlist)
         for item, _ in filtered_tups:
-            search_model.appendRow(TreeModelItem(item.text(), item.playlist))
-        self.tree_view.setModel(search_model)
+            search_model.appendRow(TreeModelItem(item.path, item.playlist))
+        self.proxy_model.setSourceModel(search_model)
 
-    def header_widgets(self) -> list[QWidget]:
+    def header_widgets(self, main_window: QMainWindow) -> list[QWidget]:
         widgets: list[QWidget] = []
         if self.is_main_view:
             label = QLabel("Playlists", self)
@@ -132,7 +142,12 @@ class PlaylistTreeWidget(QWidget):
             new_button.setStyleSheet("QToolButton::menu-indicator { image: none; }")
 
             menu = QMenu(self)
-            menu.addActions([NewPlaylistAction(self), NewFolderAction(self)])
+            menu.addActions(
+                [
+                    NewPlaylistAction(menu, main_window, self.model_.invisibleRootItem().index(), self.signals),
+                    NewFolderAction(menu),
+                ]
+            )
             new_button.setMenu(menu)
 
             header_layout = QHBoxLayout()
@@ -149,8 +164,15 @@ class PlaylistTreeWidget(QWidget):
         widgets.append(search_bar)
         return widgets
 
-    def item_at_index(self, index: QModelIndex) -> TreeModelItem:
-        return cast(TreeModelItem, cast(QStandardItemModel, self.tree_view.model()).itemFromIndex(index))
+    def source_model(self):
+        return cast(QStandardItemModel, self.proxy_model.sourceModel())
+
+    def item_at_index(self, index: QModelIndex, *, is_source: bool = False) -> TreeModelItem:
+        assert not isinstance(index.model(), QSortFilterProxyModel if is_source else QStandardItemModel)
+        return cast(
+            TreeModelItem,
+            self.source_model().itemFromIndex(index if is_source else self.proxy_model.mapToSource(index)),
+        )
 
     @Slot()
     def rename_playlist(self, index: QModelIndex) -> None:
@@ -167,7 +189,8 @@ class PlaylistTreeWidget(QWidget):
         parent = item.parent()
         self.model_.beginRemoveRows(index, index.row(), index.row())
         (self.model_ if parent is None else parent).removeRow(item.row())
-        print("TODO: PUSH CONFIRMATION + ACTUALLY DELETE")
+        item.path.unlink()
+        print("TODO: PUSH CONFIRMATION")
 
     @Slot()
     def update_playlist(self, item: TreeModelItem) -> None:
@@ -179,9 +202,10 @@ class PlaylistTreeWidget(QWidget):
         playlist.save()
 
     @Slot()
-    def playlist_context_menu(self, point: QPoint):
+    def playlist_context_menu(self, main_window: QMainWindow, point: QPoint):
         playlist_index = self.tree_view.indexAt(point)
         menu = QMenu(self.tree_view)
+        root_index = self.model_.invisibleRootItem().index()
         if playlist_index.isValid():
             rename_action = QAction("Rename", self.tree_view)
             rename_action.triggered.connect(partial(self.rename_playlist, playlist_index))
@@ -190,22 +214,24 @@ class PlaylistTreeWidget(QWidget):
             delete_action.triggered.connect(partial(self.delete_playlist, playlist_index))
 
             menu.addActions([rename_action, delete_action])
-
-        new_playlist_action = NewPlaylistAction(self)
-        new_folder_action = NewFolderAction(self)
-        menu.addActions([new_playlist_action, new_folder_action])
+            parent = self.item_at_index(playlist_index).parent()
+            if parent is not None:
+                root_index = parent.index()
+        menu.addActions([NewPlaylistAction(menu, main_window, root_index, self.signals), NewFolderAction(menu)])
 
         chosen_action = menu.exec_(self.tree_view.mapToGlobal(point))
 
-    def initialize_model(self, path: Path, root_item: QStandardItem | QStandardItemModel) -> None:
+    def _initialize_model(self, path: Path | None = None, root_item: QStandardItem | None = None) -> None:
+        path = self.default_playlist_path if path is None else path
+        root_item = self.model_.invisibleRootItem() if root_item is None else root_item
         for fp in path.iterdir():
             if fp.is_dir():
-                item = TreeModelItem(fp.stem, None)
+                item = TreeModelItem(fp, None)
                 root_item.appendRow(item)
-                self.initialize_model(fp, item)
+                self._initialize_model(fp, item)
             else:
                 playlist = get_playlist(fp)
-                item = TreeModelItem(playlist.title, playlist)
+                item = TreeModelItem(playlist.playlist_path, playlist)
                 root_item.appendRow(item)
 
     def refresh_playlist_thumbnail(self, playlist: Playlist):

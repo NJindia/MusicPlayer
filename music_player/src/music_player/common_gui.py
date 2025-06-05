@@ -1,8 +1,21 @@
 from typing import Callable
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QRect, Qt, QModelIndex
 from PySide6.QtGui import QPainter, QFont, QFontMetrics, QAction
-from PySide6.QtWidgets import QStyleOptionViewItem, QStyleOptionGraphicsItem, QWidget, QDialog
+from PySide6.QtWidgets import (
+    QMainWindow,
+    QMenu,
+    QStyleOptionViewItem,
+    QStyleOptionGraphicsItem,
+    QDialog,
+    QVBoxLayout,
+    QLineEdit,
+    QPushButton,
+    QHBoxLayout,
+    QLabel,
+)
+
+from music_player.signals import SharedSignals
 
 BUFFER_CHARS = {",", " ", "…"}
 
@@ -84,20 +97,54 @@ def text_is_buffer(text: str) -> bool:
 
 
 class NewPlaylistDialog(QDialog):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("New Playlist")
+    def __init__(self, parent: QMainWindow, root_index: QModelIndex, signals: SharedSignals):
+        super().__init__(parent)
+        # assert isinstance(root_index.model(), QStandardItemModel), type(root_index.model())
+        self.root_index = root_index
+        self.signals = signals
+
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        self.setStyleSheet("QDialog { border-radius: 5px; border: 1px solid white; }")
+
+        header = QLabel("New Playlist", self)
+        font = QFont()
+        font.setPointSize(12)
+        font.setBold(True)
+        header.setFont(font)
+
+        self.playlist_name = QLineEdit(self)
+        self.playlist_name.setPlaceholderText("Playlist name")
+
+        confirm_button = QPushButton(self)
+        confirm_button.setText("Create")
+        confirm_button.setStyleSheet("QPushButton { border-radius: 5px; }")
+        confirm_button.released.connect(self.create_clicked)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(confirm_button)
+
+        main_layout = QVBoxLayout()
+        main_layout.addWidget(header)
+        main_layout.addWidget(self.playlist_name)
+        main_layout.addLayout(button_layout)
+        self.setLayout(main_layout)
+
+    def create_clicked(self):
+        self.signals.create_playlist_signal.emit(self.playlist_name.text(), self.root_index)
+        self.close()
 
 
 class NewPlaylistAction(QAction):
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(
+        self, parent: QMenu, main_window: QMainWindow, root_index: QModelIndex, signals: SharedSignals
+    ) -> None:
         super().__init__("New playlist", parent)
-        dialog = NewPlaylistDialog()
+        dialog = NewPlaylistDialog(main_window, root_index, signals)
         self.triggered.connect(lambda: dialog.exec())
 
 
 class NewFolderAction(QAction):
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(self, parent: QMenu) -> None:
         super().__init__("New folder", parent)
         self.triggered.connect(lambda: print("TODO NEW FOLDER"))

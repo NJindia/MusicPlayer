@@ -12,6 +12,7 @@ dependencies = [
     "pandas>=2.2.3",
     "pandas-stubs>=2.2.3.250308",
     "pre-commit>=4.2.0",
+    "pyqtdarktheme>=2.1.0",
     "pyright>=1.1.400",
     "pyside6>=6.9.0",
     "python-vlc>=3.0.21203",

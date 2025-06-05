@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 from qdarktheme.qtpy.QtWidgets import QApplication
 
-from music_player.common import paint_artists, get_artist_text_rect_text_tups, text_is_buffer
+from music_player.common_gui import paint_artists, get_artist_text_rect_text_tups, text_is_buffer
 from music_player.playlist import Playlist
 from music_player.music_importer import get_music_df
 from music_player.signals import SharedSignals

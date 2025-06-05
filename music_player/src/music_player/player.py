@@ -1,5 +1,5 @@
 import sys
-from datetime import datetime
+from datetime import datetime, UTC
 from functools import partial
 from typing import cast
 
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 from vlc import EventType
 
-from music_player.common import NewPlaylistAction
+from music_player.common_gui import NewPlaylistAction
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.playlist import Playlist
 from music_player.signals import SharedSignals
@@ -45,19 +45,25 @@ class AddToQueueAction(QAction):
 
 class AddToPlaylistMenu(QMenu):
     def __init__(
-        self, selected_song_indices: list[int], shared_signals: SharedSignals, parent_menu: QMenu, parent: QWidget
+        self, selected_song_indices: list[int], shared_signals: SharedSignals, parent_menu: QMenu, parent: QMainWindow
     ):
         super().__init__("Add to playlist", parent)
         self.parent_menu = parent_menu
         self.signals = shared_signals
-        self.playlist_tree_widget = PlaylistTreeWidget(self, is_main_view=False)
+        self.playlist_tree_widget = PlaylistTreeWidget(self, parent, self.signals, is_main_view=False)
         self.playlist_tree_widget.tree_view.clicked.connect(
             partial(self.add_items_to_playlist_at_index, selected_song_indices)
         )
         widget_action = QWidgetAction(self)
         widget_action.setDefaultWidget(self.playlist_tree_widget)
-        new_playlist_action = NewPlaylistAction(self)
-        self.addActions([widget_action, new_playlist_action])
+        self.addActions(
+            [
+                widget_action,
+                NewPlaylistAction(
+                    self, parent, self.playlist_tree_widget.model_.invisibleRootItem().index(), self.signals
+                ),
+            ]
+        )
 
     def add_items_to_playlist_at_index(self, selected_song_indices: list[int], index: QModelIndex):
         playlist = self.playlist_tree_widget.item_at_index(index).playlist
@@ -231,6 +237,22 @@ class MainWindow(QMainWindow):
         self.play_playlist(playlist, 0)
 
     @Slot()
+    def create_playlist(self, playlist_name: str, source_model_root_index: QModelIndex) -> None:
+        invis_root = self.playlist_view.model_.invisibleRootItem()
+        root_item = self.playlist_view.item_at_index(source_model_root_index, is_source=True) or invis_root
+        root_item_path = self.playlist_view.default_playlist_path if root_item == invis_root else root_item.path
+        playlist = Playlist(
+            playlist_name, datetime.now(tz=UTC), None, [], root_item_path / f"{playlist_name}.json", None
+        )
+        playlist.save()
+
+        root_item.insertRows(0, 1)
+        root_item.setChild(0, TreeModelItem(playlist.playlist_path, playlist))
+        root_item.sortChildren(0)
+
+        self.library.load_playlist(playlist)
+
+    @Slot()
     def add_items_to_playlist(self, music_df_indices: list[int], playlist: Playlist | None):
         if playlist is None:
             raise NotImplementedError
@@ -304,14 +326,17 @@ class MainWindow(QMainWindow):
         main_ui = QHBoxLayout()
         self.shared_signals = SharedSignals()
 
-        self.playlist_view = PlaylistTreeWidget(self, is_main_view=True)
+        self.playlist_view = PlaylistTreeWidget(self, self, self.shared_signals, is_main_view=True)
         self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
         self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
-        self.playlist_view.tree_view.customContextMenuRequested.connect(self.playlist_view.playlist_context_menu)
+        self.playlist_view.tree_view.customContextMenuRequested.connect(
+            partial(self.playlist_view.playlist_context_menu, self)
+        )
         main_ui.addWidget(self.playlist_view, 1)
 
         self.library = MusicLibraryWidget(self.core.current_playlist, self.shared_signals)
         self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_playlist)
+        self.shared_signals.create_playlist_signal.connect(self.create_playlist)
         self.library.table_view.song_clicked.connect(self.play_song_from_library)
         self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
         scroll_area = MusicLibraryScrollArea(self.library)

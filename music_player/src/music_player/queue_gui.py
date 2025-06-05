@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QGraphicsSceneMouseEvent,
 )
 
-from music_player.common import paint_artists
+from music_player.common_gui import paint_artists
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.constants import (
