@@ -142,12 +142,8 @@ class PlaylistTreeWidget(QWidget):
             new_button.setStyleSheet("QToolButton::menu-indicator { image: none; }")
 
             menu = QMenu(self)
-            menu.addActions(
-                [
-                    NewPlaylistAction(menu, main_window, self.model_.invisibleRootItem().index(), self.signals),
-                    NewFolderAction(menu),
-                ]
-            )
+            args = menu, main_window, self.model_.invisibleRootItem().index(), self.signals
+            menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
             new_button.setMenu(menu)
 
             header_layout = QHBoxLayout()
@@ -217,9 +213,10 @@ class PlaylistTreeWidget(QWidget):
             parent = self.item_at_index(playlist_index).parent()
             if parent is not None:
                 root_index = parent.index()
-        menu.addActions([NewPlaylistAction(menu, main_window, root_index, self.signals), NewFolderAction(menu)])
+        args = menu, main_window, root_index, self.signals
+        menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
 
-        chosen_action = menu.exec_(self.tree_view.mapToGlobal(point))
+        menu.exec_(self.tree_view.mapToGlobal(point))
 
     def _initialize_model(self, path: Path | None = None, root_item: QStandardItem | None = None) -> None:
         path = self.default_playlist_path if path is None else path

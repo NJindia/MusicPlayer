@@ -36,6 +36,8 @@ from music_player.music_importer import get_music_df
 from music_player.toolbar import MediaToolbar
 from music_player.vlc_core import VLCCore
 
+from music_player.src.music_player.common_gui import CreateMode
+
 
 class AddToQueueAction(QAction):
     def __init__(self, selected_song_df_indices: list[int], signals: SharedSignals, parent: QWidget):
@@ -237,20 +239,25 @@ class MainWindow(QMainWindow):
         self.play_playlist(playlist, 0)
 
     @Slot()
-    def create_playlist(self, playlist_name: str, source_model_root_index: QModelIndex) -> None:
+    def create(self, mode: CreateMode, name: str, source_model_root_index: QModelIndex) -> None:
         invis_root = self.playlist_view.model_.invisibleRootItem()
         root_item = self.playlist_view.item_at_index(source_model_root_index, is_source=True) or invis_root
         root_item_path = self.playlist_view.default_playlist_path if root_item == invis_root else root_item.path
-        playlist = Playlist(
-            playlist_name, datetime.now(tz=UTC), None, [], root_item_path / f"{playlist_name}.json", None
-        )
-        playlist.save()
+        match mode:
+            case "playlist":
+                playlist = Playlist(name, datetime.now(tz=UTC), None, [], root_item_path / f"{name}.json", None)
+                playlist.save()
+                new_item = TreeModelItem(playlist.playlist_path, playlist)
+                self.library.load_playlist(playlist)
+            case "folder":
+                new_folder_path = root_item_path / name
+                new_folder_path.mkdir(parents=True, exist_ok=True)
+                new_item = TreeModelItem(new_folder_path, None)
+            case _:
+                raise ValueError(f"Unknown mode: {mode}")
 
-        root_item.insertRows(0, 1)
-        root_item.setChild(0, TreeModelItem(playlist.playlist_path, playlist))
+        root_item.insertRows(0, [new_item])
         root_item.sortChildren(0)
-
-        self.library.load_playlist(playlist)
 
     @Slot()
     def add_items_to_playlist(self, music_df_indices: list[int], playlist: Playlist | None):
@@ -296,7 +303,7 @@ class MainWindow(QMainWindow):
             remove_from_curr_playlist_action.triggered.connect(partial(self.remove_items_from_playlist, rows))
             menu.addAction(remove_from_curr_playlist_action)
 
-        chosen_action = menu.exec(self.library.table_view.mapToGlobal(point))
+        menu.exec(self.library.table_view.mapToGlobal(point))
 
     def queue_context_menu(self, point: QPoint):
         item = cast(QueueEntryGraphicsItem, self.queue.itemAt(point))
@@ -336,7 +343,8 @@ class MainWindow(QMainWindow):
 
         self.library = MusicLibraryWidget(self.core.current_playlist, self.shared_signals)
         self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_playlist)
-        self.shared_signals.create_playlist_signal.connect(self.create_playlist)
+        self.shared_signals.create_playlist_signal.connect(partial(self.create, "playlist"))
+        self.shared_signals.create_folder_signal.connect(partial(self.create, "folder"))
         self.library.table_view.song_clicked.connect(self.play_song_from_library)
         self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
         scroll_area = MusicLibraryScrollArea(self.library)
