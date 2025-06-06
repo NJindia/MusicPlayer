@@ -28,14 +28,15 @@ def empty_playlist_pixmap(height: int) -> QPixmap:
     return QPixmap("../icons/empty-playlist.svg").scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Playlist:
     title: str
-    created: datetime | None
+    created: datetime
+    last_updated: datetime
     last_played: datetime | None
     playlist_items: list[PlaylistItem]
     playlist_path: Path
-    thumbnail: bytes | None = None
+    thumbnail: bytes | None
 
     def get_thumbnail_pixmap(self, height: int) -> QPixmap:
         if self.thumbnail is None:
@@ -84,8 +85,11 @@ class Playlist:
     def to_json(self):
         return {
             "title": self.title,
+            "created": self.created.isoformat(),
+            "last_updated": self.last_updated.isoformat(),
             "last_played": self.last_played.isoformat() if self.last_played else None,
             "playlist_items": [i.to_json() for i in self.playlist_items],
+            "thumbnail": self.thumbnail,
         }
 
     def save(self):

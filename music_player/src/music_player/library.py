@@ -48,9 +48,9 @@ DURATION_COL_IDX = 4
 
 
 def _get_total_length_string(music_df: pd.DataFrame) -> str:
-    total_timestamp = round(sum(music_df["duration_timestamp"]))
+    total_timestamp = round(sum(music_df["duration_timestamp"]) / 60)
     components: list[str] = []
-    for item in ["second", "minute", "hour", "day"]:
+    for item in ["minute", "hour", "day"]:
         num = total_timestamp % 60
         if not num:
             break

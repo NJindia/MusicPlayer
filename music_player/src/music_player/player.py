@@ -26,7 +26,13 @@ from music_player.playlist import Playlist
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.library import MusicLibraryWidget, MusicLibraryScrollArea
-from music_player.playlist_tree import PlaylistTreeWidget, TreeModelItem
+from music_player.playlist_tree import (
+    PlaylistTreeWidget,
+    TreeModelItem,
+    SORT_BY_PLAYED_ROLE,
+    SORT_BY_UPDATED_ROLE,
+    DEFAULT_PLAYLIST_PATH,
+)
 from music_player.queue_gui import (
     QueueGraphicsView,
     QueueEntryGraphicsView,
@@ -36,7 +42,7 @@ from music_player.music_importer import get_music_df
 from music_player.toolbar import MediaToolbar
 from music_player.vlc_core import VLCCore
 
-from music_player.src.music_player.common_gui import CreateMode
+from music_player.common_gui import CreateMode
 
 
 class AddToQueueAction(QAction):
@@ -192,7 +198,12 @@ class MainWindow(QMainWindow):
             self.play_music(self.library.table_view.model_.music_data["file_path"].to_list(), lib_index)
 
     def play_playlist(self, playlist: Playlist, playlist_index: int):
-        playlist.last_played = datetime.now()  # TODO
+        playlist.last_played = datetime.now(tz=UTC)
+        playlist.save()
+
+        if self.playlist_view.proxy_model.sortRole() == SORT_BY_PLAYED_ROLE:
+            self.playlist_view.proxy_model.invalidate()
+
         self.play_music(playlist.dataframe, playlist_index)
         self.core.current_playlist = playlist
 
@@ -233,7 +244,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def double_click_tree_view_item(self, index: QModelIndex) -> None:
-        playlist = cast(TreeModelItem, self.playlist_view.model_.itemFromIndex(index)).playlist
+        playlist = cast(TreeModelItem, self.playlist_view.item_at_index(index)).playlist
         if playlist is None:
             raise NotImplementedError
         self.play_playlist(playlist, 0)
@@ -242,10 +253,18 @@ class MainWindow(QMainWindow):
     def create(self, mode: CreateMode, name: str, source_model_root_index: QModelIndex) -> None:
         invis_root = self.playlist_view.model_.invisibleRootItem()
         root_item = self.playlist_view.item_at_index(source_model_root_index, is_source=True) or invis_root
-        root_item_path = self.playlist_view.default_playlist_path if root_item == invis_root else root_item.path
+        root_item_path = DEFAULT_PLAYLIST_PATH if root_item == invis_root else root_item.path
         match mode:
             case "playlist":
-                playlist = Playlist(name, datetime.now(tz=UTC), None, [], root_item_path / f"{name}.json", None)
+                playlist = Playlist(
+                    title=name,
+                    created=datetime.now(tz=UTC),
+                    last_updated=datetime.now(tz=UTC),
+                    last_played=None,
+                    playlist_items=[],
+                    playlist_path=root_item_path / f"{name}.json",
+                    thumbnail=None,
+                )
                 playlist.save()
                 new_item = TreeModelItem(playlist.playlist_path, playlist)
                 self.library.load_playlist(playlist)
@@ -259,12 +278,19 @@ class MainWindow(QMainWindow):
         root_item.insertRows(0, [new_item])
         root_item.sortChildren(0)
 
+    def _update_playlist_last_updated(self, playlist: Playlist):
+        playlist.last_updated = datetime.now(tz=UTC)
+        playlist.save()
+        if self.playlist_view.proxy_model.sortRole() == SORT_BY_UPDATED_ROLE:
+            self.playlist_view.proxy_model.invalidate()
+
     @Slot()
     def add_items_to_playlist(self, music_df_indices: list[int], playlist: Playlist | None):
         if playlist is None:
             raise NotImplementedError
         for i in music_df_indices:
             playlist.add_item(i)
+        self._update_playlist_last_updated(playlist)
         if self.library.playlist and playlist.playlist_path == self.library.playlist.playlist_path:
             self.library.load_playlist(playlist)
         self.playlist_view.refresh_playlist_thumbnail(playlist)
@@ -273,6 +299,7 @@ class MainWindow(QMainWindow):
     def remove_items_from_playlist(self, item_indices: list[int]):
         assert self.library.playlist is not None
         self.library.playlist.remove_items(item_indices)
+        self._update_playlist_last_updated(self.library.playlist)
         self.library.load_playlist(self.library.playlist)
         self.playlist_view.refresh_playlist_thumbnail(self.library.playlist)
 

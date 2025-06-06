@@ -1,3 +1,6 @@
+import json
+import shutil
+from datetime import datetime
 from functools import partial, cache
 from pathlib import Path
 from typing import cast, Iterator
@@ -24,6 +27,12 @@ from music_player.playlist import Playlist, get_playlist
 from music_player.signals import SharedSignals
 
 PLAYLIST_ROW_HEIGHT = 50
+DEFAULT_PLAYLIST_PATH = Path("../playlists")
+PLAYLIST_CUSTOM_INDEX_JSON_PATH = Path("../custom_playlist_indices.json")
+SORT_BY_CUSTOM_ROLE: int = Qt.ItemDataRole.UserRole + 1
+SORT_BY_UPDATED_ROLE: int = Qt.ItemDataRole.UserRole + 2
+SORT_BY_PLAYED_ROLE: int = Qt.ItemDataRole.UserRole + 3
+SORT_BY_ALPHA_ROLE: int = Qt.ItemDataRole.UserRole + 4
 
 
 class TreeItemDelegate(QStyledItemDelegate):
@@ -50,7 +59,39 @@ class TreeModelItem(QStandardItem):
         self.playlist = playlist
         self.path = path
         self.update_icon()
-        self.setData(path.stem, Qt.ItemDataRole.DisplayRole)
+
+    def data(self, /, role: int = Qt.ItemDataRole.DisplayRole):
+        if role == SORT_BY_CUSTOM_ROLE:
+            return _get_custom_ordered_playlists().index(self.path)
+        elif role == SORT_BY_UPDATED_ROLE:
+            if self.playlist:
+                return self.playlist.last_updated.timestamp()
+            elif self.hasChildren():  # Get most recent child playlist value
+                return max(
+                    cast(Playlist, p.playlist).last_updated for p in _recursive_traverse(self, get_non_leaf=False)
+                ).timestamp()
+            else:  # Get folder modified time
+                return self.path.stat().st_mtime
+        elif role == SORT_BY_PLAYED_ROLE:
+            if self.playlist and self.playlist.last_played:
+                return self.playlist.last_played.timestamp()
+            elif not self.playlist and self.hasChildren():  # Get most last played child playlist value
+                return max(
+                    [
+                        t
+                        for t in [
+                            cast(Playlist, p.playlist).last_played
+                            for p in _recursive_traverse(self, get_non_leaf=False)
+                        ]
+                        if t is not None
+                    ],
+                    default=datetime.max,
+                ).timestamp()
+            else:  # Hasn't been played yet, put at bottom
+                return datetime.max.timestamp()
+        elif role == SORT_BY_ALPHA_ROLE:
+            return self.text()
+        return super().data(role)
 
     def update_icon(self):
         self.setIcon(
@@ -62,9 +103,19 @@ class TreeModelItem(QStandardItem):
         )
 
 
-class PlaylistTreeWidget(QWidget):
-    default_playlist_path = Path("../playlists")
+def _recursive_traverse(parent_item: QStandardItem, *, get_non_leaf: bool) -> Iterator[TreeModelItem]:
+    for row in range(parent_item.rowCount()):
+        child_item = cast(TreeModelItem, parent_item.child(row))
+        if child_item:
+            if child_item.hasChildren():
+                if get_non_leaf:
+                    yield child_item
+                yield from _recursive_traverse(child_item, get_non_leaf=get_non_leaf)
+            else:
+                yield child_item
 
+
+class PlaylistTreeWidget(QWidget):
     def __init__(self, parent: QWidget, main_window: QMainWindow, signals: SharedSignals, *, is_main_view: bool):
         super().__init__(parent)
         self.is_main_view = is_main_view
@@ -88,46 +139,15 @@ class PlaylistTreeWidget(QWidget):
         self.model_.itemChanged.connect(self.update_playlist)
         self._initialize_model()
 
-        layout = QVBoxLayout()
-        for widget in self.header_widgets(main_window):
-            layout.addWidget(widget)
-        layout.addWidget(self.tree_view)
-        self.setLayout(layout)
-
         self.proxy_model = QSortFilterProxyModel()
         self.proxy_model.setSourceModel(self.model_)
         self.proxy_model.setSortRole(Qt.ItemDataRole.DisplayRole)
         self.tree_view.setModel(self.proxy_model)
 
-    def _recursive_traverse(
-        self, parent_item: QStandardItem, *, get_non_leaf: bool
-    ) -> Iterator[tuple[TreeModelItem, bool]]:
-        for row in range(parent_item.rowCount()):
-            child_item = cast(TreeModelItem, parent_item.child(row))
-            if child_item:
-                if child_item.hasChildren():
-                    if get_non_leaf:
-                        yield child_item, True
-                    yield from self._recursive_traverse(child_item, get_non_leaf=get_non_leaf)
-                else:
-                    yield child_item, False
-
-    def filter(self, text: str):
-        if text == "":  # Revert back to original nested view
-            self.proxy_model.setSourceModel(self.model_)
-            return
-        # Flatten and list each item in single column
-        traversed_tups = self._recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=self.is_main_view)
-        filtered_tups = [t for t in traversed_tups if text.lower() in t[0].text().lower()]
-
-        search_model = QStandardItemModel()
-        search_model.itemChanged.connect(self.update_playlist)
-        for item, _ in filtered_tups:
-            search_model.appendRow(TreeModelItem(item.path, item.playlist))
-        self.proxy_model.setSourceModel(search_model)
-
-    def header_widgets(self, main_window: QMainWindow) -> list[QWidget]:
-        widgets: list[QWidget] = []
+        header_widget = QWidget()
+        header_layout = QVBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_widget.setLayout(header_layout)
         if self.is_main_view:
             label = QLabel("Playlists", self)
             label_font = QFont()
@@ -136,29 +156,85 @@ class PlaylistTreeWidget(QWidget):
             label.setFont(label_font)
             label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
 
+            create_menu = QMenu(self)
+            args = create_menu, main_window, self.model_.invisibleRootItem().index(), self.signals
+            create_menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
+
             new_button = QToolButton(self)
             new_button.setText("+ New")
+            new_button.setMenu(create_menu)
             new_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-            new_button.setStyleSheet("QToolButton::menu-indicator { image: none; }")
+            new_button.setStyleSheet("""
+                        QToolButton::menu-indicator { image: none; }
+                        QToolButton { border-radius: 5px; background: grey}
+                    """)
 
-            menu = QMenu(self)
-            args = menu, main_window, self.model_.invisibleRootItem().index(), self.signals
-            menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
-            new_button.setMenu(menu)
+            header_top_layout = QHBoxLayout()
+            header_top_layout.setContentsMargins(0, 0, 0, 0)
+            header_top_layout.addWidget(label)
+            header_top_layout.addWidget(new_button)
+            header_layout.addLayout(header_top_layout)
 
-            header_layout = QHBoxLayout()
-            header_layout.addWidget(label)
-            header_layout.addWidget(new_button)
-
-            header_widget = QWidget()
-            header_widget.setLayout(header_layout)
-            widgets.append(header_widget)
         search_bar = QLineEdit()
         search_bar.textChanged.connect(self.filter)
         search_bar.setClearButtonEnabled(True)
         search_bar.setPlaceholderText("Search playlists")
-        widgets.append(search_bar)
-        return widgets
+
+        sort_custom_action = QAction("Custom", self)
+        sort_updated_action = QAction("Recently updated", self)
+        sort_played_action = QAction("Recently played", self)
+        sort_alpha_action = QAction("Alphabetical", self)
+
+        sort_custom_action.triggered.connect(partial(self.change_sort_column, SORT_BY_CUSTOM_ROLE))
+        sort_updated_action.triggered.connect(partial(self.change_sort_column, SORT_BY_UPDATED_ROLE))
+        sort_played_action.triggered.connect(partial(self.change_sort_column, SORT_BY_PLAYED_ROLE))
+        sort_alpha_action.triggered.connect(partial(self.change_sort_column, SORT_BY_ALPHA_ROLE))
+
+        sort_menu = QMenu(self)
+        sort_menu.addActions([sort_custom_action, sort_updated_action, sort_played_action, sort_alpha_action])
+
+        sort_button = QToolButton(self)
+        sort_button.setText("Sort")
+        sort_button.setMenu(sort_menu)
+        sort_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        sort_button.setStyleSheet("QToolButton::menu-indicator { image: none; }")
+
+        search_sort_layout = QHBoxLayout()
+        search_sort_layout.setContentsMargins(0, 0, 0, 0)
+        search_sort_layout.addWidget(search_bar)
+        search_sort_layout.addWidget(sort_button)
+        header_layout.addLayout(search_sort_layout)
+
+        layout = QVBoxLayout()
+        layout.addWidget(header_widget)
+        layout.addWidget(self.tree_view)
+        self.setLayout(layout)
+
+    def save_model_as_custom_indices(self):
+        indices_json = [i.path for i in _recursive_traverse(self.item_at_index(QModelIndex), get_non_leaf=True)]
+        print(indices_json)
+
+    def filter(self, text: str):
+        if text == "":  # Revert back to original nested view
+            self.proxy_model.setSourceModel(self.model_)
+            return
+        # Flatten and list each item in single column
+        traversed_tups = _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=self.is_main_view)
+        filtered_tups = [t for t in traversed_tups if text.lower() in t.text().lower()]
+
+        search_model = QStandardItemModel()
+        search_model.itemChanged.connect(self.update_playlist)
+        for item in filtered_tups:
+            search_model.appendRow(TreeModelItem(item.path, item.playlist))
+        self.proxy_model.setSourceModel(search_model)
+
+    def change_sort_column(self, sort_type: int) -> None:
+        if sort_type == SORT_BY_CUSTOM_ROLE:
+            self.save_model_as_custom_indices()
+        else:
+            self.proxy_model.setSortRole(sort_type)
+        # TODO THIS IS BASICALLY JUST ALPHA
+        self.proxy_model.sort(-1 if sort_type == SORT_BY_CUSTOM_ROLE else 0)
 
     def source_model(self):
         return cast(QStandardItemModel, self.proxy_model.sourceModel())
@@ -185,7 +261,10 @@ class PlaylistTreeWidget(QWidget):
         parent = item.parent()
         self.model_.beginRemoveRows(index, index.row(), index.row())
         (self.model_ if parent is None else parent).removeRow(item.row())
-        item.path.unlink()
+        if item.path.is_dir():
+            shutil.rmtree(item.path)
+        else:
+            item.path.unlink()
         print("TODO: PUSH CONFIRMATION")
 
     @Slot()
@@ -199,19 +278,21 @@ class PlaylistTreeWidget(QWidget):
 
     @Slot()
     def playlist_context_menu(self, main_window: QMainWindow, point: QPoint):
-        playlist_index = self.tree_view.indexAt(point)
+        tree_index = self.tree_view.indexAt(point)
         menu = QMenu(self.tree_view)
         root_index = self.model_.invisibleRootItem().index()
-        if playlist_index.isValid():
+        if tree_index.isValid():
             rename_action = QAction("Rename", self.tree_view)
-            rename_action.triggered.connect(partial(self.rename_playlist, playlist_index))
+            rename_action.triggered.connect(partial(self.rename_playlist, tree_index))
 
             delete_action = QAction("Delete", self.tree_view)
-            delete_action.triggered.connect(partial(self.delete_playlist, playlist_index))
+            delete_action.triggered.connect(partial(self.delete_playlist, tree_index))
 
             menu.addActions([rename_action, delete_action])
-            parent = self.item_at_index(playlist_index).parent()
-            if parent is not None:
+
+            if (item := self.item_at_index(tree_index)).playlist is None:  # Clicked on folder
+                root_index = self.proxy_model.mapToSource(tree_index)
+            elif (parent := item.parent()) is not None:  # Not top-level
                 root_index = parent.index()
         args = menu, main_window, root_index, self.signals
         menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
@@ -219,7 +300,7 @@ class PlaylistTreeWidget(QWidget):
         menu.exec_(self.tree_view.mapToGlobal(point))
 
     def _initialize_model(self, path: Path | None = None, root_item: QStandardItem | None = None) -> None:
-        path = self.default_playlist_path if path is None else path
+        path = DEFAULT_PLAYLIST_PATH if path is None else path
         root_item = self.model_.invisibleRootItem() if root_item is None else root_item
         for fp in path.iterdir():
             if fp.is_dir():
@@ -234,6 +315,12 @@ class PlaylistTreeWidget(QWidget):
     def refresh_playlist_thumbnail(self, playlist: Playlist):
         next(
             tree_model_item
-            for tree_model_item, _ in self._recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=False)
+            for tree_model_item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=False)
             if tree_model_item.playlist == playlist
         ).update_icon()
+
+
+@cache
+def _get_custom_ordered_playlists() -> list[Path]:
+    with PLAYLIST_CUSTOM_INDEX_JSON_PATH.open("rb") as f:
+        return json.load(f)

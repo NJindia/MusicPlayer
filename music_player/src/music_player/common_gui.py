@@ -116,6 +116,7 @@ class CreateDialog(QDialog):
         close_button = QPushButton(self)
         close_button.setText("X")
         close_button.setStyleSheet("QPushButton { border: none; }")
+        close_button.clicked.connect(self.close)
 
         header_layout = QHBoxLayout()
         header_layout.addWidget(header)
@@ -123,7 +124,7 @@ class CreateDialog(QDialog):
         header_layout.addWidget(close_button)
 
         self.name = QLineEdit(self)
-        self.name.setPlaceholderText("Playlist name")
+        self.name.setPlaceholderText(f"{self.mode.capitalize()} name")
 
         confirm_button = QPushButton(self)
         confirm_button.setText("Create")
