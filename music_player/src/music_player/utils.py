@@ -60,3 +60,10 @@ def get_pixmap(cover_bytes: bytes, height: int | None) -> QPixmap:
             pixmap = pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
         QPixmapCache.insert(key, pixmap)
     return pixmap
+
+
+def get_colored_pixmap(pixmap: QPixmap, color: Qt.GlobalColor) -> QPixmap:
+    colored_pm = QPixmap(pixmap)
+    colored_pm.fill(color)
+    colored_pm.setMask(pixmap.createMaskFromColor(Qt.GlobalColor.transparent))
+    return colored_pm
