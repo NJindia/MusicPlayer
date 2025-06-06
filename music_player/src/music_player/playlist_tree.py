@@ -6,7 +6,17 @@ from functools import partial, cache
 from pathlib import Path
 from typing import cast, Iterator
 
-from PySide6.QtCore import Qt, QModelIndex, QPoint, Slot, QSize, QPersistentModelIndex, QSortFilterProxyModel
+from PySide6.QtCore import (
+    Qt,
+    QModelIndex,
+    QPoint,
+    Slot,
+    QSize,
+    QPersistentModelIndex,
+    QSortFilterProxyModel,
+    QObject,
+    QEvent,
+)
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont, QPixmap
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -22,7 +32,7 @@ from PySide6.QtWidgets import (
     QToolButton,
 )
 
-from music_player.common_gui import NewPlaylistAction, NewFolderAction, PersistentQMenu
+from music_player.common_gui import NewPlaylistAction, NewFolderAction
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.playlist import Playlist, get_playlist
 from music_player.signals import SharedSignals
@@ -192,17 +202,13 @@ class PlaylistTreeWidget(QWidget):
         search_bar.setClearButtonEnabled(True)
         search_bar.setPlaceholderText("Search playlists")
 
-        sort_menu = PersistentQMenu(self)
-        for enum in list(SORT_ROLE):
-            action = QAction(enum.name.capitalize(), self)
-            action.triggered.connect(partial(self.change_sort_role, enum))
-            sort_menu.addAction(action)
-
+        self.sort_menu = SortMenu(self)
         self.sort_button = QToolButton(self)
         self.sort_button.setText("Sort")
-        self.sort_button.setMenu(sort_menu)
+        self.sort_button.setMenu(self.sort_menu)
         self.sort_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.sort_button.setStyleSheet("QToolButton::menu-indicator { image: none; }")
+        self.update_sort_button()
 
         search_sort_layout = QHBoxLayout()
         search_sort_layout.setContentsMargins(0, 0, 0, 0)
@@ -214,6 +220,14 @@ class PlaylistTreeWidget(QWidget):
         layout.addWidget(header_widget)
         layout.addWidget(self.tree_view)
         self.setLayout(layout)
+
+    def update_sort_button(self):
+        sort_role = SORT_ROLE(self.proxy_model.sortRole())
+        order_str = "asc" if self.proxy_model.sortOrder() == Qt.SortOrder.AscendingOrder else "desc"
+        self.sort_button.setIcon(
+            QIcon(f"../icons/sort/sort-{'alpha-' if sort_role == SORT_ROLE.ALPHABETICAL else ''}{order_str}.svg")
+        )
+        self.sort_button.setText(sort_role.name.capitalize())
 
     def save_model_as_custom_indices(self):
         indices_json = [i.path for i in _recursive_traverse(self.item_at_index(QModelIndex), get_non_leaf=True)]
@@ -252,9 +266,8 @@ class PlaylistTreeWidget(QWidget):
         # TODO THIS IS BASICALLY JUST ALPHA
         self.proxy_model.sort(-1 if sort_type == SORT_ROLE.CUSTOM else 0, order)
 
-        self.sort_button.setText(
-            f"{sort_role.name.capitalize()} {'^' if order == Qt.SortOrder.AscendingOrder else 'v'}"
-        )
+        self.update_sort_button()
+        self.sort_menu.update_active_action()
 
     def source_model(self):
         return cast(QStandardItemModel, self.proxy_model.sourceModel())
@@ -344,3 +357,51 @@ class PlaylistTreeWidget(QWidget):
 def _get_custom_ordered_playlists() -> list[Path]:
     with PLAYLIST_CUSTOM_INDEX_JSON_PATH.open("rb") as f:
         return json.load(f)
+
+
+class SortRoleAction(QAction):
+    def __init__(self, sort_role: SORT_ROLE, playlist_widget: PlaylistTreeWidget, parent: QMenu) -> None:
+        super().__init__(sort_role.name.capitalize(), parent)
+        self.sort_role = sort_role
+        self.triggered.connect(partial(playlist_widget.change_sort_role, sort_role))
+        self.setCheckable(True)
+
+
+class SortMenu(QMenu):
+    def __init__(self, parent: PlaylistTreeWidget) -> None:
+        super().__init__(parent)
+        self.installEventFilter(self)
+
+        self.sort_custom_action = SortRoleAction(SORT_ROLE.CUSTOM, parent, self)
+        self.sort_updated_action = SortRoleAction(SORT_ROLE.UPDATED, parent, self)
+        self.sort_played_action = SortRoleAction(SORT_ROLE.PLAYED, parent, self)
+        self.sort_alphabetical_action = SortRoleAction(SORT_ROLE.ALPHABETICAL, parent, self)
+
+        self.update_active_action()
+
+    def parent(self, /) -> PlaylistTreeWidget:
+        return cast(PlaylistTreeWidget, self.parent())
+
+    def update_active_action(self):
+        curr_sort_role = self.parent().proxy_model.sortRole()
+        for action in (
+            self.sort_custom_action,
+            self.sort_updated_action,
+            self.sort_played_action,
+            self.sort_alphabetical_action,
+        ):
+            if action.sort_role.value == curr_sort_role:
+                action.setChecked(True)
+                order_str = "down" if self.parent().proxy_model.sortOrder() == Qt.SortOrder.AscendingOrder else "up"
+                action.setIcon(QIcon(f"../icons/arrows/arrow-narrow-{order_str}.svg"))
+            else:
+                action.setChecked(False)
+                action.setIcon(QIcon())
+
+    def eventFilter(self, watched: QObject, event: QEvent, /) -> bool:
+        if event.type() == QEvent.Type.MouseButtonRelease:
+            if isinstance(watched, QMenu):
+                if action := watched.activeAction():
+                    action.trigger()
+                    return True
+        return super().eventFilter(watched, event)

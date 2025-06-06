@@ -1,6 +1,6 @@
 from typing import Callable, Literal
 
-from PySide6.QtCore import QRect, Qt, QModelIndex, QEvent, QObject
+from PySide6.QtCore import QRect, Qt, QModelIndex
 from PySide6.QtGui import QPainter, QFont, QFontMetrics, QAction
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QHBoxLayout,
     QLabel,
-    QWidget,
 )
 
 from music_player.signals import SharedSignals
@@ -170,19 +169,3 @@ class NewFolderAction(QAction):
         super().__init__("New folder", parent)
         dialog = CreateDialog(main_window, root_index, signals, mode="folder")
         self.triggered.connect(lambda: dialog.exec())
-
-
-class PersistentQMenu(QMenu):
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.installEventFilter(self)
-
-    def eventFilter(self, watched: QObject, event: QEvent, /) -> bool:
-        if event.type() == QEvent.Type.MouseButtonRelease:
-            if isinstance(watched, QMenu):
-                if action := watched.activeAction():
-                    action.trigger()
-                    return True
-            else:
-                print("yo")
-        return super().eventFilter(watched, event)
