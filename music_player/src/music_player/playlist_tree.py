@@ -55,7 +55,7 @@ DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[SORT_ROLE, Qt.SortOrder] = {
     SORT_ROLE.PLAYED: Qt.SortOrder.DescendingOrder,
     SORT_ROLE.ALPHABETICAL: Qt.SortOrder.AscendingOrder,
 }
-
+INITIAL_SORT_ROLE = SORT_ROLE.PLAYED  # TODO: CUSTOM
 
 class TreeItemDelegate(QStyledItemDelegate):
     def __init__(self):
@@ -163,7 +163,7 @@ class PlaylistTreeWidget(QWidget):
 
         self.proxy_model = QSortFilterProxyModel()
         self.proxy_model.setSourceModel(self.model_)
-        self.proxy_model.setSortRole(Qt.ItemDataRole.DisplayRole)
+        self.proxy_model.setSortRole(INITIAL_SORT_ROLE.value)
         self.tree_view.setModel(self.proxy_model)
 
         header_widget = QWidget()
