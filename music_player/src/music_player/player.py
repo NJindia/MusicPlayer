@@ -29,8 +29,7 @@ from music_player.library import MusicLibraryWidget, MusicLibraryScrollArea
 from music_player.playlist_tree import (
     PlaylistTreeWidget,
     TreeModelItem,
-    SORT_BY_PLAYED_ROLE,
-    SORT_BY_UPDATED_ROLE,
+    SORT_ROLE,
     DEFAULT_PLAYLIST_PATH,
 )
 from music_player.queue_gui import (
@@ -201,7 +200,7 @@ class MainWindow(QMainWindow):
         playlist.last_played = datetime.now(tz=UTC)
         playlist.save()
 
-        if self.playlist_view.proxy_model.sortRole() == SORT_BY_PLAYED_ROLE:
+        if self.playlist_view.proxy_model.sortRole() == SORT_ROLE.PLAYED.value:
             self.playlist_view.proxy_model.invalidate()
 
         self.play_music(playlist.dataframe, playlist_index)
@@ -281,7 +280,7 @@ class MainWindow(QMainWindow):
     def _update_playlist_last_updated(self, playlist: Playlist):
         playlist.last_updated = datetime.now(tz=UTC)
         playlist.save()
-        if self.playlist_view.proxy_model.sortRole() == SORT_BY_UPDATED_ROLE:
+        if self.playlist_view.proxy_model.sortRole() == SORT_ROLE.PLAYED.value:
             self.playlist_view.proxy_model.invalidate()
 
     @Slot()

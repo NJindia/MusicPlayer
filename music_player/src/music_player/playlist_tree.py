@@ -1,6 +1,7 @@
 import json
 import shutil
 from datetime import datetime
+from enum import Enum
 from functools import partial, cache
 from pathlib import Path
 from typing import cast, Iterator
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import (
     QToolButton,
 )
 
-from music_player.common_gui import NewPlaylistAction, NewFolderAction
+from music_player.common_gui import NewPlaylistAction, NewFolderAction, PersistentQMenu
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.playlist import Playlist, get_playlist
 from music_player.signals import SharedSignals
@@ -29,10 +30,21 @@ from music_player.signals import SharedSignals
 PLAYLIST_ROW_HEIGHT = 50
 DEFAULT_PLAYLIST_PATH = Path("../playlists")
 PLAYLIST_CUSTOM_INDEX_JSON_PATH = Path("../custom_playlist_indices.json")
-SORT_BY_CUSTOM_ROLE: int = Qt.ItemDataRole.UserRole + 1
-SORT_BY_UPDATED_ROLE: int = Qt.ItemDataRole.UserRole + 2
-SORT_BY_PLAYED_ROLE: int = Qt.ItemDataRole.UserRole + 3
-SORT_BY_ALPHA_ROLE: int = Qt.ItemDataRole.UserRole + 4
+
+
+class SORT_ROLE(Enum):
+    CUSTOM = Qt.ItemDataRole.UserRole + 1
+    UPDATED = Qt.ItemDataRole.UserRole + 2
+    PLAYED = Qt.ItemDataRole.UserRole + 3
+    ALPHABETICAL = Qt.ItemDataRole.UserRole + 4
+
+
+DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[SORT_ROLE, Qt.SortOrder] = {
+    SORT_ROLE.CUSTOM: Qt.SortOrder.AscendingOrder,
+    SORT_ROLE.UPDATED: Qt.SortOrder.DescendingOrder,
+    SORT_ROLE.PLAYED: Qt.SortOrder.DescendingOrder,
+    SORT_ROLE.ALPHABETICAL: Qt.SortOrder.AscendingOrder,
+}
 
 
 class TreeItemDelegate(QStyledItemDelegate):
@@ -61,9 +73,9 @@ class TreeModelItem(QStandardItem):
         self.update_icon()
 
     def data(self, /, role: int = Qt.ItemDataRole.DisplayRole):
-        if role == SORT_BY_CUSTOM_ROLE:
+        if role == SORT_ROLE.CUSTOM.value:
             return _get_custom_ordered_playlists().index(self.path)
-        elif role == SORT_BY_UPDATED_ROLE:
+        elif role == SORT_ROLE.UPDATED.value:
             if self.playlist:
                 return self.playlist.last_updated.timestamp()
             elif self.hasChildren():  # Get most recent child playlist value
@@ -72,7 +84,7 @@ class TreeModelItem(QStandardItem):
                 ).timestamp()
             else:  # Get folder modified time
                 return self.path.stat().st_mtime
-        elif role == SORT_BY_PLAYED_ROLE:
+        elif role == SORT_ROLE.PLAYED.value:
             if self.playlist and self.playlist.last_played:
                 return self.playlist.last_played.timestamp()
             elif not self.playlist and self.hasChildren():  # Get most last played child playlist value
@@ -89,7 +101,7 @@ class TreeModelItem(QStandardItem):
                 ).timestamp()
             else:  # Hasn't been played yet, put at bottom
                 return datetime.max.timestamp()
-        elif role == SORT_BY_ALPHA_ROLE:
+        elif role == SORT_ROLE.ALPHABETICAL.value:
             return self.text()
         return super().data(role)
 
@@ -180,29 +192,22 @@ class PlaylistTreeWidget(QWidget):
         search_bar.setClearButtonEnabled(True)
         search_bar.setPlaceholderText("Search playlists")
 
-        sort_custom_action = QAction("Custom", self)
-        sort_updated_action = QAction("Recently updated", self)
-        sort_played_action = QAction("Recently played", self)
-        sort_alpha_action = QAction("Alphabetical", self)
+        sort_menu = PersistentQMenu(self)
+        for enum in list(SORT_ROLE):
+            action = QAction(enum.name.capitalize(), self)
+            action.triggered.connect(partial(self.change_sort_role, enum))
+            sort_menu.addAction(action)
 
-        sort_custom_action.triggered.connect(partial(self.change_sort_column, SORT_BY_CUSTOM_ROLE))
-        sort_updated_action.triggered.connect(partial(self.change_sort_column, SORT_BY_UPDATED_ROLE))
-        sort_played_action.triggered.connect(partial(self.change_sort_column, SORT_BY_PLAYED_ROLE))
-        sort_alpha_action.triggered.connect(partial(self.change_sort_column, SORT_BY_ALPHA_ROLE))
-
-        sort_menu = QMenu(self)
-        sort_menu.addActions([sort_custom_action, sort_updated_action, sort_played_action, sort_alpha_action])
-
-        sort_button = QToolButton(self)
-        sort_button.setText("Sort")
-        sort_button.setMenu(sort_menu)
-        sort_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        sort_button.setStyleSheet("QToolButton::menu-indicator { image: none; }")
+        self.sort_button = QToolButton(self)
+        self.sort_button.setText("Sort")
+        self.sort_button.setMenu(sort_menu)
+        self.sort_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.sort_button.setStyleSheet("QToolButton::menu-indicator { image: none; }")
 
         search_sort_layout = QHBoxLayout()
         search_sort_layout.setContentsMargins(0, 0, 0, 0)
         search_sort_layout.addWidget(search_bar)
-        search_sort_layout.addWidget(sort_button)
+        search_sort_layout.addWidget(self.sort_button)
         header_layout.addLayout(search_sort_layout)
 
         layout = QVBoxLayout()
@@ -228,13 +233,28 @@ class PlaylistTreeWidget(QWidget):
             search_model.appendRow(TreeModelItem(item.path, item.playlist))
         self.proxy_model.setSourceModel(search_model)
 
-    def change_sort_column(self, sort_type: int) -> None:
-        if sort_type == SORT_BY_CUSTOM_ROLE:
+    @Slot(SORT_ROLE)
+    def change_sort_role(self, sort_role: SORT_ROLE) -> None:
+        sort_type = sort_role.value
+        order = (
+            (
+                Qt.SortOrder.DescendingOrder
+                if self.proxy_model.sortOrder() == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+            if self.proxy_model.sortRole() == sort_type
+            else DEFAULT_SORT_ORDER_BY_SORT_ROLE[sort_role]
+        )
+        if sort_type == SORT_ROLE.CUSTOM:
             self.save_model_as_custom_indices()
         else:
             self.proxy_model.setSortRole(sort_type)
         # TODO THIS IS BASICALLY JUST ALPHA
-        self.proxy_model.sort(-1 if sort_type == SORT_BY_CUSTOM_ROLE else 0)
+        self.proxy_model.sort(-1 if sort_type == SORT_ROLE.CUSTOM else 0, order)
+
+        self.sort_button.setText(
+            f"{sort_role.name.capitalize()} {'^' if order == Qt.SortOrder.AscendingOrder else 'v'}"
+        )
 
     def source_model(self):
         return cast(QStandardItemModel, self.proxy_model.sourceModel())
