@@ -197,6 +197,8 @@ class MainWindow(QMainWindow):
             self.play_music(self.library.table_view.model_.music_data["file_path"].to_list(), lib_index)
 
     def play_playlist(self, playlist: Playlist, playlist_index: int):
+        if not playlist.playlist_items:
+            return
         playlist.last_played = datetime.now(tz=UTC)
         playlist.save()
 
@@ -292,7 +294,7 @@ class MainWindow(QMainWindow):
         self._update_playlist_last_updated(playlist)
         if self.library.playlist and playlist.playlist_path == self.library.playlist.playlist_path:
             self.library.load_playlist(playlist)
-        self.playlist_view.refresh_playlist_thumbnail(playlist)
+        self.playlist_view.refresh_playlist(playlist)
 
     @Slot()
     def remove_items_from_playlist(self, item_indices: list[int]):
@@ -300,7 +302,7 @@ class MainWindow(QMainWindow):
         self.library.playlist.remove_items(item_indices)
         self._update_playlist_last_updated(self.library.playlist)
         self.library.load_playlist(self.library.playlist)
-        self.playlist_view.refresh_playlist_thumbnail(self.library.playlist)
+        self.playlist_view.refresh_playlist(self.library.playlist)
 
     @Slot()
     def library_context_menu(self, point: QPoint):

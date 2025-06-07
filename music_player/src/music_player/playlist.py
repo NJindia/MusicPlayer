@@ -93,6 +93,7 @@ class Playlist:
         }
 
     def save(self):
+        print(f"SPLAYLIST: {self}")
         with self.playlist_path.open("w") as file:
             json.dump(self.to_json(), file)
 
@@ -102,6 +103,7 @@ class Playlist:
 
     def add_item(self, music_df_idx: int):
         self.playlist_items.insert(0, PlaylistItem(music_df_idx, datetime.now(tz=UTC)))
+        print(f"PLAYLIST: {self}")
         self.save()
 
 

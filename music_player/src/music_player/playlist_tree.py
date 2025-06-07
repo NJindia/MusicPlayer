@@ -161,7 +161,7 @@ class PlaylistTreeWidget(QWidget):
         self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         self.model_: QStandardItemModel = QStandardItemModel()
-        self.model_.itemChanged.connect(self.update_playlist)
+        self.model_.dataChanged.connect(self.update_playlist)
         self._initialize_model()
 
         self.proxy_model = QSortFilterProxyModel()
@@ -252,7 +252,7 @@ class PlaylistTreeWidget(QWidget):
         filtered_tups = [t for t in traversed_tups if text.lower() in t.text().lower()]
 
         search_model = QStandardItemModel()
-        search_model.itemChanged.connect(self.update_playlist)
+        search_model.dataChanged.connect(self.update_playlist)
         for item in filtered_tups:
             search_model.appendRow(TreeModelItem(item.path, item.playlist))
         self.proxy_model.setSourceModel(search_model)
@@ -311,13 +311,16 @@ class PlaylistTreeWidget(QWidget):
         print("TODO: PUSH CONFIRMATION")
 
     @Slot()
-    def update_playlist(self, item: TreeModelItem) -> None:
-        print(f"UPDATING {item.text()}")
-        playlist = item.playlist
-        if playlist is None:
-            raise NotImplementedError
-        playlist.title = item.text()
-        playlist.save()
+    def update_playlist(self, tl: QModelIndex, br: QModelIndex, roles) -> None:
+        print(tl, br, roles)  # TODO: REFRESH PERSISTENT SOURCE MODEL
+        if Qt.ItemDataRole.DisplayRole in roles:
+            item = self.item_at_index(tl, is_source=True)
+            playlist = item.playlist
+            if playlist is None:
+                raise NotImplementedError
+            playlist.title = item.text()
+            playlist.playlist_path = playlist.playlist_path.parent / f"{item.text()}.json"
+            playlist.save()
 
     @Slot()
     def playlist_context_menu(self, main_window: QMainWindow, point: QPoint):
@@ -355,12 +358,14 @@ class PlaylistTreeWidget(QWidget):
                 item = TreeModelItem(playlist.playlist_path, playlist)
                 root_item.appendRow(item)
 
-    def refresh_playlist_thumbnail(self, playlist: Playlist):
-        next(
+    def refresh_playlist(self, playlist: Playlist):
+        item = next(
             tree_model_item
             for tree_model_item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=False)
-            if tree_model_item.playlist == playlist
-        ).update_icon()
+            if cast(Playlist, tree_model_item.playlist).playlist_path == playlist.playlist_path
+        )
+        item.playlist = playlist
+        item.update_icon()
 
 
 @cache
