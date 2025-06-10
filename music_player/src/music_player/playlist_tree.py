@@ -1,7 +1,7 @@
 import json
 import math
 import shutil
-from datetime import datetime
+from datetime import datetime, UTC
 from enum import Enum
 from functools import partial, cache
 from pathlib import Path
@@ -110,10 +110,10 @@ class TreeModelItem(QStandardItem):
                         ]
                         if t is not None
                     ],
-                    default=datetime.max,
+                    default=datetime.max.replace(tzinfo=UTC),
                 ).timestamp()
             else:  # Hasn't been played yet, put at bottom
-                return math.inf
+                return datetime.max.replace(tzinfo=UTC).timestamp()
         elif role == SORT_ROLE.ALPHABETICAL.value:
             return self.text()
         return super().data(role)
