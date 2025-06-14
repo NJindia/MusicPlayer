@@ -38,25 +38,22 @@ from music_player.signals import SharedSignals
 from music_player.utils import get_colored_pixmap
 
 PLAYLIST_ROW_HEIGHT = 50
-PLAYLIST_CUSTOM_INDEX_JSON_PATH = Path("../custom_playlist_indices.json")
 
 ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 class SORT_ROLE(Enum):
-    CUSTOM = Qt.ItemDataRole.UserRole + 2
     UPDATED = Qt.ItemDataRole.UserRole + 3
     PLAYED = Qt.ItemDataRole.UserRole + 4
     ALPHABETICAL = Qt.ItemDataRole.UserRole + 5
 
 
 DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[SORT_ROLE, Qt.SortOrder] = {
-    SORT_ROLE.CUSTOM: Qt.SortOrder.AscendingOrder,
     SORT_ROLE.UPDATED: Qt.SortOrder.DescendingOrder,
     SORT_ROLE.PLAYED: Qt.SortOrder.DescendingOrder,
     SORT_ROLE.ALPHABETICAL: Qt.SortOrder.AscendingOrder,
 }
-INITIAL_SORT_ROLE = SORT_ROLE.PLAYED  # TODO: CUSTOM
+INITIAL_SORT_ROLE = SORT_ROLE.ALPHABETICAL
 
 
 class TreeItemDelegate(QStyledItemDelegate):
@@ -82,15 +79,13 @@ class TreeModelItem(QStandardItem):
     def data(self, /, role: int = Qt.ItemDataRole.DisplayRole):
         if role == ID_ROLE:
             return self.collection.id
-        elif role == SORT_ROLE.CUSTOM.value:
-            return _get_custom_ordered_playlists().index(self.collection.id)
         elif role == SORT_ROLE.UPDATED.value:
             return self.collection.last_updated.timestamp()
         elif role == SORT_ROLE.PLAYED.value:
             last_played = self.collection.last_played
             return (last_played if last_played else datetime.max.replace(tzinfo=UTC)).timestamp()
         elif role == SORT_ROLE.ALPHABETICAL.value:
-            return self.text()
+            return self.text().lower() + self.text()
         return super().data(role)
 
     def update_icon(self):
@@ -144,6 +139,7 @@ class PlaylistTreeWidget(QWidget):
         self.proxy_model = QSortFilterProxyModel()
         self.proxy_model.setSourceModel(self.model_)
         self.proxy_model.setSortRole(INITIAL_SORT_ROLE.value)
+        self.proxy_model.sort(0)
         self.proxy_model.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.tree_view.setModel(self.proxy_model)
 
@@ -217,12 +213,6 @@ class PlaylistTreeWidget(QWidget):
         self.sort_button.setIcon(QIcon(pm))
         self.sort_button.setText(sort_role.name.capitalize())
 
-    def save_model_as_custom_indices(self):
-        indices_json = [
-            i.collection.id for i in _recursive_traverse(self.item_at_index(QModelIndex), get_non_leaf=True)
-        ]
-        print(indices_json)
-
     def filter(self, text: str):
         if text == "":  # Revert back to original nested view
             self.proxy_model.setSourceModel(self.model_)
@@ -243,12 +233,9 @@ class PlaylistTreeWidget(QWidget):
             if self.proxy_model.sortRole() == sort_type
             else DEFAULT_SORT_ORDER_BY_SORT_ROLE[sort_role]
         )
-        if sort_type == SORT_ROLE.CUSTOM:
-            self.save_model_as_custom_indices()
-        else:
-            self.proxy_model.setSortRole(sort_type)
+        self.proxy_model.setSortRole(sort_type)
         # TODO THIS IS BASICALLY JUST ALPHA
-        self.proxy_model.sort(-1 if sort_type == SORT_ROLE.CUSTOM else 0, order)
+        self.proxy_model.sort(0, order)
 
         self.update_sort_button()
         self.sort_menu.update_active_action()
@@ -374,12 +361,6 @@ class PlaylistTreeWidget(QWidget):
         item.update_icon()
 
 
-@cache
-def _get_custom_ordered_playlists() -> list[str]:
-    with PLAYLIST_CUSTOM_INDEX_JSON_PATH.open("rb") as f:
-        return json.load(f)
-
-
 class SortRoleAction(QAction):
     def __init__(self, sort_role: SORT_ROLE, playlist_widget: PlaylistTreeWidget, parent: QMenu) -> None:
         super().__init__(sort_role.name.capitalize(), parent)
@@ -398,14 +379,13 @@ class SortMenu(QMenu):
             }
         """)
 
-        self.sort_custom_action = SortRoleAction(SORT_ROLE.CUSTOM, parent, self)
         self.sort_updated_action = SortRoleAction(SORT_ROLE.UPDATED, parent, self)
         self.sort_played_action = SortRoleAction(SORT_ROLE.PLAYED, parent, self)
         self.sort_alphabetical_action = SortRoleAction(SORT_ROLE.ALPHABETICAL, parent, self)
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
         self.addActions(
-            [self.sort_custom_action, self.sort_updated_action, self.sort_played_action, self.sort_alphabetical_action]
+            [self.sort_updated_action, self.sort_played_action, self.sort_alphabetical_action]
         )
 
         self.update_active_action()
@@ -416,7 +396,6 @@ class SortMenu(QMenu):
     def update_active_action(self):
         curr_sort_role = self.parent().proxy_model.sortRole()
         for action in (
-            self.sort_custom_action,
             self.sort_updated_action,
             self.sort_played_action,
             self.sort_alphabetical_action,
