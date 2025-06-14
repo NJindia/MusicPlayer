@@ -119,6 +119,7 @@ class CreateDialog(QDialog):
         close_button.setText("X")
         close_button.setStyleSheet("QPushButton { border: none; }")
         close_button.clicked.connect(self.close)
+        close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         header_layout = QHBoxLayout()
         header_layout.addWidget(header)

@@ -313,14 +313,14 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def library_context_menu(self, point: QPoint):
-        indices = self.library.table_view.selectionModel().selectedRows()
-        if not indices:
+        row_indices = self.library.table_view.selectionModel().selectedRows()
+        if not row_indices:
             index = self.library.table_view.indexAt(point)
             if not index.isValid():
                 return
             rows = [index.row()]
         else:
-            rows = [i.row() for i in indices]
+            rows = [i.row() for i in row_indices]
         selected_song_indices = [int(self.library.table_view.model_.music_data.index[row]) for row in rows[::-1]]
         menu = QMenu(self)
 

@@ -14,9 +14,9 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     QSortFilterProxyModel,
     QObject,
-    QEvent,
+    QEvent, QAbstractItemModel,
 )
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont, QPixmap
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont, QPixmap, QMouseEvent
 from PySide6.QtWidgets import (
     QMainWindow,
     QTreeView,
@@ -106,7 +106,24 @@ def _recursive_traverse(parent_item: QStandardItem, *, get_non_leaf: bool) -> It
                 yield from _recursive_traverse(child_item, get_non_leaf=get_non_leaf)
             else:
                 yield child_item
-
+                
+class PlaylistTree(QTreeView):
+    def __init__(self, model: QAbstractItemModel):
+        super().__init__()
+        self.setUniformRowHeights(True)
+        self.setExpandsOnDoubleClick(True)
+        self.setAnimated(True)
+        self.setSortingEnabled(False)
+        self.setHeaderHidden(True)
+        self.setIconSize(QSize(PLAYLIST_ROW_HEIGHT, PLAYLIST_ROW_HEIGHT))
+        delegate = TreeItemDelegate()
+        self.setItemDelegate(delegate)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.setModel(model)
+    
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.RightButton:
+            super().mousePressEvent(event)
 
 class PlaylistTreeWidget(QWidget):
     def __init__(self, parent: QWidget, main_window: QMainWindow, signals: SharedSignals, *, is_main_view: bool):
@@ -116,18 +133,7 @@ class PlaylistTreeWidget(QWidget):
 
         self.setStyleSheet("QWidget { margin: 0px; border: none; }")
         self.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
-        self.tree_view = QTreeView()
-        self.tree_view.setUniformRowHeights(True)
-        self.tree_view.setExpandsOnDoubleClick(True)
-        self.tree_view.setAnimated(True)
-        self.tree_view.setSortingEnabled(False)
-        self.tree_view.setHeaderHidden(True)
-        self.tree_view.setIconSize(QSize(PLAYLIST_ROW_HEIGHT, PLAYLIST_ROW_HEIGHT))
-        delegate = TreeItemDelegate()
-        self.tree_view.setItemDelegate(delegate)
-
-        self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-
+        
         self.model_: QStandardItemModel = QStandardItemModel()
         self.model_.layoutChanged.connect(self._update_flattened_model)  # TODO NECESSARY?
         self.model_.rowsRemoved.connect(self._update_flattened_model)
@@ -141,7 +147,8 @@ class PlaylistTreeWidget(QWidget):
         self.proxy_model.setSortRole(INITIAL_SORT_ROLE.value)
         self.proxy_model.sort(0)
         self.proxy_model.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.tree_view.setModel(self.proxy_model)
+        
+        self.tree_view = PlaylistTree(self.proxy_model)
 
         header_widget = QWidget()
         header_layout = QVBoxLayout()
@@ -329,7 +336,7 @@ class PlaylistTreeWidget(QWidget):
         args = menu, main_window, source_root_index, self.signals
         menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
 
-        menu.exec_(self.tree_view.mapToGlobal(point))
+        menu.popup(self.tree_view.mapToGlobal(point))
 
     def _update_flattened_model(self):
         print("UPDATED FM")
