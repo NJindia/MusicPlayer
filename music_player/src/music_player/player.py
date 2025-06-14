@@ -255,11 +255,16 @@ class MainWindow(QMainWindow):
     @Slot()
     def create(self, mode: CreateMode, name: str, source_model_root_index: QModelIndex) -> None:
         invis_root = self.playlist_view.model_.invisibleRootItem()
-        root_collection = self.playlist_view.item_at_index(source_model_root_index, is_source=True).collection
-        default_model_root_item = self.playlist_view.get_model_item(root_collection) or invis_root
+        if source_model_root_index.isValid():
+            root_collection = self.playlist_view.item_at_index(source_model_root_index, is_source=True).collection
+            default_model_root_item = self.playlist_view.get_model_item(root_collection)
+            parent_id = default_model_root_item.collection.id
+        else:
+            default_model_root_item = invis_root
+            parent_id = ""
         collection_base = CollectionBase(
             id=str(next(self.collection_id)),
-            parent_id="" if default_model_root_item == invis_root else default_model_root_item.collection.id,
+            parent_id=parent_id,
             title=name,
             created=datetime.now(tz=UTC),
             last_updated=datetime.now(tz=UTC),
