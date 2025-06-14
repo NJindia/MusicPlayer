@@ -1,6 +1,4 @@
 import json
-import math
-import shutil
 from datetime import datetime, UTC
 from enum import Enum
 from functools import partial, cache
@@ -35,20 +33,21 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import NewPlaylistAction, NewFolderAction
 from music_player.constants import MAX_SIDE_BAR_WIDTH
-from music_player.playlist import Playlist, get_playlist
+from music_player.playlist import Playlist, CollectionBase, get_collections_by_parent_id, Folder
 from music_player.signals import SharedSignals
 from music_player.utils import get_colored_pixmap
 
 PLAYLIST_ROW_HEIGHT = 50
-DEFAULT_PLAYLIST_PATH = Path("../playlists")
 PLAYLIST_CUSTOM_INDEX_JSON_PATH = Path("../custom_playlist_indices.json")
+
+ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 class SORT_ROLE(Enum):
-    CUSTOM = Qt.ItemDataRole.UserRole + 1
-    UPDATED = Qt.ItemDataRole.UserRole + 2
-    PLAYED = Qt.ItemDataRole.UserRole + 3
-    ALPHABETICAL = Qt.ItemDataRole.UserRole + 4
+    CUSTOM = Qt.ItemDataRole.UserRole + 2
+    UPDATED = Qt.ItemDataRole.UserRole + 3
+    PLAYED = Qt.ItemDataRole.UserRole + 4
+    ALPHABETICAL = Qt.ItemDataRole.UserRole + 5
 
 
 DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[SORT_ROLE, Qt.SortOrder] = {
@@ -69,63 +68,37 @@ class TreeItemDelegate(QStyledItemDelegate):
         return QSize(default_size.width(), PLAYLIST_ROW_HEIGHT)
 
 
-@cache
-def get_folder_pixmap(height: int) -> QPixmap:
-    return QPixmap("../icons/folder.svg").scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
-
-
 class TreeModelItem(QStandardItem):
-    def __init__(self, path: Path, playlist: Playlist | None) -> None:
-        super().__init__(path.stem)
+    def __init__(self, collection: Playlist | Folder) -> None:
+        super().__init__(collection.title)
+        self.collection = collection
+
         font = QFont()
         font.setPointSize(14)
         self.setFont(font)
         self.setEditable(False)
-        self.playlist = playlist
-        self.path = path
         self.update_icon()
 
     def data(self, /, role: int = Qt.ItemDataRole.DisplayRole):
-        if role == SORT_ROLE.CUSTOM.value:
-            return _get_custom_ordered_playlists().index(self.path)
+        if role == ID_ROLE:
+            return self.collection.id
+        elif role == SORT_ROLE.CUSTOM.value:
+            return _get_custom_ordered_playlists().index(self.collection.id)
         elif role == SORT_ROLE.UPDATED.value:
-            if self.playlist:
-                return self.playlist.last_updated.timestamp()
-            elif self.hasChildren():  # Get most recent child playlist value
-                return max(
-                    cast(Playlist, p.playlist).last_updated for p in _recursive_traverse(self, get_non_leaf=False)
-                ).timestamp()
-            else:  # Get folder modified time
-                return self.path.stat().st_mtime
+            return self.collection.last_updated.timestamp()
         elif role == SORT_ROLE.PLAYED.value:
-            if self.playlist and self.playlist.last_played:
-                return self.playlist.last_played.timestamp()
-            elif not self.playlist and self.hasChildren():  # Get most last played child playlist value
-                return max(
-                    [
-                        t
-                        for t in [
-                            cast(Playlist, p.playlist).last_played
-                            for p in _recursive_traverse(self, get_non_leaf=False)
-                        ]
-                        if t is not None
-                    ],
-                    default=datetime.max.replace(tzinfo=UTC),
-                ).timestamp()
-            else:  # Hasn't been played yet, put at bottom
-                return datetime.max.replace(tzinfo=UTC).timestamp()
+            last_played = self.collection.last_played
+            return (last_played if last_played else datetime.max.replace(tzinfo=UTC)).timestamp()
         elif role == SORT_ROLE.ALPHABETICAL.value:
             return self.text()
         return super().data(role)
 
     def update_icon(self):
-        self.setIcon(
-            QIcon(
-                get_folder_pixmap(PLAYLIST_ROW_HEIGHT)
-                if self.playlist is None
-                else self.playlist.get_thumbnail_pixmap(PLAYLIST_ROW_HEIGHT)
-            )
-        )
+        self.setIcon(QIcon(self.collection.get_thumbnail_pixmap(PLAYLIST_ROW_HEIGHT)))
+
+    def sync_item(self, item: "TreeModelItem"):
+        self.setText(self.collection.title)
+        self.collection = item.collection
 
 
 def _recursive_traverse(parent_item: QStandardItem, *, get_non_leaf: bool) -> Iterator[TreeModelItem]:
@@ -161,12 +134,17 @@ class PlaylistTreeWidget(QWidget):
         self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         self.model_: QStandardItemModel = QStandardItemModel()
+        self.model_.layoutChanged.connect(self._update_flattened_model)  # TODO NECESSARY?
+        self.model_.rowsRemoved.connect(self._update_flattened_model)
         self.model_.dataChanged.connect(self.update_playlist)
+        self._flattened_model: QStandardItemModel = QStandardItemModel()
+        self._flattened_model.dataChanged.connect(self.update_playlist)
         self._initialize_model()
 
         self.proxy_model = QSortFilterProxyModel()
         self.proxy_model.setSourceModel(self.model_)
         self.proxy_model.setSortRole(INITIAL_SORT_ROLE.value)
+        self.proxy_model.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self.tree_view.setModel(self.proxy_model)
 
         header_widget = QWidget()
@@ -240,22 +218,18 @@ class PlaylistTreeWidget(QWidget):
         self.sort_button.setText(sort_role.name.capitalize())
 
     def save_model_as_custom_indices(self):
-        indices_json = [i.path for i in _recursive_traverse(self.item_at_index(QModelIndex), get_non_leaf=True)]
+        indices_json = [
+            i.collection.id for i in _recursive_traverse(self.item_at_index(QModelIndex), get_non_leaf=True)
+        ]
         print(indices_json)
 
     def filter(self, text: str):
         if text == "":  # Revert back to original nested view
             self.proxy_model.setSourceModel(self.model_)
+            self.proxy_model.setFilterRegularExpression("")
             return
-        # Flatten and list each item in single column
-        traversed_tups = _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=self.is_main_view)
-        filtered_tups = [t for t in traversed_tups if text.lower() in t.text().lower()]
-
-        search_model = QStandardItemModel()
-        search_model.dataChanged.connect(self.update_playlist)
-        for item in filtered_tups:
-            search_model.appendRow(TreeModelItem(item.path, item.playlist))
-        self.proxy_model.setSourceModel(search_model)
+        self.proxy_model.setSourceModel(self._flattened_model)
+        self.proxy_model.setFilterRegularExpression(rf"\b{text}\w*")
 
     @Slot(SORT_ROLE)
     def change_sort_role(self, sort_role: SORT_ROLE) -> None:
@@ -282,94 +256,126 @@ class PlaylistTreeWidget(QWidget):
     def source_model(self):
         return cast(QStandardItemModel, self.proxy_model.sourceModel())
 
-    def item_at_index(self, index: QModelIndex, *, is_source: bool = False) -> TreeModelItem:
+    def item_at_index(
+        self, index: QModelIndex, *, is_source: bool
+    ) -> TreeModelItem:  # , get_default_model_item: bool = False
         assert not isinstance(index.model(), QSortFilterProxyModel if is_source else QStandardItemModel)
+
         return cast(
             TreeModelItem,
             self.source_model().itemFromIndex(index if is_source else self.proxy_model.mapToSource(index)),
         )
 
+    def flattened_proxy_index_to_default_model_item(self, proxy_index: QModelIndex) -> TreeModelItem:
+        return self.get_model_item(self.item_at_index(proxy_index, is_source=False).collection)
+
     @Slot()
-    def rename_playlist(self, index: QModelIndex) -> None:
-        item = self.item_at_index(index)
+    def rename_playlist(self, proxy_index: QModelIndex) -> None:
+        item = self.item_at_index(proxy_index, is_source=False)
         self.model_.blockSignals(True)
         item.setEditable(True)
-        self.tree_view.edit(index)
+        self.tree_view.edit(proxy_index)
         item.setEditable(False)
         self.model_.blockSignals(False)
 
     @Slot()
-    def delete_playlist(self, index: QModelIndex) -> None:
-        item = self.item_at_index(index)
+    def delete_collection(self, proxy_index: QModelIndex) -> None:
+        item = self.flattened_proxy_index_to_default_model_item(proxy_index)
         parent = item.parent()
-        self.model_.beginRemoveRows(index, index.row(), index.row())
+        parent_index = (parent or self.model_.invisibleRootItem()).index()
+        self.model_.beginRemoveRows(parent_index, item.row(), item.row())
         (self.model_ if parent is None else parent).removeRow(item.row())
-        if item.path.is_dir():
-            shutil.rmtree(item.path)
-        else:
-            item.path.unlink()
+
+        if item.collection.is_folder:
+
+            def get_recursive_children(parent_id: str) -> Iterator[CollectionBase]:
+                for collection in get_collections_by_parent_id().get(parent_id, []):
+                    if collection.is_folder:
+                        yield from get_recursive_children(collection.id)
+                    yield collection
+
+            for child in list(get_recursive_children(item.collection.id)):
+                child.delete()
+            get_collections_by_parent_id.cache_clear()
+        item.collection.delete()
         print("TODO: PUSH CONFIRMATION")
 
     @Slot()
-    def update_playlist(self, tl: QModelIndex, br: QModelIndex, roles) -> None:
-        print(tl, br, roles)  # TODO: REFRESH PERSISTENT SOURCE MODEL
+    def update_playlist(self, tl_source_index: QModelIndex, _: QModelIndex, roles: list[int]) -> None:
         if Qt.ItemDataRole.DisplayRole in roles:
-            item = self.item_at_index(tl, is_source=True)
-            playlist = item.playlist
+            item = self.item_at_index(tl_source_index, is_source=True)
+            if item is None:
+                raise ValueError
+            playlist = item.collection
             if playlist is None:
                 raise NotImplementedError
             playlist.title = item.text()
-            playlist.playlist_path = playlist.playlist_path.parent / f"{item.text()}.json"
             playlist.save()
+
+            if self.proxy_model.filterRegularExpression().pattern():
+                self.model_.blockSignals(True)
+                self.get_model_item(item.collection).sync_item(item)
+                self.model_.blockSignals(False)
+            else:
+                self._update_flattened_model()
+            pass
 
     @Slot()
     def playlist_context_menu(self, main_window: QMainWindow, point: QPoint):
-        tree_index = self.tree_view.indexAt(point)
+        proxy_index = self.tree_view.indexAt(point)
         menu = QMenu(self.tree_view)
-        root_index = self.model_.invisibleRootItem().index()
-        if tree_index.isValid():
+        source_root_index = self.source_model().invisibleRootItem().index()
+        if proxy_index.isValid():
             rename_action = QAction("Rename", self.tree_view)
-            rename_action.triggered.connect(partial(self.rename_playlist, tree_index))
+            rename_action.triggered.connect(partial(self.rename_playlist, proxy_index))
 
             delete_action = QAction("Delete", self.tree_view)
-            delete_action.triggered.connect(partial(self.delete_playlist, tree_index))
+            delete_action.triggered.connect(partial(self.delete_collection, proxy_index))
 
             menu.addActions([rename_action, delete_action])
 
-            if (item := self.item_at_index(tree_index)).playlist is None:  # Clicked on folder
-                root_index = self.proxy_model.mapToSource(tree_index)
+            if (item := self.item_at_index(proxy_index, is_source=False)).collection.is_folder:
+                source_root_index = self.proxy_model.mapToSource(proxy_index)
             elif (parent := item.parent()) is not None:  # Not top-level
-                root_index = parent.index()
-        args = menu, main_window, root_index, self.signals
+                assert self.source_model() != self._flattened_model, "Should only have top-level for flattened!"
+                source_root_index = parent.index()
+        args = menu, main_window, source_root_index, self.signals
         menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
 
         menu.exec_(self.tree_view.mapToGlobal(point))
 
-    def _initialize_model(self, path: Path | None = None, root_item: QStandardItem | None = None) -> None:
-        path = DEFAULT_PLAYLIST_PATH if path is None else path
-        root_item = self.model_.invisibleRootItem() if root_item is None else root_item
-        for fp in path.iterdir():
-            if fp.is_dir():
-                item = TreeModelItem(fp, None)
-                root_item.appendRow(item)
-                self._initialize_model(fp, item)
-            else:
-                playlist = get_playlist(fp)
-                item = TreeModelItem(playlist.playlist_path, playlist)
-                root_item.appendRow(item)
+    def _update_flattened_model(self):
+        print("UPDATED FM")
+        self._flattened_model.clear()
+        for item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=self.is_main_view):
+            self._flattened_model.appendRow(TreeModelItem(item.collection))
+
+    def _initialize_model(self) -> None:
+        def _add_children_to_item(root_item_: QStandardItem, root_item_id_: str):
+            for collection in get_collections_by_parent_id().get(root_item_id_, []):
+                folder_item = TreeModelItem(collection)
+                root_item_.appendRow(folder_item)
+                if collection.is_folder:
+                    _add_children_to_item(folder_item, collection.id)
+
+        _add_children_to_item(self.model_.invisibleRootItem(), "")
+        self._update_flattened_model()  # TODO PASS ROOT ITEM TO MAKE THINGS QUICKER
+
+    def get_model_item(self, collection: Playlist | Folder) -> TreeModelItem:
+        return next(
+            tree_model_item
+            for tree_model_item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=True)
+            if tree_model_item.collection.id == collection.id
+        )
 
     def refresh_playlist(self, playlist: Playlist):
-        item = next(
-            tree_model_item
-            for tree_model_item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=False)
-            if cast(Playlist, tree_model_item.playlist).playlist_path == playlist.playlist_path
-        )
-        item.playlist = playlist
+        item = self.get_model_item(playlist)
+        item.collection = playlist
         item.update_icon()
 
 
 @cache
-def _get_custom_ordered_playlists() -> list[Path]:
+def _get_custom_ordered_playlists() -> list[str]:
     with PLAYLIST_CUSTOM_INDEX_JSON_PATH.open("rb") as f:
         return json.load(f)
 

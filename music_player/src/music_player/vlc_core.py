@@ -26,7 +26,7 @@ class VLCCore:
 
         self.list_player: MediaListPlayer = self.instance.media_list_player_new()
 
-        self.current_playlist: Playlist = get_playlist(Path("../playlists/Liked Songs.json"))
+        self.current_playlist: Playlist = get_playlist(Path("../playlists/p0.json"))
         paths = get_music_df().iloc[self.current_playlist.indices]["file_path"].to_list()
         self.media_list: MediaList = self.instance.media_list_new(paths)
         self.list_indices = list(range(len(paths)))

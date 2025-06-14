@@ -98,9 +98,11 @@ def text_is_buffer(text: str) -> bool:
 
 
 class CreateDialog(QDialog):
-    def __init__(self, parent: QMainWindow, root_index: QModelIndex, signals: SharedSignals, mode: CreateMode) -> None:
+    def __init__(
+        self, parent: QMainWindow, source_root_index: QModelIndex, signals: SharedSignals, mode: CreateMode
+    ) -> None:
         super().__init__(parent)
-        self.root_index = root_index
+        self.source_root_index = source_root_index
         self.signals = signals
         self.mode = mode
 
@@ -149,23 +151,23 @@ class CreateDialog(QDialog):
                 signal = self.signals.create_folder_signal
             case _:
                 raise ValueError(f"Unknown mode: {self.mode}")
-        signal.emit(self.name.text(), self.root_index)
+        signal.emit(self.name.text(), self.source_root_index)
         self.close()
 
 
 class NewPlaylistAction(QAction):
     def __init__(
-        self, parent: QMenu, main_window: QMainWindow, root_index: QModelIndex, signals: SharedSignals
+        self, parent: QMenu, main_window: QMainWindow, source_root_index: QModelIndex, signals: SharedSignals
     ) -> None:
         super().__init__("New playlist", parent)
-        dialog = CreateDialog(main_window, root_index, signals, mode="playlist")
+        dialog = CreateDialog(main_window, source_root_index, signals, mode="playlist")
         self.triggered.connect(lambda: dialog.exec())
 
 
 class NewFolderAction(QAction):
     def __init__(
-        self, parent: QMenu, main_window: QMainWindow, root_index: QModelIndex, signals: SharedSignals
+        self, parent: QMenu, main_window: QMainWindow, source_root_index: QModelIndex, signals: SharedSignals
     ) -> None:
         super().__init__("New folder", parent)
-        dialog = CreateDialog(main_window, root_index, signals, mode="folder")
+        dialog = CreateDialog(main_window, source_root_index, signals, mode="folder")
         self.triggered.connect(lambda: dialog.exec())

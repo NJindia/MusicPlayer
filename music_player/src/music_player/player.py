@@ -1,6 +1,8 @@
 import sys
+from dataclasses import asdict
 from datetime import datetime, UTC
 from functools import partial
+from itertools import count
 from typing import cast
 
 import qdarktheme
@@ -22,7 +24,7 @@ from vlc import EventType
 
 from music_player.common_gui import NewPlaylistAction
 from music_player.constants import MAX_SIDE_BAR_WIDTH
-from music_player.playlist import Playlist
+from music_player.playlist import Playlist, Folder, CollectionBase, DEFAULT_PLAYLIST_PATH, get_collections_by_parent_id
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.library import MusicLibraryWidget, MusicLibraryScrollArea
@@ -30,7 +32,6 @@ from music_player.playlist_tree import (
     PlaylistTreeWidget,
     TreeModelItem,
     SORT_ROLE,
-    DEFAULT_PLAYLIST_PATH,
 )
 from music_player.queue_gui import (
     QueueGraphicsView,
@@ -72,14 +73,15 @@ class AddToPlaylistMenu(QMenu):
             ]
         )
 
-    def add_items_to_playlist_at_index(self, selected_song_indices: list[int], index: QModelIndex):
-        playlist = self.playlist_tree_widget.item_at_index(index).playlist
+    def add_items_to_playlist_at_index(self, selected_song_indices: list[int], proxy_index: QModelIndex):
+        playlist = self.playlist_tree_widget.item_at_index(proxy_index, is_source=False).collection
         self.signals.add_to_playlist_signal.emit(selected_song_indices, playlist)
         self.parent_menu.close()
 
 
 class MainWindow(QMainWindow):
     media_changed_signal = Signal()
+    collection_id = count(len(list(DEFAULT_PLAYLIST_PATH.iterdir())))
 
     @Slot()
     def media_changed_ui(self):
@@ -237,47 +239,47 @@ class MainWindow(QMainWindow):
         self.queue.initialize_queue()
 
     @Slot()
-    def select_tree_view_item(self, index: QModelIndex):
-        playlist = self.playlist_view.item_at_index(index).playlist
-        if playlist is None:
-            raise NotImplementedError
+    def select_tree_view_item(self, proxy_index: QModelIndex):
+        playlist = self.playlist_view.item_at_index(proxy_index, is_source=False).collection
+        if not isinstance(playlist, Playlist):
+            raise NotImplementedError(proxy_index)
         self.library.load_playlist(playlist)
 
     @Slot()
-    def double_click_tree_view_item(self, index: QModelIndex) -> None:
-        playlist = cast(TreeModelItem, self.playlist_view.item_at_index(index)).playlist
-        if playlist is None:
+    def double_click_tree_view_item(self, proxy_index: QModelIndex) -> None:
+        playlist = cast(TreeModelItem, self.playlist_view.item_at_index(proxy_index, is_source=False)).collection
+        if not isinstance(playlist, Playlist):
             raise NotImplementedError
         self.play_playlist(playlist, 0)
 
     @Slot()
     def create(self, mode: CreateMode, name: str, source_model_root_index: QModelIndex) -> None:
         invis_root = self.playlist_view.model_.invisibleRootItem()
-        root_item = self.playlist_view.item_at_index(source_model_root_index, is_source=True) or invis_root
-        root_item_path = DEFAULT_PLAYLIST_PATH if root_item == invis_root else root_item.path
+        root_collection = self.playlist_view.item_at_index(source_model_root_index, is_source=True).collection
+        default_model_root_item = self.playlist_view.get_model_item(root_collection) or invis_root
+        collection_base = CollectionBase(
+            id=str(next(self.collection_id)),
+            parent_id="" if default_model_root_item == invis_root else default_model_root_item.collection.id,
+            title=name,
+            created=datetime.now(tz=UTC),
+            last_updated=datetime.now(tz=UTC),
+            last_played=None,
+            thumbnail=None,
+        )
         match mode:
             case "playlist":
-                playlist = Playlist(
-                    title=name,
-                    created=datetime.now(tz=UTC),
-                    last_updated=datetime.now(tz=UTC),
-                    last_played=None,
-                    playlist_items=[],
-                    playlist_path=root_item_path / f"{name}.json",
-                    thumbnail=None,
-                )
-                playlist.save()
-                new_item = TreeModelItem(playlist.playlist_path, playlist)
-                self.library.load_playlist(playlist)
+                collection_base.id = "p" + collection_base.id
+                collection = Playlist(playlist_items=[], **asdict(collection_base))
+                self.library.load_playlist(collection)
             case "folder":
-                new_folder_path = root_item_path / name
-                new_folder_path.mkdir(parents=True, exist_ok=True)
-                new_item = TreeModelItem(new_folder_path, None)
+                collection_base.id = "f" + collection_base.id
+                collection = Folder(**asdict(collection_base))
             case _:
                 raise ValueError(f"Unknown mode: {mode}")
-
-        root_item.insertRows(0, [new_item])
-        root_item.sortChildren(0)
+        collection.save()
+        get_collections_by_parent_id.cache_clear()
+        default_model_root_item.appendRow(TreeModelItem(collection))
+        default_model_root_item.sortChildren(0)
 
     def _update_playlist_last_updated(self, playlist: Playlist):
         playlist.last_updated = datetime.now(tz=UTC)
@@ -292,7 +294,7 @@ class MainWindow(QMainWindow):
         for i in music_df_indices:
             playlist.add_item(i)
         self._update_playlist_last_updated(playlist)
-        if self.library.playlist and playlist.playlist_path == self.library.playlist.playlist_path:
+        if self.library.playlist and playlist.id == self.library.playlist.id:
             self.library.load_playlist(playlist)
         self.playlist_view.refresh_playlist(playlist)
 
