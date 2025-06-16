@@ -18,11 +18,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QTabWidget,
     QMenu,
-    QWidgetAction,
 )
 from vlc import EventType
 
-from music_player.common_gui import NewPlaylistAction
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.playlist import Playlist, Folder, CollectionBase, DEFAULT_PLAYLIST_PATH, get_collections_by_parent_id
 from music_player.signals import SharedSignals
@@ -32,6 +30,7 @@ from music_player.playlist_tree import (
     PlaylistTreeWidget,
     TreeModelItem,
     SORT_ROLE,
+    AddToPlaylistMenu,
 )
 from music_player.queue_gui import (
     QueueGraphicsView,
@@ -49,34 +48,6 @@ class AddToQueueAction(QAction):
     def __init__(self, selected_song_df_indices: list[int], signals: SharedSignals, parent: QWidget):
         super().__init__("Add to queue", parent)
         self.triggered.connect(partial(signals.add_to_queue_signal.emit, selected_song_df_indices))
-
-
-class AddToPlaylistMenu(QMenu):
-    def __init__(
-        self, selected_song_indices: list[int], shared_signals: SharedSignals, parent_menu: QMenu, parent: QMainWindow
-    ):
-        super().__init__("Add to playlist", parent)
-        self.parent_menu = parent_menu
-        self.signals = shared_signals
-        self.playlist_tree_widget = PlaylistTreeWidget(self, parent, self.signals, is_main_view=False)
-        self.playlist_tree_widget.tree_view.clicked.connect(
-            partial(self.add_items_to_playlist_at_index, selected_song_indices)
-        )
-        widget_action = QWidgetAction(self)
-        widget_action.setDefaultWidget(self.playlist_tree_widget)
-        self.addActions(
-            [
-                widget_action,
-                NewPlaylistAction(
-                    self, parent, self.playlist_tree_widget.model_.invisibleRootItem().index(), self.signals
-                ),
-            ]
-        )
-
-    def add_items_to_playlist_at_index(self, selected_song_indices: list[int], proxy_index: QModelIndex):
-        playlist = self.playlist_tree_widget.item_at_index(proxy_index, is_source=False).collection
-        self.signals.add_to_playlist_signal.emit(selected_song_indices, playlist)
-        self.parent_menu.close()
 
 
 class MainWindow(QMainWindow):
@@ -296,8 +267,7 @@ class MainWindow(QMainWindow):
     def add_items_to_playlist(self, music_df_indices: list[int], playlist: Playlist | None):
         if playlist is None:
             raise NotImplementedError
-        for i in music_df_indices:
-            playlist.add_item(i)
+        playlist.add_items(music_df_indices)
         self._update_playlist_last_updated(playlist)
         if self.library.playlist and playlist.id == self.library.playlist.id:
             self.library.load_playlist(playlist)

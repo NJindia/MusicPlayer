@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QToolButton,
+    QWidgetAction,
 )
 
 from music_player.common_gui import NewPlaylistAction, NewFolderAction
@@ -321,25 +322,31 @@ class PlaylistTreeWidget(QWidget):
         proxy_index = self.tree_view.indexAt(point)
         menu = QMenu(self.tree_view)
         source_root_index = self.source_model().invisibleRootItem().index()
-        if (
-            proxy_index.isValid()
-            and not (item := self.item_at_index(proxy_index, is_source=False)).collection.is_protected
-        ):
-            if item.collection.is_folder:
+        if proxy_index.isValid():
+            item = self.item_at_index(proxy_index, is_source=False)
+
+            # Set root for adding playlist/folder
+            if item.collection.is_folder:  # Folder is a valid root
                 source_root_index = self.proxy_model.mapToSource(proxy_index)
             elif (parent := item.parent()) is not None:  # Not top-level
                 assert self.source_model() != self._flattened_model, "Should only have top-level for flattened!"
                 source_root_index = parent.index()
 
-            rename_action = QAction("Rename", self.tree_view)
-            rename_action.triggered.connect(partial(self.rename_playlist, proxy_index))
+            if not item.collection.is_protected:
+                rename_action = QAction("Rename", self.tree_view)
+                rename_action.triggered.connect(partial(self.rename_playlist, proxy_index))
 
-            delete_action = QAction("Delete", self.tree_view)
-            delete_action.triggered.connect(partial(self.delete_collection, proxy_index))
+                delete_action = QAction("Delete", self.tree_view)
+                delete_action.triggered.connect(partial(self.delete_collection, proxy_index))
 
-            menu.addActions([rename_action, delete_action])
+                menu.addActions([rename_action, delete_action])
+
+            if not item.collection.is_folder:
+                playlist = cast(Playlist, item.collection)
+                menu.addMenu(AddToPlaylistMenu(playlist.indices, self.signals, menu, main_window))
 
         args = menu, main_window, source_root_index, self.signals
+        menu.addSeparator()
         menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
 
         menu.popup(self.tree_view.mapToGlobal(point))
@@ -427,3 +434,31 @@ class SortMenu(QMenu):
                     action.trigger()
                     return True
         return super().eventFilter(watched, event)
+
+
+class AddToPlaylistMenu(QMenu):
+    def __init__(
+        self, selected_song_indices: list[int], shared_signals: SharedSignals, parent_menu: QMenu, parent: QMainWindow
+    ):
+        super().__init__("Add to playlist", parent)
+        self.parent_menu = parent_menu
+        self.signals = shared_signals
+        self.playlist_tree_widget = PlaylistTreeWidget(self, parent, self.signals, is_main_view=False)
+        self.playlist_tree_widget.tree_view.clicked.connect(
+            partial(self.add_items_to_playlist_at_index, selected_song_indices)
+        )
+        widget_action = QWidgetAction(self)
+        widget_action.setDefaultWidget(self.playlist_tree_widget)
+        self.addActions(
+            [
+                widget_action,
+                NewPlaylistAction(
+                    self, parent, self.playlist_tree_widget.model_.invisibleRootItem().index(), self.signals
+                ),
+            ]
+        )
+
+    def add_items_to_playlist_at_index(self, selected_song_indices: list[int], proxy_index: QModelIndex):
+        playlist = self.playlist_tree_widget.item_at_index(proxy_index, is_source=False).collection
+        self.signals.add_to_playlist_signal.emit(selected_song_indices, playlist)
+        self.parent_menu.close()

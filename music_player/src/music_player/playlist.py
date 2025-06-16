@@ -115,8 +115,10 @@ class Playlist(CollectionBase):
         self.playlist_items = [item for i, item in enumerate(self.playlist_items) if i not in item_indices]
         self.save()
 
-    def add_item(self, music_df_idx: int):
-        self.playlist_items.insert(0, PlaylistItem(music_df_idx, datetime.now(tz=UTC)))
+    def add_items(self, music_df_indices: list[int]):
+        self.playlist_items = [
+            PlaylistItem(df_idx, datetime.now(tz=UTC)) for df_idx in music_df_indices
+        ] + self.playlist_items
         print(f"PLAYLIST: {self}")
         self.save()
 
