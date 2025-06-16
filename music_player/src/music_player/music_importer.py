@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import datetime, time, UTC
 from pathlib import Path
 
 from mutagen.flac import FLAC
@@ -31,6 +31,7 @@ class Music:
     isrc: str
     file_path: Path
     album_cover_bytes: bytes | None
+    downloaded_datetime: datetime
 
     @property
     def data_sr(self):
@@ -70,6 +71,7 @@ def load_music(path: Path) -> Music:
                 else {},
                 file_path=path,
                 album_cover_bytes=md.pictures[0].data if md.pictures else None,  # pyright: ignore[reportIndexIssue]
+                downloaded_datetime=datetime.fromtimestamp(path.stat().st_ctime, tz=UTC),
             )
         case ".m4a":
             raise NotAcceptedFileTypeError()

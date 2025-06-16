@@ -1,4 +1,5 @@
 from datetime import datetime, date, UTC
+from pathlib import Path
 
 from PySide6.QtGui import QPixmap, QPixmapCache, QImage, Qt
 
@@ -51,11 +52,11 @@ def datetime_to_age_string(dt: datetime) -> str:
         return datetime_to_date_str(dt)
 
 
-def get_pixmap(cover_bytes: bytes, height: int | None) -> QPixmap:
+def get_pixmap(source: bytes | Path, height: int | None) -> QPixmap:
     pixmap = QPixmap()
-    key = f"{cover_bytes}_{height}"
+    key = f"{source}_{height}"
     if not QPixmapCache.find(key, pixmap):
-        pixmap = QPixmap.fromImage(QImage.fromData(cover_bytes))
+        pixmap = QPixmap.fromImage(QImage.fromData(source)) if isinstance(source, bytes) else QPixmap(source)
         if height is not None:
             pixmap = pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
         QPixmapCache.insert(key, pixmap)

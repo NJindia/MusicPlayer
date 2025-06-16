@@ -15,9 +15,10 @@ from dacite import Config
 from typing_extensions import override
 
 from music_player.music_importer import get_music_df
-from music_player.utils import get_pixmap
+from music_player.utils import get_pixmap, get_colored_pixmap
 
 DEFAULT_PLAYLIST_PATH = Path("../playlists")
+DOWNLOADED_SONGS_PLAYLIST_PATH = Path("../playlists/_.json")
 
 
 @dataclass
@@ -30,13 +31,22 @@ class PlaylistItem:
 
 
 @cache
-def empty_playlist_pixmap(height: int) -> QPixmap:
-    return QPixmap("../icons/empty-playlist.svg").scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
+def _empty_playlist_pixmap(height: int) -> QPixmap:
+    return QPixmap("../icons/playlist/empty-playlist.svg").scaledToHeight(
+        height, Qt.TransformationMode.SmoothTransformation
+    )
 
 
 @cache
-def get_folder_pixmap(height: int) -> QPixmap:
-    return QPixmap("../icons/folder.svg").scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
+def _get_folder_pixmap(height: int) -> QPixmap:
+    return QPixmap("../icons/playlist/folder.svg").scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
+
+
+@cache
+def _get_downloaded_songs_playlist_pixmap(height: int) -> QPixmap:
+    return get_colored_pixmap(QPixmap("../icons/playlist/downloaded_songs.svg"), Qt.GlobalColor.black).scaledToHeight(
+        height, Qt.TransformationMode.SmoothTransformation
+    )
 
 
 @dataclass(kw_only=True)
@@ -80,6 +90,10 @@ class CollectionBase:
     def is_folder(self) -> bool:
         return self.id[0] == "f"
 
+    @property
+    def is_protected(self) -> bool:
+        return self.id == "_"
+
 
 @dataclass(kw_only=True)
 class Playlist(CollectionBase):
@@ -91,6 +105,8 @@ class Playlist(CollectionBase):
 
     @override
     def get_thumbnail_pixmap(self, height: int) -> QPixmap:
+        if self.is_protected:
+            return _get_downloaded_songs_playlist_pixmap(height)
         if self.thumbnail is None:
             return self.get_default_thumbnail(height)
         return get_pixmap(self.thumbnail, height)
@@ -116,7 +132,7 @@ class Playlist(CollectionBase):
         album_covers = self.dataframe["album_cover_bytes"]
         covers = album_covers.value_counts().index[:4]
         if len(covers) == 0:
-            return empty_playlist_pixmap(height)
+            return _empty_playlist_pixmap(height)
 
         combined_pixmap = QPixmap()
         key = f"{b''.join(covers)}_{height}"
@@ -148,13 +164,13 @@ class Playlist(CollectionBase):
 class Folder(CollectionBase):
     @override
     def get_thumbnail_pixmap(self, height: int) -> QPixmap:
-        return get_folder_pixmap(height)
+        return _get_folder_pixmap(height)
 
 
 T = TypeVar("T", bound=CollectionBase)
 
 
-@cache
+# TODO CACHE THIS OR SOMETHING IDK
 def _get_collection(path: Path, collection_type: Type[T]) -> T:
     with path.open("r") as f:
         return dacite.from_dict(
@@ -178,7 +194,7 @@ def get_collections_by_parent_id() -> dict[str, list[Folder | Playlist]]:
     for file in DEFAULT_PLAYLIST_PATH.iterdir():
         if file.stem[0] == "f":
             collections.append(get_folder(file))
-        elif file.stem[0] == "p":
+        elif file.stem[0] in ["p", "_"]:
             collections.append(get_playlist(file))
         else:
             raise ValueError

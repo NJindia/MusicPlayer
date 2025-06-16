@@ -1,8 +1,6 @@
-import json
 from datetime import datetime, UTC
 from enum import Enum
-from functools import partial, cache
-from pathlib import Path
+from functools import partial
 from typing import cast, Iterator
 
 from PySide6.QtCore import (
@@ -14,7 +12,8 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     QSortFilterProxyModel,
     QObject,
-    QEvent, QAbstractItemModel,
+    QEvent,
+    QAbstractItemModel,
 )
 from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont, QPixmap, QMouseEvent
 from PySide6.QtWidgets import (
@@ -106,9 +105,10 @@ def _recursive_traverse(parent_item: QStandardItem, *, get_non_leaf: bool) -> It
                 yield from _recursive_traverse(child_item, get_non_leaf=get_non_leaf)
             else:
                 yield child_item
-                
+
+
 class PlaylistTree(QTreeView):
-    def __init__(self, model: QAbstractItemModel):
+    def __init__(self, model: QAbstractItemModel, *, is_main_view: bool):
         super().__init__()
         self.setUniformRowHeights(True)
         self.setExpandsOnDoubleClick(True)
@@ -118,12 +118,14 @@ class PlaylistTree(QTreeView):
         self.setIconSize(QSize(PLAYLIST_ROW_HEIGHT, PLAYLIST_ROW_HEIGHT))
         delegate = TreeItemDelegate()
         self.setItemDelegate(delegate)
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        if is_main_view:
+            self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setModel(model)
-    
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.RightButton:
             super().mousePressEvent(event)
+
 
 class PlaylistTreeWidget(QWidget):
     def __init__(self, parent: QWidget, main_window: QMainWindow, signals: SharedSignals, *, is_main_view: bool):
@@ -133,7 +135,7 @@ class PlaylistTreeWidget(QWidget):
 
         self.setStyleSheet("QWidget { margin: 0px; border: none; }")
         self.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
-        
+
         self.model_: QStandardItemModel = QStandardItemModel()
         self.model_.layoutChanged.connect(self._update_flattened_model)  # TODO NECESSARY?
         self.model_.rowsRemoved.connect(self._update_flattened_model)
@@ -147,8 +149,8 @@ class PlaylistTreeWidget(QWidget):
         self.proxy_model.setSortRole(INITIAL_SORT_ROLE.value)
         self.proxy_model.sort(0)
         self.proxy_model.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        
-        self.tree_view = PlaylistTree(self.proxy_model)
+
+        self.tree_view = PlaylistTree(self.proxy_model, is_main_view=is_main_view)
 
         header_widget = QWidget()
         header_layout = QVBoxLayout()
@@ -319,7 +321,16 @@ class PlaylistTreeWidget(QWidget):
         proxy_index = self.tree_view.indexAt(point)
         menu = QMenu(self.tree_view)
         source_root_index = self.source_model().invisibleRootItem().index()
-        if proxy_index.isValid():
+        if (
+            proxy_index.isValid()
+            and not (item := self.item_at_index(proxy_index, is_source=False)).collection.is_protected
+        ):
+            if item.collection.is_folder:
+                source_root_index = self.proxy_model.mapToSource(proxy_index)
+            elif (parent := item.parent()) is not None:  # Not top-level
+                assert self.source_model() != self._flattened_model, "Should only have top-level for flattened!"
+                source_root_index = parent.index()
+
             rename_action = QAction("Rename", self.tree_view)
             rename_action.triggered.connect(partial(self.rename_playlist, proxy_index))
 
@@ -328,11 +339,6 @@ class PlaylistTreeWidget(QWidget):
 
             menu.addActions([rename_action, delete_action])
 
-            if (item := self.item_at_index(proxy_index, is_source=False)).collection.is_folder:
-                source_root_index = self.proxy_model.mapToSource(proxy_index)
-            elif (parent := item.parent()) is not None:  # Not top-level
-                assert self.source_model() != self._flattened_model, "Should only have top-level for flattened!"
-                source_root_index = parent.index()
         args = menu, main_window, source_root_index, self.signals
         menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
 
@@ -347,6 +353,8 @@ class PlaylistTreeWidget(QWidget):
     def _initialize_model(self) -> None:
         def _add_children_to_item(root_item_: QStandardItem, root_item_id_: str):
             for collection in get_collections_by_parent_id().get(root_item_id_, []):
+                if not self.is_main_view and collection.is_protected:
+                    continue
                 folder_item = TreeModelItem(collection)
                 root_item_.appendRow(folder_item)
                 if collection.is_folder:
@@ -391,9 +399,7 @@ class SortMenu(QMenu):
         self.sort_alphabetical_action = SortRoleAction(SORT_ROLE.ALPHABETICAL, parent, self)
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
-        self.addActions(
-            [self.sort_updated_action, self.sort_played_action, self.sort_alphabetical_action]
-        )
+        self.addActions([self.sort_updated_action, self.sort_played_action, self.sort_alphabetical_action])
 
         self.update_active_action()
 

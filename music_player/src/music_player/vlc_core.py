@@ -1,12 +1,11 @@
 import itertools
-from pathlib import Path
 from typing import cast, Literal, get_args
 
 import pandas as pd
 from vlc import Instance, MediaPlayer, EventType, Event, MediaList, MediaListPlayer, Media
 
 from music_player.music_importer import get_music_df
-from music_player.playlist import get_playlist, Playlist
+from music_player.playlist import get_playlist, Playlist, DOWNLOADED_SONGS_PLAYLIST_PATH
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
 
@@ -26,7 +25,7 @@ class VLCCore:
 
         self.list_player: MediaListPlayer = self.instance.media_list_player_new()
 
-        self.current_playlist: Playlist = get_playlist(Path("../playlists/p0.json"))
+        self.current_playlist: Playlist = get_playlist(DOWNLOADED_SONGS_PLAYLIST_PATH)
         paths = get_music_df().iloc[self.current_playlist.indices]["file_path"].to_list()
         self.media_list: MediaList = self.instance.media_list_new(paths)
         self.list_indices = list(range(len(paths)))
