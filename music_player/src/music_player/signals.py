@@ -10,3 +10,4 @@ class SharedSignals(QObject):
     create_folder_signal = Signal(str, QModelIndex)
     library_load_artist_signal = Signal(str)
     library_load_album_signal = Signal(str)
+    move_collection_signal = Signal(QModelIndex, QModelIndex)
