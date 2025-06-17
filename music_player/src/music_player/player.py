@@ -333,7 +333,7 @@ class MainWindow(QMainWindow):
         self.media_changed: bool = False
         self.setWindowTitle("Media Player")
         self.media_changed_signal.connect(self.media_changed_ui)
-        self.last_played_music: pd.Series = self.core.current_music  # TODO -> VLCCore?
+        self.last_played_music: pd.Series = pd.Series()  # TODO -> VLCCore?
 
         main_ui = QHBoxLayout()
         self.shared_signals = SharedSignals()

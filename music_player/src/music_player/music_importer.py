@@ -89,6 +89,8 @@ def load_from_sources():
 @cache
 def get_music_df() -> DataFrame:
     df = DataFrame.from_records(asdict(m) for m in load_from_sources())
+    if df.empty:
+        return DataFrame(columns=[*Music.__dataclass_fields__.keys(), "duration"])
     df["duration"] = df["duration_timestamp"].round().apply(timestamp_to_str)
     return df
 

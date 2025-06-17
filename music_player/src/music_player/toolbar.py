@@ -33,15 +33,35 @@ def expanding_widget() -> QWidget:
 
 
 class AlbumButton(QToolButton):
-    def __init__(self, music: pd.Series, shared_signals: SharedSignals, height_linewidth: tuple[int, int]):
+    def __init__(self, music: pd.Series | None, shared_signals: SharedSignals, height_linewidth: tuple[int, int]):
         super().__init__()
-        self.clicked.connect(partial(shared_signals.library_load_album_signal.emit, music["album"]))
+        self.music = music
+        self.signals = shared_signals
+
         height = height_linewidth[0] - height_linewidth[1] * 2
-        if music["album_cover_bytes"] is not None:
-            self.setIcon(QIcon(get_pixmap(music["album_cover_bytes"], height)))
         button_size = QSize(height, height)
         self.setFixedSize(button_size)
         self.setIconSize(button_size)
+
+        self.clicked.connect(self.button_clicked)
+
+    def button_clicked(self):
+        if self.music is None:
+            return
+        partial(self.signals.library_load_album_signal.emit, self.music["album"])
+
+    def set_music(self, music: pd.Series | None):
+        """Set the music for this button, updating the icon."""
+        self.music = music
+        if self.music is not None:
+            if self.music["album_cover_bytes"] is None:
+                raise NotImplementedError("NEED PLACEHOLDER FOR NO ALBUM COVER")
+            else:
+                self.setIcon(QIcon(get_pixmap(self.music["album_cover_bytes"], self.iconSize().height())))
+        else:
+            pm = QPixmap(self.iconSize())
+            pm.fill(Qt.GlobalColor.transparent)  # Fill with transparent pixmap
+            self.setIcon(QIcon(pm))
 
 
 class OpacityButton(QToolButton):
@@ -83,7 +103,10 @@ class MediaScrubberSlider(QHBoxLayout):
         self.update_after_label()
 
     def get_current_media_duration(self) -> float:
-        return self.core.current_media.get_duration() / 1000
+        curr_media = self.core.current_media
+        if curr_media is None:
+            return 0.0
+        return curr_media.get_duration() / 1000
 
     @Slot()
     def scrub_media(self):
@@ -202,11 +225,11 @@ class MediaToolbar(QToolBar):
         self.setIconSize(QSize(100, 100))
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 
-        current_music = self.core.current_music
+        current_music = None  # TODO REMEMBER LAST SESSION self.core.current_music
         self.album_button = AlbumButton(current_music, shared_signals, (100, 0))
         self.addWidget(self.album_button)
 
-        self.song_label = QLabel(current_music.title)
+        self.song_label = QLabel()  # current_music.title)
         self.song_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.addWidget(self.song_label)
 
