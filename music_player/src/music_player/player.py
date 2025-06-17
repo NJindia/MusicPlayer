@@ -254,7 +254,11 @@ class MainWindow(QMainWindow):
                 raise ValueError(f"Unknown mode: {mode}")
         collection.save()
         get_collections_by_parent_id.cache_clear()
+        self.playlist_view.model_.beginInsertRows(
+            default_model_root_item.index(), default_model_root_item.rowCount(), default_model_root_item.rowCount()
+        )
         default_model_root_item.appendRow(TreeModelItem(collection))
+        self.playlist_view.model_.endInsertRows()
         default_model_root_item.sortChildren(0)
 
     def _update_playlist_last_updated(self, playlist: Playlist):

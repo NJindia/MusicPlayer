@@ -151,9 +151,10 @@ class PlaylistProxyModel(QSortFilterProxyModel):
                 if source_parent.isValid()
                 else self.sourceModel().invisibleRootItem()
             )
-            if self.folders_only and not cast(TreeModelItem, src_parent_item.child(source_row)).collection.is_folder:
-                return False
-            if not self.main_view and cast(TreeModelItem, src_parent_item.child(source_row)).collection.is_protected:
+            child = src_parent_item.child(source_row)
+            assert child is not None
+            collection = cast(TreeModelItem, child).collection
+            if (self.folders_only and not collection.is_folder) or (not self.main_view and collection.is_protected):
                 return False
         return super().filterAcceptsRow(source_row, source_parent)
 
@@ -167,6 +168,8 @@ class PlaylistTreeWidget(QWidget):
         *,
         is_main_view: bool,
         folders_only: bool = False,
+        model: QStandardItemModel | None = None,
+        flattened_model: QStandardItemModel | None = None,
     ):
         super().__init__(parent)
         self.is_main_view = is_main_view
@@ -175,13 +178,20 @@ class PlaylistTreeWidget(QWidget):
         self.setStyleSheet("QWidget { margin: 0px; border: none; }")
         self.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
 
-        self.model_: QStandardItemModel = QStandardItemModel()
-        self.model_.layoutChanged.connect(self._update_flattened_model)  # TODO NECESSARY?
-        self.model_.rowsRemoved.connect(self._update_flattened_model)
-        self.model_.dataChanged.connect(self.update_playlist)
-        self._flattened_model: QStandardItemModel = QStandardItemModel()
-        self._flattened_model.dataChanged.connect(self.update_playlist)
-        self._initialize_model()
+        if self.is_main_view:
+            self.model_: QStandardItemModel = QStandardItemModel()
+            self.model_.layoutChanged.connect(self._update_flattened_model)  # TODO NECESSARY?
+            self.model_.rowsRemoved.connect(self._update_flattened_model)
+            self.model_.dataChanged.connect(self.update_playlist)
+            self.model_.rowsMoved.connect(self._update_flattened_model)
+            self._flattened_model: QStandardItemModel = QStandardItemModel()
+            self._flattened_model.dataChanged.connect(self.update_playlist)
+            self._initialize_model()
+        else:
+            assert model
+            assert flattened_model
+            self.model_ = model
+            self._flattened_model = flattened_model
 
         self.proxy_model = PlaylistProxyModel(self.model_, is_main_view=is_main_view, folders_only=folders_only)
         self.tree_view = PlaylistTree(self.proxy_model, is_main_view=is_main_view)
@@ -250,37 +260,40 @@ class PlaylistTreeWidget(QWidget):
 
     @Slot()
     def move_collection(self, source_index: QModelIndex, destination_parent: QModelIndex):
-        print("MOVE")
-        src_index = self.model_.index(source_index.row(), source_index.column(), parent=source_index.parent())
-        src_parent_idx = src_index.parent() if src_index.parent().isValid() else QModelIndex()
+        assert source_index.isValid()
+        assert destination_parent.isValid()
+        assert source_index.model() == self.model_, "Source index must be from the source model"
+        assert destination_parent.model() == self.model_, "Destination parent must be from the source model"
+        src_parent_idx = source_index.parent() if source_index.parent().isValid() else QModelIndex()
         src_parent_item = (
-            self.item_at_index(src_parent_idx, is_source=True)
-            if src_parent_idx.isValid()
-            else self.model_.invisibleRootItem()
+            self.item_at_index(src_parent_idx, is_source=True) if src_parent_idx.isValid() else self.model_
         )
-        src_item = self.item_at_index(src_index, is_source=True)
+        src_item = self.item_at_index(source_index, is_source=True)
 
-        dest_parent_idx = self.model_.index(
-            destination_parent.row(), destination_parent.column(), parent=destination_parent.parent()
-        )
         dest_parent_item = (
-            self.item_at_index(dest_parent_idx, is_source=True)
-            if dest_parent_idx.isValid()
-            else self.model_.invisibleRootItem()
+            self.item_at_index(destination_parent, is_source=True) if destination_parent.isValid() else self.model_
         )
+
+        print(self.model_.rowCount())
+        assert self.model_.beginMoveRows(
+            src_parent_idx, source_index.row(), source_index.row(), destination_parent, dest_parent_item.rowCount()
+        )
+
+        self.model_.blockSignals(True)
+        child = src_parent_item.takeRow(source_index.row())[0]
+        assert child is not None
+        dest_parent_item.appendRow(child)
+        self.model_.blockSignals(False)
+
+        print(self.model_.rowCount())
+        self.model_.endMoveRows()
+        print("END")
 
         src_item.collection.parent_id = (
             dest_parent_item.collection.id if isinstance(dest_parent_item, TreeModelItem) else ""
         )
         src_item.collection.save()
-
-        assert self.model_.beginMoveRows(
-            src_parent_idx, src_index.row(), src_index.row(), dest_parent_idx, dest_parent_item.rowCount()
-        )
-        child = src_parent_item.takeChild(src_index.row())
-        assert child is not None
-        dest_parent_item.appendRow(child)
-        self.model_.endMoveRows()
+        print("TRUE END")
 
     def update_sort_button(self):
         sort_role = SORT_ROLE(self.proxy_model.sortRole())
@@ -368,6 +381,8 @@ class PlaylistTreeWidget(QWidget):
 
     @Slot()
     def update_playlist(self, tl_source_index: QModelIndex, _: QModelIndex, roles: list[int]) -> None:
+        if not self.is_main_view:
+            raise ValueError
         if Qt.ItemDataRole.DisplayRole in roles:
             item = self.item_at_index(tl_source_index, is_source=True)
             if item is None:
@@ -408,7 +423,9 @@ class PlaylistTreeWidget(QWidget):
                 delete_action = QAction("Delete", self.tree_view)
                 delete_action.triggered.connect(partial(self.delete_collection, proxy_index))
 
-                move_to_folder_menu = MoveToFolderMenu(item.index(), self.signals, menu, main_window)
+                move_to_folder_menu = MoveToFolderMenu(
+                    item.index(), self.signals, menu, main_window, self.model_, self._flattened_model
+                )
 
                 menu.addActions([rename_action, delete_action])
                 menu.addSeparator()
@@ -418,7 +435,11 @@ class PlaylistTreeWidget(QWidget):
 
             if not item.collection.is_folder:
                 playlist = cast(Playlist, item.collection)
-                menu.addMenu(AddToPlaylistMenu(playlist.indices, self.signals, menu, main_window))
+                menu.addMenu(
+                    AddToPlaylistMenu(
+                        playlist.indices, self.signals, menu, main_window, self.model_, self._flattened_model
+                    )
+                )
 
         args = menu, main_window, source_root_index, self.signals
         menu.addSeparator()
@@ -427,12 +448,18 @@ class PlaylistTreeWidget(QWidget):
         menu.popup(self.tree_view.mapToGlobal(point))
 
     def _update_flattened_model(self):
+        if not self.is_main_view:
+            raise ValueError
         print("UPDATED FM")
+        self._flattened_model.beginResetModel()
         self._flattened_model.clear()
         for item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=self.is_main_view):
             self._flattened_model.appendRow(TreeModelItem(item.collection))
+        self._flattened_model.endResetModel()
 
     def _initialize_model(self) -> None:
+        assert self.is_main_view
+
         def _add_children_to_item(root_item_: QStandardItem, root_item_id_: str):
             for collection in get_collections_by_parent_id().get(root_item_id_, []):
                 item = TreeModelItem(collection)
@@ -511,13 +538,25 @@ class SortMenu(QMenu):
 
 class MoveToFolderMenu(QMenu):
     def __init__(
-        self, source_index: QModelIndex, shared_signals: SharedSignals, parent_menu: QMenu, parent: QMainWindow
+        self,
+        source_index: QModelIndex,
+        shared_signals: SharedSignals,
+        parent_menu: QMenu,
+        parent: QMainWindow,
+        model: QStandardItemModel,
+        flattened_model: QStandardItemModel,
     ):
         super().__init__("Move to folder", parent)
         self.parent_menu = parent_menu
         self.signals = shared_signals
         self.playlist_tree_widget = PlaylistTreeWidget(
-            self, parent, self.signals, is_main_view=False, folders_only=True
+            self,
+            parent,
+            self.signals,
+            is_main_view=False,
+            folders_only=True,
+            model=model,
+            flattened_model=flattened_model,
         )
         self.playlist_tree_widget.tree_view.clicked.connect(partial(self.adjust_root_index, source_index))
         widget_action = QWidgetAction(self)
@@ -539,12 +578,20 @@ class MoveToFolderMenu(QMenu):
 
 class AddToPlaylistMenu(QMenu):
     def __init__(
-        self, selected_song_indices: list[int], shared_signals: SharedSignals, parent_menu: QMenu, parent: QMainWindow
+        self,
+        selected_song_indices: list[int],
+        shared_signals: SharedSignals,
+        parent_menu: QMenu,
+        parent: QMainWindow,
+        model: QStandardItemModel,
+        flattened_model: QStandardItemModel,
     ):
         super().__init__("Add to playlist", parent)
         self.parent_menu = parent_menu
         self.signals = shared_signals
-        self.playlist_tree_widget = PlaylistTreeWidget(self, parent, self.signals, is_main_view=False)
+        self.playlist_tree_widget = PlaylistTreeWidget(
+            self, parent, self.signals, is_main_view=False, model=model, flattened_model=flattened_model
+        )
         self.playlist_tree_widget.tree_view.clicked.connect(
             partial(self.add_items_to_playlist_at_index, selected_song_indices)
         )
