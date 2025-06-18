@@ -13,9 +13,8 @@ from PySide6.QtCore import (
     QSortFilterProxyModel,
     QObject,
     QEvent,
-    QAbstractItemModel,
 )
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont, QPixmap, QMouseEvent
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont, QPixmap, QMouseEvent, QDragMoveEvent
 from PySide6.QtWidgets import (
     QMainWindow,
     QTreeView,
@@ -108,26 +107,6 @@ def _recursive_traverse(parent_item: QStandardItem, *, get_non_leaf: bool) -> It
                 yield child_item
 
 
-class PlaylistTree(QTreeView):
-    def __init__(self, model: QAbstractItemModel, *, is_main_view: bool):
-        super().__init__()
-        self.setUniformRowHeights(True)
-        self.setExpandsOnDoubleClick(True)
-        self.setAnimated(True)
-        self.setSortingEnabled(False)
-        self.setHeaderHidden(True)
-        self.setIconSize(QSize(PLAYLIST_ROW_HEIGHT, PLAYLIST_ROW_HEIGHT))
-        delegate = TreeItemDelegate()
-        self.setItemDelegate(delegate)
-        if is_main_view:
-            self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.setModel(model)
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() != Qt.MouseButton.RightButton:
-            super().mousePressEvent(event)
-
-
 class PlaylistProxyModel(QSortFilterProxyModel):
     def __init__(self, source_model: QStandardItemModel, *, is_main_view: bool, folders_only: bool):
         super().__init__()
@@ -159,6 +138,56 @@ class PlaylistProxyModel(QSortFilterProxyModel):
         return super().filterAcceptsRow(source_row, source_parent)
 
 
+class PlaylistTree(QTreeView):
+    def __init__(self, model: PlaylistProxyModel, *, is_main_view: bool):
+        super().__init__()
+        self.setUniformRowHeights(True)
+        self.setExpandsOnDoubleClick(True)
+        self.setAnimated(True)
+        self.setSortingEnabled(False)
+        self.setHeaderHidden(True)
+
+        self.setDragEnabled(True)
+        self.setDragDropMode(QTreeView.DragDropMode.InternalMove)
+
+        self.setIconSize(QSize(PLAYLIST_ROW_HEIGHT, PLAYLIST_ROW_HEIGHT))
+        delegate = TreeItemDelegate()
+        self.setItemDelegate(delegate)
+        if is_main_view:
+            self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.setModel(model)
+
+    def model(self, /) -> PlaylistProxyModel:
+        return cast(PlaylistProxyModel, super().model())
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.RightButton:
+            super().mousePressEvent(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent, /):
+        drop_index = self.indexAt(event.pos())
+        selected_index = self.selectedIndexes()[0]
+
+        root_index = self.rootIndex()
+        if drop_index.isValid():
+            drop_item = self.model().sourceModel().itemFromIndex(self.model().mapToSource(drop_index))
+            assert isinstance(drop_item, TreeModelItem)
+            if drop_item.collection.is_folder:
+                root_index = drop_index
+            elif drop_index.parent() is not None:
+                root_index = drop_index.parent()
+
+        if selected_index.parent() == root_index:
+            self.setDropIndicatorShown(False)
+            event.setDropAction(Qt.DropAction.IgnoreAction)
+            event.ignore()
+            return
+
+        self.setDropIndicatorShown(True)
+        event.setDropAction(Qt.DropAction.MoveAction)
+        event.accept()
+
+
 class PlaylistTreeWidget(QWidget):
     def __init__(
         self,
@@ -183,7 +212,6 @@ class PlaylistTreeWidget(QWidget):
             self.model_.layoutChanged.connect(self._update_flattened_model)  # TODO NECESSARY?
             self.model_.rowsRemoved.connect(self._update_flattened_model)
             self.model_.dataChanged.connect(self.update_playlist)
-            self.model_.rowsMoved.connect(self._update_flattened_model)
             self.flattened_model_: QStandardItemModel = QStandardItemModel()
             self.flattened_model_.dataChanged.connect(self.update_playlist)
             self._initialize_model()
