@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from typing import Literal
 
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD
-from music_player.utils import timestamp_to_str
+from music_player.utils import timestamp_to_str, get_empty_pixmap
 from music_player.vlc_core import VLCCore
 
 
@@ -59,9 +59,7 @@ class AlbumButton(QToolButton):
             else:
                 self.setIcon(QIcon(get_pixmap(self.music["album_cover_bytes"], self.iconSize().height())))
         else:
-            pm = QPixmap(self.iconSize())
-            pm.fill(Qt.GlobalColor.transparent)  # Fill with transparent pixmap
-            self.setIcon(QIcon(pm))
+            self.setIcon(QIcon(get_empty_pixmap(self.iconSize().height())))
 
 
 class OpacityButton(QToolButton):

@@ -37,7 +37,7 @@ from music_player.common_gui import paint_artists, get_artist_text_rect_text_tup
 from music_player.playlist import Playlist
 from music_player.music_importer import get_music_df
 from music_player.signals import SharedSignals
-from music_player.utils import datetime_to_age_string, datetime_to_date_str, get_pixmap
+from music_player.utils import datetime_to_age_string, datetime_to_date_str, get_pixmap, get_empty_pixmap
 
 PADDING = 5
 ROW_HEIGHT = 50
@@ -339,21 +339,28 @@ class MusicLibraryWidget(QWidget):
     def __init__(self, playlist: Playlist, shared_signals: SharedSignals):
         super().__init__()
         self.setStyleSheet("QWidget { margin: 0px; border: none; }")
-        self.playlist: Playlist | None = playlist
+        self.playlist: Playlist | None = None
 
         shared_signals.library_load_artist_signal.connect(self.load_artist)
         shared_signals.library_load_album_signal.connect(self.load_album)
+        shared_signals.delete_playlist_signal.connect(self.delete_playlist)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Expanding)
 
         self.header_widget = LibraryHeaderWidget(self)
         self.table_view = MusicLibraryTable(shared_signals, self)
-        self.load_playlist(self.playlist)
+        self.load_playlist(playlist)
 
         layout = QVBoxLayout()
         layout.addWidget(self.header_widget)
         layout.addWidget(self.table_view)
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
+
+    @Slot()
+    def delete_playlist(self, playlist: Playlist):
+        if playlist == self.playlist:
+            self.load_playlist(None)
+        playlist.delete()
 
     @Slot()
     def filter(self, text: str):
@@ -369,16 +376,28 @@ class MusicLibraryWidget(QWidget):
                 self.table_view.showRow(row)
         self.table_view.adjust_height_to_content()
 
-    def load_playlist(self, playlist: Playlist):
-        playlist_df = get_music_df().iloc[playlist.indices].copy()
-        dates = [i.added_on for i in playlist.playlist_items]
+    def load_playlist(self, playlist: Playlist | None):
+        playlist_df = get_music_df().iloc[playlist.indices if playlist else []].copy()
+        dates = [i.added_on for i in (playlist.playlist_items if playlist else [])]
         playlist_df["_date_added"] = [datetime_to_date_str(d) for d in dates]
         playlist_df["date added"] = [datetime_to_age_string(d) for d in dates]
-        self.header_widget.header_img.setPixmap(playlist.get_thumbnail_pixmap(self.header_widget.header_img_size))
-        self.header_widget.header_label_type.setText("Playlist")
-        self.header_widget.header_label_title.setText(playlist.title)
+
+        if playlist is not None:
+            header_img_pixmap = playlist.get_thumbnail_pixmap(self.header_widget.header_img_size)
+            header_label_type_text = "Playlist"
+            header_label_title_text = playlist.title
+            header_label_meta_text = _get_meta_text(playlist_df)
+        else:
+            header_img_pixmap = get_empty_pixmap(self.header_widget.header_img_size)
+            header_label_type_text = ""
+            header_label_title_text = ""
+            header_label_meta_text = ""
+
+        self.header_widget.header_img.setPixmap(header_img_pixmap)
+        self.header_widget.header_label_type.setText(header_label_type_text)
+        self.header_widget.header_label_title.setText(header_label_title_text)
+        self.header_widget.header_label_meta.setText(header_label_meta_text)
         self.header_widget.header_label_subtitle.setVisible(False)
-        self.header_widget.header_label_meta.setText(_get_meta_text(playlist_df))
         self.table_view.show_date_added()
 
         self.playlist = playlist

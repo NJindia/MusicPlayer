@@ -1,6 +1,8 @@
 from datetime import datetime, date, UTC
+from functools import cache
 from pathlib import Path
 
+from PySide6.QtCore import QSize
 from PySide6.QtGui import QPixmap, QPixmapCache, QImage, Qt
 
 
@@ -68,3 +70,10 @@ def get_colored_pixmap(pixmap: QPixmap, color: Qt.GlobalColor) -> QPixmap:
     colored_pm.fill(color)
     colored_pm.setMask(pixmap.createMaskFromColor(Qt.GlobalColor.transparent))
     return colored_pm
+
+
+@cache
+def get_empty_pixmap(height: int | None) -> QPixmap:
+    pm = QPixmap(QSize(height, height)) if height is not None else QPixmap()
+    pm.fill(Qt.GlobalColor.transparent)  # Fill with transparent pixmap
+    return pm

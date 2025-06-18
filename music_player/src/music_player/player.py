@@ -224,7 +224,13 @@ class MainWindow(QMainWindow):
         self.play_playlist(playlist, 0)
 
     @Slot()
-    def create(self, mode: CreateMode, name: str, source_model_root_index: QModelIndex) -> None:
+    def create(
+        self,
+        mode: CreateMode,
+        name: str,
+        source_model_root_index: QModelIndex,
+        callback_value: QModelIndex | list[int],
+    ) -> None:
         invis_root = self.playlist_view.model_.invisibleRootItem()
         if source_model_root_index.isValid():
             root_collection = self.playlist_view.item_at_index(source_model_root_index, is_source=True).collection
@@ -252,14 +258,23 @@ class MainWindow(QMainWindow):
                 collection = Folder(**asdict(collection_base))
             case _:
                 raise ValueError(f"Unknown mode: {mode}")
+
         collection.save()
         get_collections_by_parent_id.cache_clear()
-        self.playlist_view.model_.beginInsertRows(
-            default_model_root_item.index(), default_model_root_item.rowCount(), default_model_root_item.rowCount()
-        )
-        default_model_root_item.appendRow(TreeModelItem(collection))
-        self.playlist_view.model_.endInsertRows()
-        default_model_root_item.sortChildren(0)
+        item = TreeModelItem(collection)
+        default_model_root_item.appendRow(item)
+
+        if callback_value:
+            match mode:
+                case "folder":
+                    assert isinstance(callback_value, QModelIndex)
+                    if callback_value.isValid():
+                        self.shared_signals.move_collection_signal.emit(callback_value, item.index())
+                case "playlist":
+                    assert isinstance(collection, Playlist)
+                    assert isinstance(callback_value, list)
+                    if len(callback_value):
+                        self.shared_signals.add_to_playlist_signal.emit(callback_value, collection)
 
     def _update_playlist_last_updated(self, playlist: Playlist):
         playlist.last_updated = datetime.now(tz=UTC)
@@ -303,7 +318,7 @@ class MainWindow(QMainWindow):
         menu.addAction(add_to_queue_action)
 
         # Add to playlist
-        playlist_menu = AddToPlaylistMenu(selected_song_indices, self.shared_signals, menu, self)
+        playlist_menu = AddToPlaylistMenu(selected_song_indices, self.shared_signals, menu, self, self.playlist_view)
         menu.addMenu(playlist_menu)
 
         if self.library.playlist:
@@ -325,7 +340,7 @@ class MainWindow(QMainWindow):
         menu.addAction(remove_from_queue_action)
 
         music_df_idx = get_music_df()[get_music_df()["file_path"] == item.music.file_path].index[0]
-        add_to_playlist_menu = AddToPlaylistMenu(music_df_idx, self.shared_signals, menu, self)
+        add_to_playlist_menu = AddToPlaylistMenu(music_df_idx, self.shared_signals, menu, self, self.playlist_view)
         menu.addMenu(add_to_playlist_menu)
 
         menu.exec(self.queue.mapToGlobal(point))

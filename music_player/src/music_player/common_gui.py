@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Callable, Literal
 
 from PySide6.QtCore import QRect, Qt, QModelIndex
@@ -97,9 +98,15 @@ def text_is_buffer(text: str) -> bool:
     return not bool(len(set(text) - set(BUFFER_CHARS)))
 
 
-class CreateDialog(QDialog):
+class _CreateDialog(QDialog):
     def __init__(
-        self, parent: QMainWindow, source_root_index: QModelIndex, signals: SharedSignals, mode: CreateMode
+        self,
+        parent: QMainWindow,
+        source_root_index: QModelIndex,
+        signals: SharedSignals,
+        mode: CreateMode,
+        move_from_index: QModelIndex | None = None,
+        df_indices_to_add: list[int] | None = None,
     ) -> None:
         super().__init__(parent)
         self.source_root_index = source_root_index
@@ -132,7 +139,7 @@ class CreateDialog(QDialog):
         confirm_button = QPushButton(self)
         confirm_button.setText("Create")
         confirm_button.setStyleSheet("QPushButton { border-radius: 5px; }")
-        confirm_button.released.connect(self.create_clicked)
+        confirm_button.released.connect(partial(self.create_clicked, move_from_index, df_indices_to_add))
 
         button_layout = QHBoxLayout()
         button_layout.addStretch()
@@ -144,31 +151,47 @@ class CreateDialog(QDialog):
         main_layout.addLayout(button_layout)
         self.setLayout(main_layout)
 
-    def create_clicked(self):
+    def create_clicked(self, move_from_index: QModelIndex | None, df_indices_to_add: list[int] | None) -> None:
+        base_args = self.name.text(), self.source_root_index
         match self.mode:
             case "playlist":
-                signal = self.signals.create_playlist_signal
+                assert move_from_index is None
+                self.signals.create_playlist_signal.emit(*base_args, df_indices_to_add or [])
             case "folder":
-                signal = self.signals.create_folder_signal
+                assert df_indices_to_add is None
+                self.signals.create_folder_signal.emit(*base_args, move_from_index or QModelIndex())
             case _:
                 raise ValueError(f"Unknown mode: {self.mode}")
-        signal.emit(self.name.text(), self.source_root_index)
         self.close()
 
 
 class NewPlaylistAction(QAction):
     def __init__(
-        self, parent: QMenu, main_window: QMainWindow, source_root_index: QModelIndex, signals: SharedSignals
+        self,
+        parent: QMenu,
+        main_window: QMainWindow,
+        source_root_index: QModelIndex,
+        signals: SharedSignals,
+        df_indices_to_add: list[int] | None = None,
     ) -> None:
         super().__init__("New playlist", parent)
-        dialog = CreateDialog(main_window, source_root_index, signals, mode="playlist")
+        dialog = _CreateDialog(
+            main_window, source_root_index, signals, mode="playlist", df_indices_to_add=df_indices_to_add
+        )
         self.triggered.connect(lambda: dialog.exec())
 
 
 class NewFolderAction(QAction):
     def __init__(
-        self, parent: QMenu, main_window: QMainWindow, source_root_index: QModelIndex, signals: SharedSignals
+        self,
+        parent: QMenu,
+        main_window: QMainWindow,
+        source_root_index: QModelIndex,
+        signals: SharedSignals,
+        move_collection_from_index: QModelIndex | None = None,
     ) -> None:
         super().__init__("New folder", parent)
-        dialog = CreateDialog(main_window, source_root_index, signals, mode="folder")
+        dialog = _CreateDialog(
+            main_window, source_root_index, signals, mode="folder", move_from_index=move_collection_from_index
+        )
         self.triggered.connect(lambda: dialog.exec())
