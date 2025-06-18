@@ -525,6 +525,7 @@ class MoveToFolderMenu(QMenu):
         super().__init__("Move to folder", parent)
         self.parent_menu = parent_menu
         self.signals = shared_signals
+
         self.playlist_tree_widget = PlaylistTreeWidget(
             self,
             parent,
@@ -537,18 +538,21 @@ class MoveToFolderMenu(QMenu):
         self.playlist_tree_widget.tree_view.clicked.connect(partial(self.adjust_root_index, source_index))
         widget_action = QWidgetAction(self)
         widget_action.setDefaultWidget(self.playlist_tree_widget)
-        self.addActions(
-            [
-                widget_action,
-                NewFolderAction(
-                    self,
-                    parent,
-                    self.playlist_tree_widget.model_.invisibleRootItem().index(),
-                    self.signals,
-                    move_collection_from_index=source_index,
-                ),
-            ]
+        self.addAction(widget_action)
+
+        if source_index.parent().isValid():  # If not top-level, allow removing from folders
+            remove_from_folders_action = QAction("Remove from folders", self)
+            remove_from_folders_action.triggered.connect(partial(self.adjust_root_index, source_index, QModelIndex()))
+            self.addAction(remove_from_folders_action)
+
+        new_folder_action = NewFolderAction(
+            self,
+            parent,
+            self.playlist_tree_widget.model_.invisibleRootItem().index(),
+            self.signals,
+            move_collection_from_index=source_index,
         )
+        self.addAction(new_folder_action)
 
     def adjust_root_index(self, source_index: QModelIndex, proxy_root_index: QModelIndex):
         dest_index = self.playlist_tree_widget.proxy_model.mapToSource(proxy_root_index)
@@ -582,18 +586,16 @@ class AddToPlaylistMenu(QMenu):
         )
         widget_action = QWidgetAction(self)
         widget_action.setDefaultWidget(self.playlist_tree_widget)
-        self.addActions(
-            [
-                widget_action,
-                NewPlaylistAction(
-                    self,
-                    parent,
-                    self.playlist_tree_widget.model_.invisibleRootItem().index(),
-                    self.signals,
-                    selected_song_indices,
-                ),
-            ]
+
+        new_playlist_action = NewPlaylistAction(
+            self,
+            parent,
+            self.playlist_tree_widget.model_.invisibleRootItem().index(),
+            self.signals,
+            selected_song_indices,
         )
+
+        self.addActions([widget_action, new_playlist_action])
 
     def add_items_to_playlist_at_index(self, selected_song_indices: list[int], proxy_index: QModelIndex):
         playlist = self.playlist_tree_widget.item_at_index(proxy_index, is_source=False).collection
