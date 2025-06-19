@@ -15,7 +15,7 @@ from PySide6.QtCore import (
     Slot,
     QObject,
 )
-from PySide6.QtGui import QFontMetrics, QFont, QPainter, QMouseEvent, QResizeEvent
+from PySide6.QtGui import QDragLeaveEvent, QFontMetrics, QFont, QPainter, QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QTableView,
     QSizePolicy,
@@ -36,6 +36,7 @@ from qdarktheme.qtpy.QtWidgets import QApplication
 from music_player.common_gui import paint_artists, get_artist_text_rect_text_tups, text_is_buffer
 from music_player.playlist import Playlist
 from music_player.music_importer import get_music_df
+from music_player.constants import ID_ROLE
 from music_player.signals import SharedSignals
 from music_player.utils import datetime_to_age_string, datetime_to_date_str, get_pixmap, get_empty_pixmap
 
@@ -165,6 +166,8 @@ class MusicTableModel(QAbstractTableModel):
         """Returns data for given index."""
         if not index.isValid():
             return None
+        if role == ID_ROLE:
+            return int(self.display_df.iloc[[index.row()]].index[0])
         if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
             return self.display_df.iloc[index.row(), index.column()]
         if role == Qt.ItemDataRole.TextAlignmentRole:
@@ -184,7 +187,7 @@ class MusicTableModel(QAbstractTableModel):
 
     def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
         """Returns flags for given index."""
-        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+        return super().flags(index) | Qt.ItemFlag.ItemIsDragEnabled
 
     def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
         # TODO: Sort by artist list
@@ -537,6 +540,11 @@ class MusicLibraryTable(QTableView):
         self.setSortingEnabled(True)
         self.setCornerButtonEnabled(False)
 
+        self.setDragEnabled(True)
+        self.setDragDropMode(QTableView.DragDropMode.DragDrop)
+        self.setDragDropOverwriteMode(False)
+        self.setAcceptDrops(True)
+
         self.setStyleSheet("""
             QTableView { background: black; border: none; }
             QTableView::item { background: transparent; }
@@ -574,6 +582,25 @@ class MusicLibraryTable(QTableView):
 
         self.viewport().installEventFilter(self)
         self.adjust_height_to_content()
+
+    # TODO START
+    def startDrag(self, supportedActions, /):
+        print("DRAG STARTED")
+        super().startDrag(supportedActions)
+
+    def dragMoveEvent(self, event, /):
+        print("TODO: Handle drag move event")
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event, /):
+        print("\n\nDROPPED ONTO LIB")
+        super().dropEvent(event)
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent, /):
+        print("TODO: Handle drag leave event")
+        super().dragLeaveEvent(event)
+
+    # TODO END
 
     def get_text_rect_tups_for_index(self, index: QModelIndex | QPersistentModelIndex) -> list[tuple[QRect, str, str]]:
         column = index.column()
