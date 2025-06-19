@@ -5,7 +5,7 @@ from datetime import datetime, UTC
 from functools import cache
 from itertools import groupby
 from pathlib import Path
-from typing import TypeVar, Type
+from typing import TypeVar, Type, Iterator
 
 import dacite
 import pandas as pd
@@ -84,6 +84,11 @@ class CollectionBase:
 
     @abstractmethod
     def get_thumbnail_pixmap(self, height: int) -> QPixmap:
+        pass
+
+    @property
+    @abstractmethod
+    def indices(self) -> list[int]:
         pass
 
     @property
@@ -167,6 +172,17 @@ class Folder(CollectionBase):
     @override
     def get_thumbnail_pixmap(self, height: int) -> QPixmap:
         return _get_folder_pixmap(height)
+
+    @property
+    @override
+    def indices(self) -> list[int]:
+        def traverse(parent_collection_id: str) -> Iterator[int]:
+            for collection in get_collections_by_parent_id().get(parent_collection_id, []):
+                if collection.is_folder:
+                    yield from traverse(collection.id)
+                yield from collection.indices
+
+        return list(traverse(self.id))
 
 
 T = TypeVar("T", bound=CollectionBase)

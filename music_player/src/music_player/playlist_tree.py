@@ -14,7 +14,17 @@ from PySide6.QtCore import (
     QObject,
     QEvent,
 )
-from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QFont, QPixmap, QMouseEvent, QDragMoveEvent
+from PySide6.QtGui import (
+    QStandardItemModel,
+    QStandardItem,
+    QIcon,
+    QAction,
+    QFont,
+    QPixmap,
+    QMouseEvent,
+    QDragMoveEvent,
+    QDropEvent,
+)
 from PySide6.QtWidgets import (
     QMainWindow,
     QTreeView,
@@ -39,6 +49,9 @@ from music_player.utils import get_colored_pixmap
 PLAYLIST_ROW_HEIGHT = 50
 
 ID_ROLE = Qt.ItemDataRole.UserRole + 1
+IS_FOLDER_ROLE = Qt.ItemDataRole.UserRole + 2
+IS_PROTECTED_ROLE = Qt.ItemDataRole.UserRole + 3
+COLLECTION_ROLE = Qt.ItemDataRole.UserRole + 4
 
 
 class SORT_ROLE(Enum):
@@ -78,6 +91,12 @@ class TreeModelItem(QStandardItem):
     def data(self, /, role: int = Qt.ItemDataRole.DisplayRole):
         if role == ID_ROLE:
             return self.collection.id
+        if role == IS_FOLDER_ROLE:
+            return self.collection.is_folder
+        if role == IS_PROTECTED_ROLE:
+            return self.collection.is_protected
+        if role == COLLECTION_ROLE:
+            return self.collection
         elif role == SORT_ROLE.UPDATED.value:
             return self.collection.last_updated.timestamp()
         elif role == SORT_ROLE.PLAYED.value:
@@ -137,23 +156,31 @@ class PlaylistProxyModel(QSortFilterProxyModel):
                 return False
         return super().filterAcceptsRow(source_row, source_parent)
 
+    def data_(self, index: QModelIndex, role: int):
+        data = self.data(index, role)
+        assert data is not None
+        return data
+
 
 class PlaylistTree(QTreeView):
-    def __init__(self, model: PlaylistProxyModel, *, is_main_view: bool):
+    def __init__(self, model: PlaylistProxyModel, shared_signals: SharedSignals, *, is_main_view: bool):
         super().__init__()
+        self._signals = shared_signals
+        self.is_main_view = is_main_view
+
         self.setUniformRowHeights(True)
         self.setExpandsOnDoubleClick(True)
         self.setAnimated(True)
         self.setSortingEnabled(False)
         self.setHeaderHidden(True)
 
-        self.setDragEnabled(True)
-        self.setDragDropMode(QTreeView.DragDropMode.InternalMove)
-
         self.setIconSize(QSize(PLAYLIST_ROW_HEIGHT, PLAYLIST_ROW_HEIGHT))
         delegate = TreeItemDelegate()
         self.setItemDelegate(delegate)
-        if is_main_view:
+        if self.is_main_view:
+            self.setDragDropMode(QTreeView.DragDropMode.InternalMove)
+            self.setDragDropOverwriteMode(True)
+
             self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setModel(model)
 
@@ -164,28 +191,39 @@ class PlaylistTree(QTreeView):
         if event.button() != Qt.MouseButton.RightButton:
             super().mousePressEvent(event)
 
-    def dragMoveEvent(self, event: QDragMoveEvent, /):
+    def dropEvent(self, event: QDropEvent) -> None:
+        assert self.is_main_view
+        action = event.proposedAction()
+        if action == Qt.DropAction.IgnoreAction:
+            return
+        source_index = self.selectedIndexes()[0]
         drop_index = self.indexAt(event.pos())
-        selected_index = self.selectedIndexes()[0]
+        if not drop_index.isValid() or self.model().data_(drop_index, IS_FOLDER_ROLE):
+            self._signals.move_collection_signal.emit(
+                self.model().mapToSource(source_index), self.model().mapToSource(drop_index)
+            )
+        else:
+            indices = cast(CollectionBase, self.model().data_(source_index, COLLECTION_ROLE)).indices
+            dest_playlist = cast(Playlist, self.model().data_(drop_index, COLLECTION_ROLE))
+            self._signals.add_to_playlist_signal.emit(indices, dest_playlist)
 
-        root_index = self.rootIndex()
-        if drop_index.isValid():
-            drop_item = self.model().sourceModel().itemFromIndex(self.model().mapToSource(drop_index))
-            assert isinstance(drop_item, TreeModelItem)
-            if drop_item.collection.is_folder:
-                root_index = drop_index
-            elif drop_index.parent() is not None:
-                root_index = drop_index.parent()
+    def dragMoveEvent(self, event: QDragMoveEvent, /):
+        assert self.is_main_view
+        drop_index = self.indexAt(event.pos())
+        src_index = self.selectedIndexes()[0]
 
-        if selected_index.parent() == root_index:
-            self.setDropIndicatorShown(False)
+        if drop_index == src_index.parent() or (
+            drop_index.isValid()
+            and (
+                self.model().data_(drop_index, IS_PROTECTED_ROLE)
+                or (self.model().data_(src_index, IS_PROTECTED_ROLE) and self.model().data_(drop_index, IS_FOLDER_ROLE))
+            )
+        ):
             event.setDropAction(Qt.DropAction.IgnoreAction)
             event.ignore()
             return
 
-        self.setDropIndicatorShown(True)
-        event.setDropAction(Qt.DropAction.MoveAction)
-        event.accept()
+        super().dragMoveEvent(event)
 
 
 class PlaylistTreeWidget(QWidget):
@@ -222,7 +260,7 @@ class PlaylistTreeWidget(QWidget):
             self.flattened_model_ = flattened_model
 
         self.proxy_model = PlaylistProxyModel(self.model_, is_main_view=is_main_view, folders_only=folders_only)
-        self.tree_view = PlaylistTree(self.proxy_model, is_main_view=is_main_view)
+        self.tree_view = PlaylistTree(self.proxy_model, self.signals, is_main_view=is_main_view)
 
         header_widget = QWidget()
         header_layout = QVBoxLayout()
@@ -351,8 +389,6 @@ class PlaylistTreeWidget(QWidget):
     ) -> TreeModelItem:  # , get_default_model_item: bool = False
         assert not isinstance(index.model(), QSortFilterProxyModel if is_source else QStandardItemModel)
         item = self.source_model().itemFromIndex(index if is_source else self.proxy_model.mapToSource(index))
-        if not isinstance(item, TreeModelItem):
-            pass
         assert isinstance(item, TreeModelItem)
         return item
 
@@ -442,9 +478,7 @@ class PlaylistTreeWidget(QWidget):
             else:
                 menu.addSeparator()
 
-            if not item.collection.is_folder:
-                playlist = cast(Playlist, item.collection)
-                menu.addMenu(AddToPlaylistMenu(playlist.indices, self.signals, menu, main_window, self))
+            menu.addMenu(AddToPlaylistMenu(item.collection.indices, self.signals, menu, main_window, self))
 
         args = menu, main_window, source_root_index, self.signals
         menu.addSeparator()

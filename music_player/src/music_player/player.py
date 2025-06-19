@@ -218,7 +218,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def double_click_tree_view_item(self, proxy_index: QModelIndex) -> None:
-        playlist = cast(TreeModelItem, self.playlist_view.item_at_index(proxy_index, is_source=False)).collection
+        playlist = self.playlist_view.item_at_index(proxy_index, is_source=False).collection
         if not isinstance(playlist, Playlist):
             raise NotImplementedError
         self.play_playlist(playlist, 0)
