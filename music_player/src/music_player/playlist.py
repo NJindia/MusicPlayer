@@ -59,6 +59,10 @@ class CollectionBase:
     last_played: datetime | None
     thumbnail: bytes | None
 
+    def __post_init__(self):
+        assert self.id != ""
+        assert self.title != ""
+
     @property
     def _playlist_path(self) -> Path:
         return DEFAULT_PLAYLIST_PATH / f"{self.id}.json"

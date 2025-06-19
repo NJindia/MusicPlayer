@@ -115,6 +115,7 @@ class _CreateDialog(QDialog):
 
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setStyleSheet("QDialog { border-radius: 5px; border: 1px solid white; }")
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
         header = QLabel(f"New {self.mode.capitalize()}", self)
         font = QFont()
@@ -135,21 +136,26 @@ class _CreateDialog(QDialog):
 
         self.name = QLineEdit(self)
         self.name.setPlaceholderText(f"{self.mode.capitalize()} name")
+        self.name.textChanged.connect(self.update_confirm_button)
 
-        confirm_button = QPushButton(self)
-        confirm_button.setText("Create")
-        confirm_button.setStyleSheet("QPushButton { border-radius: 5px; }")
-        confirm_button.released.connect(partial(self.create_clicked, move_from_index, df_indices_to_add))
+        self.confirm_button = QPushButton(self)
+        self.confirm_button.setEnabled(False)
+        self.confirm_button.setText("Create")
+        self.confirm_button.setStyleSheet("QPushButton { border-radius: 5px; }")
+        self.confirm_button.released.connect(partial(self.create_clicked, move_from_index, df_indices_to_add))
 
         button_layout = QHBoxLayout()
         button_layout.addStretch()
-        button_layout.addWidget(confirm_button)
+        button_layout.addWidget(self.confirm_button)
 
         main_layout = QVBoxLayout()
         main_layout.addLayout(header_layout)
         main_layout.addWidget(self.name)
         main_layout.addLayout(button_layout)
         self.setLayout(main_layout)
+
+    def update_confirm_button(self, text: str) -> None:
+        self.confirm_button.setEnabled(bool(text))
 
     def create_clicked(self, move_from_index: QModelIndex | None, df_indices_to_add: list[int] | None) -> None:
         base_args = self.name.text(), self.source_root_index
@@ -175,10 +181,11 @@ class NewPlaylistAction(QAction):
         df_indices_to_add: list[int] | None = None,
     ) -> None:
         super().__init__("New playlist", parent)
-        dialog = _CreateDialog(
-            main_window, source_root_index, signals, mode="playlist", df_indices_to_add=df_indices_to_add
+        self.triggered.connect(
+            lambda: _CreateDialog(
+                main_window, source_root_index, signals, mode="playlist", df_indices_to_add=df_indices_to_add
+            ).exec()
         )
-        self.triggered.connect(lambda: dialog.exec())
 
 
 class NewFolderAction(QAction):
@@ -191,7 +198,8 @@ class NewFolderAction(QAction):
         move_collection_from_index: QModelIndex | None = None,
     ) -> None:
         super().__init__("New folder", parent)
-        dialog = _CreateDialog(
-            main_window, source_root_index, signals, mode="folder", move_from_index=move_collection_from_index
+        self.triggered.connect(
+            lambda: _CreateDialog(
+                main_window, source_root_index, signals, mode="folder", move_from_index=move_collection_from_index
+            ).exec()
         )
-        self.triggered.connect(lambda: dialog.exec())
