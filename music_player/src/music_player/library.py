@@ -15,7 +15,7 @@ from PySide6.QtCore import (
     Slot,
     QObject,
 )
-from PySide6.QtGui import QDragLeaveEvent, QFontMetrics, QFont, QPainter, QMouseEvent, QResizeEvent
+from PySide6.QtGui import QDragMoveEvent, QDropEvent, QFontMetrics, QFont, QPainter, QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QTableView,
     QSizePolicy,
@@ -34,10 +34,11 @@ from PySide6.QtWidgets import (
 from qdarktheme.qtpy.QtWidgets import QApplication
 
 from music_player.common_gui import paint_artists, get_artist_text_rect_text_tups, text_is_buffer
-from music_player.playlist import Playlist
+from music_player.playlist import Playlist, CollectionBase
 from music_player.music_importer import get_music_df
 from music_player.constants import ID_ROLE
 from music_player.signals import SharedSignals
+from music_player.view_types import PlaylistTreeView, LibraryTableView
 from music_player.utils import datetime_to_age_string, datetime_to_date_str, get_pixmap, get_empty_pixmap
 
 PADDING = 5
@@ -517,12 +518,12 @@ class TableHeader(QHeaderView):
         self.setSortIndicator(*args)
 
 
-class MusicLibraryTable(QTableView):
+class MusicLibraryTable(LibraryTableView):
     song_clicked = Signal(int)
 
     def __init__(self, shared_signals: SharedSignals, parent: MusicLibraryWidget):
         super().__init__(parent)
-        self.shared_signals = shared_signals
+        self._signals = shared_signals
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self.setShowGrid(False)
@@ -574,24 +575,25 @@ class MusicLibraryTable(QTableView):
         self.viewport().installEventFilter(self)
         self.adjust_height_to_content()
 
-    # TODO START
-    def startDrag(self, supportedActions, /):
-        print("DRAG STARTED")
-        super().startDrag(supportedActions)
+    def dragMoveEvent(self, event: QDragMoveEvent, /):
+        source = event.source()
+        playlist = cast(MusicLibraryWidget, self.parent()).playlist
+        if playlist is not None and not playlist.is_protected and isinstance(source, PlaylistTreeView):
+            event.setDropAction(Qt.DropAction.CopyAction)
+            event.accept()
+            return
+        event.setDropAction(Qt.DropAction.IgnoreAction)
+        event.ignore()
 
-    def dragMoveEvent(self, event, /):
-        print("TODO: Handle drag move event")
-        super().dragMoveEvent(event)
-
-    def dropEvent(self, event, /):
-        print("\n\nDROPPED ONTO LIB")
-        super().dropEvent(event)
-
-    def dragLeaveEvent(self, event: QDragLeaveEvent, /):
-        print("TODO: Handle drag leave event")
-        super().dragLeaveEvent(event)
-
-    # TODO END
+    def dropEvent(self, event: QDropEvent, /):
+        source = event.source()
+        if isinstance(source, PlaylistTreeView):
+            dest_playlist = cast(MusicLibraryWidget, self.parent()).playlist
+            assert dest_playlist is not None
+            src_playlist = cast(
+                CollectionBase, source.model().data(source.selectedIndexes()[0], PlaylistTreeView.collection_role)
+            )
+            self._signals.add_to_playlist_signal.emit(src_playlist.indices, dest_playlist)
 
     def get_text_rect_tups_for_index(self, index: QModelIndex | QPersistentModelIndex) -> list[tuple[QRect, str, str]]:
         column = index.column()
@@ -658,9 +660,9 @@ class MusicLibraryTable(QTableView):
                     case 0:
                         self.song_clicked.emit(index.row())
                     case 1:
-                        self.shared_signals.library_load_artist_signal.emit(self.hovered_data)
+                        self._signals.library_load_artist_signal.emit(self.hovered_data)
                     case 2:
-                        self.shared_signals.library_load_album_signal.emit(self.hovered_data)
+                        self._signals.library_load_album_signal.emit(self.hovered_data)
                     case _:
                         raise NotImplementedError
         super().mouseReleaseEvent(event)

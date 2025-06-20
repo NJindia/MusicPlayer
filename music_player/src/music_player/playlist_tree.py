@@ -47,16 +47,12 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import NewPlaylistAction, NewFolderAction
 from music_player.constants import MAX_SIDE_BAR_WIDTH, ID_ROLE
-from music_player.library import MusicLibraryTable
+from music_player.view_types import LibraryTableView, PlaylistTreeView
 from music_player.playlist import Playlist, CollectionBase, get_collections_by_parent_id, Folder
 from music_player.signals import SharedSignals
 from music_player.utils import get_colored_pixmap
 
 PLAYLIST_ROW_HEIGHT = 50
-
-IS_FOLDER_ROLE = Qt.ItemDataRole.UserRole + 2
-IS_PROTECTED_ROLE = Qt.ItemDataRole.UserRole + 3
-COLLECTION_ROLE = Qt.ItemDataRole.UserRole + 4
 
 
 class SORT_ROLE(Enum):
@@ -99,11 +95,11 @@ class TreeModelItem(QStandardItem):
     def data(self, /, role: int = Qt.ItemDataRole.DisplayRole):
         if role == ID_ROLE:
             return self.collection.id
-        if role == IS_FOLDER_ROLE:
+        if role == PlaylistTreeView.is_folder_role:
             return self.collection.is_folder
-        if role == IS_PROTECTED_ROLE:
+        if role == PlaylistTreeView.is_protected_role:
             return self.collection.is_protected
-        if role == COLLECTION_ROLE:
+        if role == PlaylistTreeView.collection_role:
             return self.collection
         elif role == SORT_ROLE.UPDATED.value:
             return self.collection.last_updated.timestamp()
@@ -170,7 +166,7 @@ class PlaylistProxyModel(QSortFilterProxyModel):
         return data
 
 
-class PlaylistTree(QTreeView):
+class PlaylistTree(PlaylistTreeView):
     def __init__(self, model: PlaylistProxyModel, shared_signals: SharedSignals, *, is_main_view: bool):
         super().__init__()
         self._signals = shared_signals
@@ -208,8 +204,6 @@ class PlaylistTree(QTreeView):
             self.drop_index_ = None
             self.setStyleSheet("")
 
-
-
     def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
         self._reset_drop_index()
         super().dragLeaveEvent(event)
@@ -232,29 +226,30 @@ class PlaylistTree(QTreeView):
             if event.proposedAction() != Qt.DropAction.MoveAction:
                 qCritical("If PlaylistTree.dropEvent source is itself, DropAction should always be MoveAction")
             source_index = self.selectedIndexes()[0]
-            if not drop_index.isValid() or self.model().data_(drop_index, IS_FOLDER_ROLE):
+            if not drop_index.isValid() or self.model().data_(drop_index, self.is_folder_role):
                 self._signals.move_collection_signal.emit(
                     self.model().mapToSource(source_index), self.model().mapToSource(drop_index)
                 )
             else:
-                indices = cast(CollectionBase, self.model().data_(source_index, COLLECTION_ROLE)).indices
-                dest_playlist = cast(Playlist, self.model().data_(drop_index, COLLECTION_ROLE))
+                indices = cast(CollectionBase, self.model().data_(source_index, self.collection_role)).indices
+                dest_playlist = cast(Playlist, self.model().data_(drop_index, self.collection_role))
                 self._signals.add_to_playlist_signal.emit(indices, dest_playlist)
         else:
             if event.proposedAction() != Qt.DropAction.CopyAction:
-                qCritical("If PlaylistTree.dropEvent source is not itself, DropAction should always be CopyAction")
-            if not isinstance(source, MusicLibraryTable):
+                qFatal("If PlaylistTree.dropEvent source is not itself, DropAction should always be CopyAction")
+            if not isinstance(source, LibraryTableView):
                 qFatal("Bad source")
                 return
             lib_indices = source.selectionModel().selectedRows()
-            df_indices = [source.model_.data(lib_index, ID_ROLE) for lib_index in lib_indices]
+            df_indices = [source.model().data(lib_index, ID_ROLE) for lib_index in lib_indices]
 
-            if not drop_index.isValid() or self.model().data(drop_index, IS_FOLDER_ROLE):
+            if not drop_index.isValid() or self.model().data_(drop_index, self.is_folder_role):
                 source_drop_index = self.model().mapToSource(drop_index)
                 self._signals.create_playlist_signal.emit("New Playlist", source_drop_index, df_indices)
             else:
-                self._signals.add_to_playlist_signal.emit(df_indices, self.model().data_(drop_index, COLLECTION_ROLE))
-
+                self._signals.add_to_playlist_signal.emit(
+                    df_indices, self.model().data_(drop_index, self.collection_role)
+                )
 
     def dragMoveEvent(self, event: QDragMoveEvent, /):
         def ignore_event():
@@ -275,10 +270,10 @@ class PlaylistTree(QTreeView):
                 or (
                     drop_index.isValid()
                     and (
-                        self.model().data_(drop_index, IS_PROTECTED_ROLE)
+                        self.model().data_(drop_index, self.is_protected_role)
                         or (
-                            self.model().data_(src_index, IS_PROTECTED_ROLE)
-                            and self.model().data_(drop_index, IS_FOLDER_ROLE)
+                            self.model().data_(src_index, self.is_protected_role)
+                            and self.model().data_(drop_index, self.is_folder_role)
                         )
                     )
                 )
@@ -291,7 +286,7 @@ class PlaylistTree(QTreeView):
         else:
             if Qt.DropAction.CopyAction not in event.possibleActions():
                 qFatal("Copy action should be possible")
-            if drop_index.isValid() and self.model().data_(drop_index, IS_PROTECTED_ROLE):
+            if drop_index.isValid() and self.model().data_(drop_index, self.is_protected_role):
                 ignore_event()
                 return
             event.setDropAction(Qt.DropAction.CopyAction)
