@@ -1,19 +1,20 @@
+from collections.abc import Callable
 from functools import partial
-from typing import Callable, Literal
+from typing import Literal
 
-from PySide6.QtCore import QRect, Qt, QModelIndex
-from PySide6.QtGui import QPainter, QFont, QFontMetrics, QAction
+from PySide6.QtCore import QModelIndex, QRect, Qt
+from PySide6.QtGui import QAction, QFont, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QMainWindow,
-    QMenu,
-    QStyleOptionViewItem,
-    QStyleOptionGraphicsItem,
     QDialog,
-    QVBoxLayout,
-    QLineEdit,
-    QPushButton,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QPushButton,
+    QStyleOptionGraphicsItem,
+    QStyleOptionViewItem,
+    QVBoxLayout,
 )
 
 from music_player.signals import SharedSignals
@@ -78,9 +79,9 @@ def paint_artists(
     text_flag = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter  # TODO SINGLE LINE?
     found_hovered: bool = False
     text_rects: list[QRect] = []
-    for text_rect, _, text in get_artist_text_rect_text_tups(artists, text_rect, font_metrics):
-        text_rects.append(text_rect)
-        if not found_hovered and not text_is_buffer(text) and hover_condition(text_rect):
+    for artist_text_rect, _, text in get_artist_text_rect_text_tups(artists, text_rect, font_metrics):
+        text_rects.append(artist_text_rect)
+        if not found_hovered and not text_is_buffer(text) and hover_condition(artist_text_rect):
             found_hovered = True
             font.setUnderline(True)
         else:
@@ -88,7 +89,7 @@ def paint_artists(
         painter.save()
         painter.setFont(font)
 
-        painter.drawText(text_rect, text_flag, text)
+        painter.drawText(artist_text_rect, text_flag, text)
         painter.restore()
 
     return text_rects
@@ -115,7 +116,7 @@ class _CreateDialog(QDialog):
 
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
         self.setStyleSheet("QDialog { border-radius: 5px; border: 1px solid white; }")
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, on=True)
 
         header = QLabel(f"New {self.mode.capitalize()}", self)
         font = QFont()

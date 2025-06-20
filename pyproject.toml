@@ -27,6 +27,30 @@ line-length = 120
 target-version = "py313"
 fix = true
 
+[tool.ruff.lint]
+dummy-variable-rgx = "^_$"
+select = ["ALL"]
+unfixable = [
+    "T20", # Removes print statements (should be given the opportunity to convert to a log or ignore).
+    "ERA", # Removes commented out code
+]
+ignore = [
+    "S101", # No `assert` statements
+    "D", # Docstring rules
+    "COM", # Tailing commas (better handled by black)
+    "FIX002", # Disallows TODOs
+    "TD",  # Disallows TODOs
+    "EM", # Denies using string literals in Exception constructors
+    "T201", # Disallows print statements
+    "ANN", # Flags missing type annotations... these requirements should be covered by pyright instead.
+    "TRY003", # Denies passing long strings to the constructor of exception classes.
+    "TCH", # Quotes around type hints
+    "PLR2004", # Magic value used in comparison,
+    "PLR0913", # Too many arguments in a function call
+    "BLE", # Denies catching a raw Exception
+
+]
+
 [tool.ruff.lint.isort]
 split-on-trailing-comma = false
 

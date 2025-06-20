@@ -1,6 +1,6 @@
-from PySide6.QtCore import QObject, Signal, QModelIndex
+from PySide6.QtCore import QModelIndex, QObject, Signal
 
-from music_player.playlist import Playlist, CollectionBase
+from music_player.playlist import CollectionBase, Playlist
 
 
 class SharedSignals(QObject):

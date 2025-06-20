@@ -1,35 +1,33 @@
-from datetime import datetime, date, UTC
+from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
 
 from PySide6.QtCore import QSize
-from PySide6.QtGui import QPixmap, QPixmapCache, QImage, Qt
+from PySide6.QtGui import QImage, QPixmap, QPixmapCache, Qt
 
 
 def length_timestamp_to_seconds(length_timestamp: str) -> int:
-    return int(
-        (
-            datetime.combine(datetime.min, datetime.strptime(length_timestamp, "%H:%M:%S").time()) - datetime.min
-        ).total_seconds()
-    )
+    min_datetime_utc = datetime.min.replace(tzinfo=UTC)
+    length_time_utc = datetime.strptime(length_timestamp, "%H:%M:%S").replace(tzinfo=UTC).time()
+    return int((datetime.combine(min_datetime_utc, length_time_utc) - min_datetime_utc).total_seconds())
 
 
 def parse_release_date(release_date: str) -> date:
     match release_date.count("-"):
         case 2:
-            return datetime.strptime(release_date, "%Y-%m-%d").date()
+            return datetime.strptime(release_date, "%Y-%m-%d").replace(tzinfo=UTC).date()
         case 1:
-            return datetime.strptime(release_date, "%Y-%m").date()
+            return datetime.strptime(release_date, "%Y-%m").replace(tzinfo=UTC).date()
         case 0:
-            return datetime.strptime(release_date, "%Y").date()
+            return datetime.strptime(release_date, "%Y").replace(tzinfo=UTC).date()
         case _:
             raise ValueError("Invalid release date")
 
 
-def timestamp_to_str(timestamp: int | float):
+def timestamp_to_str(timestamp: float):
     if isinstance(timestamp, float):
         timestamp = round(timestamp)
-    return datetime.fromtimestamp(timestamp).strftime("%M:%S")
+    return datetime.fromtimestamp(timestamp, tz=UTC).strftime("%M:%S")
 
 
 def datetime_to_date_str(dt: datetime) -> str:
@@ -40,18 +38,17 @@ def datetime_to_age_string(dt: datetime) -> str:
     td = datetime.now(tz=UTC) - dt
     if td.seconds < 60:
         return f"{td.seconds} second{'s'[: td.seconds ^ 1]} ago"
-    elif (mins := round(td.seconds / 60)) < 60:
+    if (mins := round(td.seconds / 60)) < 60:
         return f"{mins} minute{'s'[: mins ^ 1]} ago"
-    elif td.days < 1:
+    if td.days < 1:
         hour = round(td.seconds / 60 / 60)
         return f"{hour} hour{'s'[: hour ^ 1]} ago"
-    elif td.days < 7:
+    if td.days < 7:
         return f"{td.days} day{'s'[: td.days ^ 1]} ago"
-    elif td.days <= 28:
+    if td.days <= 28:
         week = td.days // 7
         return f"{week} week{'s'[: week ^ 1]} ago"
-    else:
-        return datetime_to_date_str(dt)
+    return datetime_to_date_str(dt)
 
 
 def get_pixmap(source: bytes | Path, height: int | None) -> QPixmap:

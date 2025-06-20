@@ -1,16 +1,16 @@
 import asyncio
 import logging
-import os
+from pathlib import Path
 
 import aiohttp
 from rich.logging import RichHandler
 from rich.markdown import Markdown
 from rich.traceback import install
+from streamrip import __version__
+from streamrip.config import DEFAULT_CONFIG_PATH, Config, OutdatedConfigError, set_user_defaults
 from streamrip.console import console
 from streamrip.rip.cli import latest_streamrip_version
 from streamrip.rip.main import Main
-from streamrip.config import Config, OutdatedConfigError, set_user_defaults, DEFAULT_CONFIG_PATH
-from streamrip import __version__
 
 logger = logging.getLogger(__name__)
 CODECS = ("ALAC", "FLAC", "OGG", "MP3", "AAC")
@@ -45,7 +45,7 @@ def rip(
         install(console=console, suppress=[asyncio], max_frames=1)
         logger.setLevel(logging.INFO)
 
-    if not os.path.isfile(config_path):
+    if not Path(config_path).is_file():
         console.print(
             f"No file found at [bold cyan]{config_path}[/bold cyan], creating default config.",
         )
@@ -63,7 +63,7 @@ def rip(
             f"Error loading config from [bold cyan]{config_path}[/bold cyan]: {e}\n"
             "Try running [bold]rip config reset[/bold]",
         )
-        return
+        return None
 
     # set session config values to command line args
     if no_db:
@@ -111,7 +111,7 @@ async def url(urls: list[str], config: Config | None):
                         " to update.[/green]\n"
                     )
 
-                    console.print(Markdown(notes))
+                    console.print(Markdown(str(notes)))
 
     except aiohttp.ClientConnectorCertificateError as e:
         from streamrip.utils.ssl_utils import print_ssl_error_help

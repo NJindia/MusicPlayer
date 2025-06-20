@@ -1,47 +1,30 @@
 import sys
 from dataclasses import asdict
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from functools import partial
 from itertools import count
 from typing import cast
 
-import qdarktheme
 import numpy as np
 import pandas as pd
+import qdarktheme
 import vlc
-from PySide6.QtCore import Slot, Qt, QThread, Signal, QModelIndex, QPoint
-from PySide6.QtGui import QIcon, QMouseEvent, QAction
-from PySide6.QtWidgets import (
-    QApplication,
-    QMainWindow,
-    QWidget,
-    QHBoxLayout,
-    QTabWidget,
-    QMenu,
-)
+from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QAction, QIcon, QMouseEvent
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QWidget
 from vlc import EventType
 
-from music_player.constants import MAX_SIDE_BAR_WIDTH
-from music_player.playlist import Playlist, Folder, CollectionBase, DEFAULT_PLAYLIST_PATH, get_collections_by_parent_id
-from music_player.signals import SharedSignals
-from music_player.utils import get_pixmap
-from music_player.library import MusicLibraryWidget, MusicLibraryScrollArea
-from music_player.playlist_tree import (
-    PlaylistTreeWidget,
-    TreeModelItem,
-    SORT_ROLE,
-    AddToPlaylistMenu,
-)
-from music_player.queue_gui import (
-    QueueGraphicsView,
-    QueueEntryGraphicsView,
-    QueueEntryGraphicsItem,
-)
-from music_player.music_importer import get_music_df
-from music_player.toolbar import MediaToolbar
-from music_player.vlc_core import VLCCore
-
 from music_player.common_gui import CreateMode
+from music_player.constants import MAX_SIDE_BAR_WIDTH
+from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
+from music_player.music_importer import get_music_df
+from music_player.playlist import DEFAULT_PLAYLIST_PATH, CollectionBase, Folder, Playlist, get_collections_by_parent_id
+from music_player.playlist_tree import AddToPlaylistMenu, PlaylistTreeWidget, SortRole, TreeModelItem
+from music_player.queue_gui import QueueEntryGraphicsItem, QueueEntryGraphicsView, QueueGraphicsView
+from music_player.signals import SharedSignals
+from music_player.toolbar import MediaToolbar
+from music_player.utils import get_pixmap
+from music_player.vlc_core import VLCCore
 
 
 class AddToQueueAction(QAction):
@@ -53,6 +36,82 @@ class AddToQueueAction(QAction):
 class MainWindow(QMainWindow):
     media_changed_signal = Signal()
     collection_id = count(len(list(DEFAULT_PLAYLIST_PATH.iterdir())))
+
+    def __init__(self, core: VLCCore):
+        super().__init__()
+
+        self.core = core
+        self.media_changed: bool = False
+        self.setWindowTitle("Media Player")
+        self.media_changed_signal.connect(self.media_changed_ui)
+        self.last_played_music: pd.Series = pd.Series()  # TODO -> VLCCore?
+
+        main_ui = QHBoxLayout()
+        self.shared_signals = SharedSignals()
+
+        self.playlist_view = PlaylistTreeWidget(self, self, self.shared_signals, is_main_view=True)
+        self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
+        self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
+        self.playlist_view.tree_view.customContextMenuRequested.connect(
+            partial(self.playlist_view.playlist_context_menu, self)
+        )
+        main_ui.addWidget(self.playlist_view, 1)
+
+        self.library = MusicLibraryWidget(self.core.current_playlist, self.shared_signals)
+        self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_playlist)
+        self.shared_signals.create_playlist_signal.connect(partial(self.create, "playlist"))
+        self.shared_signals.create_folder_signal.connect(partial(self.create, "folder"))
+        self.library.table_view.song_clicked.connect(self.play_song_from_library)
+        self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
+        scroll_area = MusicLibraryScrollArea(self.library)
+
+        main_ui.addWidget(scroll_area, 2)
+
+        self.history = QueueEntryGraphicsView()
+        self.queue = QueueGraphicsView(self.core, self.shared_signals)
+        self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
+        self.queue.customContextMenuRequested.connect(self.queue_context_menu)
+
+        queue_tab = QTabWidget()
+        queue_tab.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
+        queue_tab.addTab(self.queue, "Queue")
+        queue_tab.addTab(self.history, "History")
+        main_ui.addWidget(queue_tab, 1)
+
+        self.toolbar = MediaToolbar(self.core, self.shared_signals)
+        self.toolbar.shuffle_button.toggled.connect(self.shuffle_button_toggled)
+        self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.toolbar)
+
+        w = QWidget()
+        main_ui.setSpacing(0)
+        main_ui.setContentsMargins(0, 0, 0, 0)
+        w.setLayout(main_ui)
+        self.setCentralWidget(w)
+
+        self.core.player_event_manager.event_attach(
+            EventType.MediaPlayerPlaying,  # pyright: ignore[reportAttributeAccessIssue]
+            self.media_player_playing_callback,
+        )
+        self.core.player_event_manager.event_attach(
+            EventType.MediaPlayerPaused,  # pyright: ignore[reportAttributeAccessIssue]
+            self.media_player_paused_callback,
+        )
+        self.core.player_event_manager.event_attach(
+            EventType.MediaPlayerStopped,  # pyright: ignore[reportAttributeAccessIssue]
+            self.media_player_paused_callback,
+        )
+        self.core.player_event_manager.event_attach(
+            EventType.MediaPlayerTimeChanged,  # pyright: ignore[reportAttributeAccessIssue]
+            self.toolbar.media_slider.update_ui_live,
+        )
+        self.core.player_event_manager.event_attach(
+            EventType.MediaPlayerEndReached,  # pyright: ignore[reportAttributeAccessIssue]
+            self.media_player_ended_callback,
+        )
+        self.core.list_player_event_manager.event_attach(
+            EventType.MediaListPlayerNextItemSet,  # pyright: ignore[reportAttributeAccessIssue]
+            self.media_player_media_changed_callback,
+        )
 
     @Slot()
     def media_changed_ui(self):
@@ -175,7 +234,7 @@ class MainWindow(QMainWindow):
         playlist.last_played = datetime.now(tz=UTC)
         playlist.save()
 
-        if self.playlist_view.proxy_model.sortRole() == SORT_ROLE.PLAYED.value:
+        if self.playlist_view.proxy_model.sortRole() == SortRole.PLAYED.value:
             self.playlist_view.proxy_model.invalidate()
 
         self.play_music(playlist.dataframe, playlist_index)
@@ -279,7 +338,7 @@ class MainWindow(QMainWindow):
     def _update_playlist_last_updated(self, playlist: Playlist):
         playlist.last_updated = datetime.now(tz=UTC)
         playlist.save()
-        if self.playlist_view.proxy_model.sortRole() == SORT_ROLE.PLAYED.value:
+        if self.playlist_view.proxy_model.sortRole() == SortRole.PLAYED.value:
             self.playlist_view.proxy_model.invalidate()
 
     @Slot()
@@ -344,82 +403,6 @@ class MainWindow(QMainWindow):
         menu.addMenu(add_to_playlist_menu)
 
         menu.exec(self.queue.mapToGlobal(point))
-
-    def __init__(self, core: VLCCore):
-        super().__init__()
-
-        self.core = core
-        self.media_changed: bool = False
-        self.setWindowTitle("Media Player")
-        self.media_changed_signal.connect(self.media_changed_ui)
-        self.last_played_music: pd.Series = pd.Series()  # TODO -> VLCCore?
-
-        main_ui = QHBoxLayout()
-        self.shared_signals = SharedSignals()
-
-        self.playlist_view = PlaylistTreeWidget(self, self, self.shared_signals, is_main_view=True)
-        self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
-        self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
-        self.playlist_view.tree_view.customContextMenuRequested.connect(
-            partial(self.playlist_view.playlist_context_menu, self)
-        )
-        main_ui.addWidget(self.playlist_view, 1)
-
-        self.library = MusicLibraryWidget(self.core.current_playlist, self.shared_signals)
-        self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_playlist)
-        self.shared_signals.create_playlist_signal.connect(partial(self.create, "playlist"))
-        self.shared_signals.create_folder_signal.connect(partial(self.create, "folder"))
-        self.library.table_view.song_clicked.connect(self.play_song_from_library)
-        self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
-        scroll_area = MusicLibraryScrollArea(self.library)
-
-        main_ui.addWidget(scroll_area, 2)
-
-        self.history = QueueEntryGraphicsView()
-        self.queue = QueueGraphicsView(self.core, self.shared_signals)
-        self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
-        self.queue.customContextMenuRequested.connect(self.queue_context_menu)
-
-        queue_tab = QTabWidget()
-        queue_tab.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
-        queue_tab.addTab(self.queue, "Queue")
-        queue_tab.addTab(self.history, "History")
-        main_ui.addWidget(queue_tab, 1)
-
-        self.toolbar = MediaToolbar(self.core, self.shared_signals)
-        self.toolbar.shuffle_button.toggled.connect(self.shuffle_button_toggled)
-        self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.toolbar)
-
-        w = QWidget()
-        main_ui.setSpacing(0)
-        main_ui.setContentsMargins(0, 0, 0, 0)
-        w.setLayout(main_ui)
-        self.setCentralWidget(w)
-
-        self.core.player_event_manager.event_attach(
-            EventType.MediaPlayerPlaying,  # pyright: ignore[reportAttributeAccessIssue]
-            self.media_player_playing_callback,
-        )
-        self.core.player_event_manager.event_attach(
-            EventType.MediaPlayerPaused,  # pyright: ignore[reportAttributeAccessIssue]
-            self.media_player_paused_callback,
-        )
-        self.core.player_event_manager.event_attach(
-            EventType.MediaPlayerStopped,  # pyright: ignore[reportAttributeAccessIssue]
-            self.media_player_paused_callback,
-        )
-        self.core.player_event_manager.event_attach(
-            EventType.MediaPlayerTimeChanged,  # pyright: ignore[reportAttributeAccessIssue]
-            self.toolbar.media_slider.update_ui_live,
-        )
-        self.core.player_event_manager.event_attach(
-            EventType.MediaPlayerEndReached,  # pyright: ignore[reportAttributeAccessIssue]
-            self.media_player_ended_callback,
-        )
-        self.core.list_player_event_manager.event_attach(
-            EventType.MediaListPlayerNextItemSet,  # pyright: ignore[reportAttributeAccessIssue]
-            self.media_player_media_changed_callback,
-        )
 
 
 if __name__ == "__main__":

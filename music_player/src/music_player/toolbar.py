@@ -1,29 +1,26 @@
 from functools import cache, partial
+from typing import Literal
 
 import pandas as pd
 import vlc
-from PySide6.QtCore import Qt, Slot, QSize
+from PySide6.QtCore import QSize, Qt, Slot
 from PySide6.QtGui import QIcon, QPixmap, QTransform
 from PySide6.QtWidgets import (
-    QWidget,
-    QSlider,
-    QLabel,
-    QHBoxLayout,
-    QToolButton,
-    QSizePolicy,
-    QToolBar,
-    QVBoxLayout,
     QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QSlider,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
-from typing import Literal
 
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD
-from music_player.utils import timestamp_to_str, get_empty_pixmap
-from music_player.vlc_core import VLCCore
-
-
 from music_player.signals import SharedSignals
-from music_player.utils import get_pixmap
+from music_player.utils import get_empty_pixmap, get_pixmap, timestamp_to_str
+from music_player.vlc_core import VLCCore
 
 
 def expanding_widget() -> QWidget:
@@ -56,8 +53,7 @@ class AlbumButton(QToolButton):
         if self.music is not None:
             if self.music["album_cover_bytes"] is None:
                 raise NotImplementedError("NEED PLACEHOLDER FOR NO ALBUM COVER")
-            else:
-                self.setIcon(QIcon(get_pixmap(self.music["album_cover_bytes"], self.iconSize().height())))
+            self.setIcon(QIcon(get_pixmap(self.music["album_cover_bytes"], self.iconSize().height())))
         else:
             self.setIcon(QIcon(get_empty_pixmap(self.iconSize().height())))
 
@@ -256,7 +252,7 @@ class MediaToolbar(QToolBar):
         media_control_button_hbox.addWidget(self.play_button)
 
         self.skip_button = QToolButton()
-        self.skip_button.setIcon((QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1)))))
+        self.skip_button.setIcon(QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1))))
         self.skip_button.clicked.connect(self.core.next)
         media_control_button_hbox.addWidget(self.skip_button)
 

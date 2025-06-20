@@ -1,11 +1,11 @@
 import itertools
-from typing import cast, Literal, get_args
+from typing import Literal, cast, get_args
 
 import pandas as pd
-from vlc import Instance, MediaPlayer, EventType, Event, MediaList, MediaListPlayer, Media
+from vlc import Event, EventType, Instance, Media, MediaList, MediaListPlayer, MediaPlayer
 
 from music_player.music_importer import get_music_df
-from music_player.playlist import get_playlist, Playlist, DOWNLOADED_SONGS_PLAYLIST_PATH
+from music_player.playlist import DOWNLOADED_SONGS_PLAYLIST_PATH, Playlist, get_playlist
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
 
@@ -70,8 +70,7 @@ class VLCCore:
 
     def previous(self):
         self.current_media_idx -= 1
-        if self.current_media_idx < 0:
-            self.current_media_idx = 0
+        self.current_media_idx = max(self.current_media_idx, 0)
         self.list_player.play_item_at_index(self.list_indices[self.current_media_idx])
 
     def next(self):

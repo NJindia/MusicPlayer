@@ -1,21 +1,21 @@
 import json
 from abc import abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from functools import cache
 from itertools import groupby
 from pathlib import Path
-from typing import TypeVar, Type, Iterator
+from typing import TypeVar, override
 
 import dacite
 import pandas as pd
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QPainter, QPixmapCache
 from dacite import Config
-from typing_extensions import override
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QPixmap, QPixmapCache
 
 from music_player.music_importer import get_music_df
-from music_player.utils import get_pixmap, get_colored_pixmap
+from music_player.utils import get_colored_pixmap, get_pixmap
 
 DEFAULT_PLAYLIST_PATH = Path("../playlists")
 DOWNLOADED_SONGS_PLAYLIST_PATH = Path("../playlists/_.json")
@@ -28,25 +28,6 @@ class PlaylistItem:
 
     def to_json(self):
         return {"song_index": self.song_index, "added_on": self.added_on.isoformat()}
-
-
-@cache
-def _empty_playlist_pixmap(height: int) -> QPixmap:
-    return QPixmap("../icons/playlist/empty-playlist.svg").scaledToHeight(
-        height, Qt.TransformationMode.SmoothTransformation
-    )
-
-
-@cache
-def _get_folder_pixmap(height: int) -> QPixmap:
-    return QPixmap("../icons/playlist/folder.svg").scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
-
-
-@cache
-def _get_downloaded_songs_playlist_pixmap(height: int) -> QPixmap:
-    return get_colored_pixmap(QPixmap("../icons/playlist/downloaded_songs.svg"), Qt.GlobalColor.black).scaledToHeight(
-        height, Qt.TransformationMode.SmoothTransformation
-    )
 
 
 @dataclass(kw_only=True)
@@ -192,8 +173,27 @@ class Folder(CollectionBase):
 T = TypeVar("T", bound=CollectionBase)
 
 
+@cache
+def _empty_playlist_pixmap(height: int) -> QPixmap:
+    return QPixmap("../icons/playlist/empty-playlist.svg").scaledToHeight(
+        height, Qt.TransformationMode.SmoothTransformation
+    )
+
+
+@cache
+def _get_folder_pixmap(height: int) -> QPixmap:
+    return QPixmap("../icons/playlist/folder.svg").scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
+
+
+@cache
+def _get_downloaded_songs_playlist_pixmap(height: int) -> QPixmap:
+    return get_colored_pixmap(QPixmap("../icons/playlist/downloaded_songs.svg"), Qt.GlobalColor.black).scaledToHeight(
+        height, Qt.TransformationMode.SmoothTransformation
+    )
+
+
 # TODO CACHE THIS OR SOMETHING IDK
-def _get_collection(path: Path, collection_type: Type[T]) -> T:
+def _get_collection(path: Path, collection_type: type[T]) -> T:
     with path.open("r") as f:
         return dacite.from_dict(
             collection_type,

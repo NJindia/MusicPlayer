@@ -1,29 +1,23 @@
+from typing import override
+
 import pandas as pd
-from PySide6.QtCore import Qt, Slot, Signal, QRectF, QObject, QRect
-from PySide6.QtGui import (
-    QPainter,
-    QFont,
-    QResizeEvent,
-    QFontMetrics,
-)
+from PySide6.QtCore import QObject, QRect, QRectF, Qt, Signal, Slot
+from PySide6.QtGui import QFont, QFontMetrics, QPainter, QResizeEvent
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QScrollArea,
-    QGraphicsView,
-    QGraphicsScene,
     QGraphicsItem,
+    QGraphicsScene,
     QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
+    QGraphicsView,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
 from music_player.common_gui import paint_artists
+from music_player.constants import QUEUE_ENTRY_HEIGHT, QUEUE_ENTRY_SPACING
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
-from music_player.constants import (
-    QUEUE_ENTRY_HEIGHT,
-    QUEUE_ENTRY_SPACING,
-)
 from music_player.vlc_core import VLCCore
 
 
@@ -47,7 +41,7 @@ class QueueSignal(QObject):
 
 class QueueEntryGraphicsItem(QGraphicsItem):
     def __init__(
-        self, music: pd.Series, shared_signals: SharedSignals, manually_added: bool = False, start_width: int = 0
+        self, music: pd.Series, shared_signals: SharedSignals, *, manually_added: bool = False, start_width: int = 0
     ) -> None:
         super().__init__()
         self.manually_added = manually_added
@@ -79,13 +73,11 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         )
         self._artist_rects: list[QRect] = []
 
+    @override
     def boundingRect(self):
         return self._bounding_rect
 
-    def resize(self, resize_event: QResizeEvent) -> None:
-        self.prepareGeometryChange()
-        self._bounding_rect.setWidth(resize_event.size().width())
-
+    @override
     def paint(self, painter: QPainter, option, widget=None):
         # Paint album art
         if self.music["album_cover_bytes"] is not None:
@@ -113,19 +105,14 @@ class QueueEntryGraphicsItem(QGraphicsItem):
             lambda r: r == self._hovered_text_rect,
         )
 
-    def _update_hover_text_rect(self, event: QGraphicsSceneHoverEvent):
-        self._hovered_text_rect = (
-            self._song_text_rect
-            if self._song_text_rect.contains(event.pos())
-            else next((r for r in self._artist_rects if r.contains(event.pos().toPoint())), QRectF())
-        )
-
+    @override
     def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent):
         self._hovered = True
         self._update_hover_text_rect(event)
         self.update()
         super().hoverEnterEvent(event)
 
+    @override
     def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent):
         previous_hovered = self._hovered_text_rect
         self._update_hover_text_rect(event)
@@ -133,12 +120,14 @@ class QueueEntryGraphicsItem(QGraphicsItem):
             self.update()
         super().hoverMoveEvent(event)
 
+    @override
     def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent):
         self._hovered = False
         self._hovered_text_rect = QRectF()
         self.update()
         super().hoverLeaveEvent(event)
 
+    @override
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         if self._song_text_rect.contains(event.pos()):
             self.signal.song_is_clicked(self)
@@ -151,10 +140,22 @@ class QueueEntryGraphicsItem(QGraphicsItem):
                     break
         super().mouseReleaseEvent(event)
 
+    @override
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
             self.signal.song_is_clicked(self)
         super().mouseDoubleClickEvent(event)
+
+    def _update_hover_text_rect(self, event: QGraphicsSceneHoverEvent):
+        self._hovered_text_rect = (
+            self._song_text_rect
+            if self._song_text_rect.contains(event.pos())
+            else next((r for r in self._artist_rects if r.contains(event.pos().toPoint())), QRectF())
+        )
+
+    def resize(self, resize_event: QResizeEvent) -> None:
+        self.prepareGeometryChange()
+        self._bounding_rect.setWidth(resize_event.size().width())
 
 
 class QueueEntryGraphicsView(QGraphicsView):
@@ -166,6 +167,12 @@ class QueueEntryGraphicsView(QGraphicsView):
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.queue_entries: list[QueueEntryGraphicsItem] = []
+
+    @override
+    def resizeEvent(self, event: QResizeEvent):
+        super().resizeEvent(event)
+        for entry in self.queue_entries:
+            entry.resize(event)
 
     @property
     def current_entries(self):
@@ -189,11 +196,6 @@ class QueueEntryGraphicsView(QGraphicsView):
     @staticmethod
     def get_y_pos(index: int) -> float:
         return QUEUE_ENTRY_SPACING + index * (QUEUE_ENTRY_SPACING + QUEUE_ENTRY_HEIGHT)
-
-    def resizeEvent(self, event: QResizeEvent):
-        super().resizeEvent(event)
-        for entry in self.queue_entries:
-            entry.resize(event)
 
 
 class QueueGraphicsView(QueueEntryGraphicsView):

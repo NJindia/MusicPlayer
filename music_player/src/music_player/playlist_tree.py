@@ -1,79 +1,82 @@
-from datetime import datetime, UTC
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from enum import Enum
 from functools import partial
-from typing import cast, Iterator
+from typing import cast, override
 
 from PySide6.QtCore import (
-    Qt,
-    QModelIndex,
-    QPoint,
-    Slot,
-    QSize,
-    QPersistentModelIndex,
-    QSortFilterProxyModel,
-    QObject,
     QEvent,
+    QModelIndex,
+    QObject,
+    QPersistentModelIndex,
+    QPoint,
+    QRect,
+    QSize,
+    QSortFilterProxyModel,
+    Qt,
+    Slot,
     qCritical,
     qFatal,
-    QRect,
 )
 from PySide6.QtGui import (
-    QStandardItemModel,
-    QStandardItem,
-    QIcon,
     QAction,
-    QFont,
-    QPixmap,
-    QMouseEvent,
+    QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
+    QFont,
+    QIcon,
+    QMouseEvent,
     QPainter,
-    QDragLeaveEvent,
+    QPixmap,
+    QStandardItem,
+    QStandardItemModel,
 )
 from PySide6.QtWidgets import (
-    QMainWindow,
-    QTreeView,
-    QWidget,
-    QVBoxLayout,
-    QMenu,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
-    QHBoxLayout,
+    QMainWindow,
+    QMenu,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QToolButton,
+    QTreeView,
+    QVBoxLayout,
+    QWidget,
     QWidgetAction,
 )
 
-from music_player.common_gui import NewPlaylistAction, NewFolderAction
-from music_player.constants import MAX_SIDE_BAR_WIDTH, ID_ROLE
-from music_player.view_types import LibraryTableView, PlaylistTreeView
-from music_player.playlist import Playlist, CollectionBase, get_collections_by_parent_id, Folder
+from music_player.common_gui import NewFolderAction, NewPlaylistAction
+from music_player.constants import ID_ROLE, MAX_SIDE_BAR_WIDTH
+from music_player.playlist import CollectionBase, Folder, Playlist, get_collections_by_parent_id
 from music_player.signals import SharedSignals
 from music_player.utils import get_colored_pixmap
+from music_player.view_types import LibraryTableView, PlaylistTreeView
 
 PLAYLIST_ROW_HEIGHT = 50
 
 
-class SORT_ROLE(Enum):
+class SortRole(Enum):
     UPDATED = Qt.ItemDataRole.UserRole + 3
     PLAYED = Qt.ItemDataRole.UserRole + 4
     ALPHABETICAL = Qt.ItemDataRole.UserRole + 5
 
 
-DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[SORT_ROLE, Qt.SortOrder] = {
-    SORT_ROLE.UPDATED: Qt.SortOrder.DescendingOrder,
-    SORT_ROLE.PLAYED: Qt.SortOrder.DescendingOrder,
-    SORT_ROLE.ALPHABETICAL: Qt.SortOrder.AscendingOrder,
+DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[SortRole, Qt.SortOrder] = {
+    SortRole.UPDATED: Qt.SortOrder.DescendingOrder,
+    SortRole.PLAYED: Qt.SortOrder.DescendingOrder,
+    SortRole.ALPHABETICAL: Qt.SortOrder.AscendingOrder,
 }
-INITIAL_SORT_ROLE = SORT_ROLE.ALPHABETICAL
+INITIAL_SORT_ROLE = SortRole.ALPHABETICAL
 
 
 class TreeItemDelegate(QStyledItemDelegate):
+    @override
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex, /) -> QSize:
         default_size = super().sizeHint(option, index)
         return QSize(default_size.width(), PLAYLIST_ROW_HEIGHT)
 
+    @override
     def paint(self, painter: QPainter, option, index, /):
         super().paint(painter, option, index)
         if cast(PlaylistTree, self.parent()).drop_index_ == index:
@@ -92,23 +95,26 @@ class TreeModelItem(QStandardItem):
         self.setEditable(False)
         self.update_icon()
 
+    @override
     def data(self, /, role: int = Qt.ItemDataRole.DisplayRole):
         if role == ID_ROLE:
-            return self.collection.id
-        if role == PlaylistTreeView.is_folder_role:
-            return self.collection.is_folder
-        if role == PlaylistTreeView.is_protected_role:
-            return self.collection.is_protected
-        if role == PlaylistTreeView.collection_role:
-            return self.collection
-        elif role == SORT_ROLE.UPDATED.value:
-            return self.collection.last_updated.timestamp()
-        elif role == SORT_ROLE.PLAYED.value:
+            data_val = self.collection.id
+        elif role == PlaylistTreeView.is_folder_role:
+            data_val = self.collection.is_folder
+        elif role == PlaylistTreeView.is_protected_role:
+            data_val = self.collection.is_protected
+        elif role == PlaylistTreeView.collection_role:
+            data_val = self.collection
+        elif role == SortRole.UPDATED.value:
+            data_val = self.collection.last_updated.timestamp()
+        elif role == SortRole.PLAYED.value:
             last_played = self.collection.last_played
-            return (last_played if last_played else datetime.max.replace(tzinfo=UTC)).timestamp()
-        elif role == SORT_ROLE.ALPHABETICAL.value:
-            return self.text().lower() + self.text()
-        return super().data(role)
+            data_val = (last_played if last_played else datetime.max.replace(tzinfo=UTC)).timestamp()
+        elif role == SortRole.ALPHABETICAL.value:
+            data_val = self.text().lower() + self.text()
+        else:
+            data_val = super().data(role)
+        return data_val
 
     def update_icon(self):
         self.setIcon(QIcon(self.collection.get_thumbnail_pixmap(PLAYLIST_ROW_HEIGHT)))
@@ -143,9 +149,11 @@ class PlaylistProxyModel(QSortFilterProxyModel):
         self.sort(0)
         self.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
+    @override
     def sourceModel(self) -> QStandardItemModel:
         return self._source_model
 
+    @override
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex, /) -> bool:
         if self.folders_only or not self.main_view:
             src_parent_item = (
@@ -190,28 +198,21 @@ class PlaylistTree(PlaylistTreeView):
             self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setModel(model)
 
+    @override
     def model(self, /) -> PlaylistProxyModel:
         return cast(PlaylistProxyModel, super().model())
 
-    def _reset_drop_index(self):
-        if self.drop_index_ is None:
-            return
-        if self.drop_index_.isValid():
-            old_idx = self.drop_index_
-            self.drop_index_ = None
-            self.viewport().update(self.visualRect(old_idx))
-        else:
-            self.drop_index_ = None
-            self.setStyleSheet("")
-
+    @override
     def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
         self._reset_drop_index()
         super().dragLeaveEvent(event)
 
+    @override
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.RightButton:
             super().mousePressEvent(event)
 
+    @override
     def dropEvent(self, event: QDropEvent) -> None:
         if not self.is_main_view:
             qFatal("dropEvent triggered in non-main view PlaylistTree")
@@ -251,6 +252,7 @@ class PlaylistTree(PlaylistTreeView):
                     df_indices, self.model().data_(drop_index, self.collection_role)
                 )
 
+    @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
         def ignore_event():
             event.setDropAction(Qt.DropAction.IgnoreAction)
@@ -301,9 +303,20 @@ class PlaylistTree(PlaylistTreeView):
                 self.setStyleSheet("QTreeView { border: 1px solid white; }")
         event.accept()
 
+    def _reset_drop_index(self):
+        if self.drop_index_ is None:
+            return
+        if self.drop_index_.isValid():
+            old_idx = self.drop_index_
+            self.drop_index_ = None
+            self.viewport().update(self.visualRect(old_idx))
+        else:
+            self.drop_index_ = None
+            self.setStyleSheet("")
+
 
 class PlaylistTreeWidget(QWidget):
-    def __init__(
+    def __init__(  # noqa: PLR0915
         self,
         parent: QWidget,
         main_window: QMainWindow,
@@ -421,10 +434,10 @@ class PlaylistTreeWidget(QWidget):
         src_item.collection.save()
 
     def update_sort_button(self):
-        sort_role = SORT_ROLE(self.proxy_model.sortRole())
+        sort_role = SortRole(self.proxy_model.sortRole())
         order_str = "asc" if self.proxy_model.sortOrder() == Qt.SortOrder.AscendingOrder else "desc"
         pm = get_colored_pixmap(
-            QPixmap(f"../icons/sort/sort-{'alpha-' if sort_role == SORT_ROLE.ALPHABETICAL else ''}{order_str}.svg"),
+            QPixmap(f"../icons/sort/sort-{'alpha-' if sort_role == SortRole.ALPHABETICAL else ''}{order_str}.svg"),
             Qt.GlobalColor.white,
         )
         self.sort_button.setIcon(QIcon(pm))
@@ -438,8 +451,8 @@ class PlaylistTreeWidget(QWidget):
         self.proxy_model.setSourceModel(self.flattened_model_)
         self.proxy_model.setFilterRegularExpression(rf"\b{text}\w*")
 
-    @Slot(SORT_ROLE)
-    def change_sort_role(self, sort_role: SORT_ROLE) -> None:
+    @Slot(SortRole)
+    def change_sort_role(self, sort_role: SortRole) -> None:
         sort_type = sort_role.value
         order = (
             (
@@ -474,11 +487,11 @@ class PlaylistTreeWidget(QWidget):
     @Slot()
     def rename_playlist(self, proxy_index: QModelIndex) -> None:
         item = self.item_at_index(proxy_index, is_source=False)
-        self.model_.blockSignals(True)
+        self.model_.blockSignals(True)  # noqa: FBT003
         item.setEditable(True)
         self.tree_view.edit(proxy_index)
         item.setEditable(False)
-        self.model_.blockSignals(False)
+        self.model_.blockSignals(False)  # noqa: FBT003
 
     @Slot()
     def delete_collection(self, proxy_index: QModelIndex) -> None:
@@ -517,12 +530,11 @@ class PlaylistTreeWidget(QWidget):
             playlist.save()
 
             if self.proxy_model.filterRegularExpression().pattern():
-                self.model_.blockSignals(True)
+                self.model_.blockSignals(True)  # noqa: FBT003
                 self.get_model_item(item.collection).sync_item(item)
-                self.model_.blockSignals(False)
+                self.model_.blockSignals(False)  # noqa: FBT003
             else:
                 self._update_flattened_model()
-            pass
 
     @Slot()
     def playlist_context_menu(self, main_window: QMainWindow, point: QPoint):
@@ -599,7 +611,7 @@ class PlaylistTreeWidget(QWidget):
 
 
 class SortRoleAction(QAction):
-    def __init__(self, sort_role: SORT_ROLE, playlist_widget: PlaylistTreeWidget, parent: QMenu) -> None:
+    def __init__(self, sort_role: SortRole, playlist_widget: PlaylistTreeWidget, parent: QMenu) -> None:
         super().__init__(sort_role.name.capitalize(), parent)
         self.sort_role = sort_role
         self.triggered.connect(partial(playlist_widget.change_sort_role, sort_role))
@@ -616,17 +628,29 @@ class SortMenu(QMenu):
             }
         """)
 
-        self.sort_updated_action = SortRoleAction(SORT_ROLE.UPDATED, parent, self)
-        self.sort_played_action = SortRoleAction(SORT_ROLE.PLAYED, parent, self)
-        self.sort_alphabetical_action = SortRoleAction(SORT_ROLE.ALPHABETICAL, parent, self)
+        self.sort_updated_action = SortRoleAction(SortRole.UPDATED, parent, self)
+        self.sort_played_action = SortRoleAction(SortRole.PLAYED, parent, self)
+        self.sort_alphabetical_action = SortRoleAction(SortRole.ALPHABETICAL, parent, self)
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
         self.addActions([self.sort_updated_action, self.sort_played_action, self.sort_alphabetical_action])
 
         self.update_active_action()
 
+    @override
     def parent(self, /) -> PlaylistTreeWidget:
         return cast(PlaylistTreeWidget, super().parent())
+
+    @override
+    def eventFilter(self, watched: QObject, event: QEvent, /) -> bool:
+        if (
+            event.type() == QEvent.Type.MouseButtonRelease
+            and isinstance(watched, QMenu)
+            and (action := watched.activeAction())
+        ):
+            action.trigger()
+            return True
+        return super().eventFilter(watched, event)
 
     def update_active_action(self):
         curr_sort_role = self.parent().proxy_model.sortRole()
@@ -641,14 +665,6 @@ class SortMenu(QMenu):
                 action.setIcon(QIcon(pm))
             else:
                 action.setIcon(QIcon())
-
-    def eventFilter(self, watched: QObject, event: QEvent, /) -> bool:
-        if event.type() == QEvent.Type.MouseButtonRelease:
-            if isinstance(watched, QMenu):
-                if action := watched.activeAction():
-                    action.trigger()
-                    return True
-        return super().eventFilter(watched, event)
 
 
 class MoveToFolderMenu(QMenu):

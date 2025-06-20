@@ -1,16 +1,12 @@
-from datetime import datetime, time, UTC
+from dataclasses import asdict, dataclass
+from datetime import UTC, date, datetime, time
 from pathlib import Path
-
-from mutagen.flac import FLAC
-from tqdm import tqdm
-
-from dataclasses import dataclass, asdict
-from datetime import date
 
 import soundfile as sf
 from dacite.cache import cache
-
+from mutagen.flac import FLAC
 from pandas import DataFrame
+from tqdm import tqdm
 
 from music_player.utils import timestamp_to_str
 
@@ -45,7 +41,11 @@ def _parse_lyrics(lyrics: str) -> dict[time | None, str]:
     lyrics_by_timestamp: dict[time | None, str] = {}
     for line in lyrics.split("\n"):
         timestamp_end_idx = line.find("]")
-        _time = datetime.strptime(line[1:timestamp_end_idx], "%M:%S.%f").time() if timestamp_end_idx != -1 else None
+        _time = (
+            datetime.strptime(line[1:timestamp_end_idx], "%M:%S.%f").replace(tzinfo=UTC).time()
+            if timestamp_end_idx != -1
+            else None
+        )
         lyrics_by_timestamp[_time] = line[timestamp_end_idx + 1 :].strip()
     return lyrics_by_timestamp
 
@@ -74,9 +74,9 @@ def load_music(path: Path) -> Music:
                 downloaded_datetime=datetime.fromtimestamp(path.stat().st_ctime, tz=UTC),
             )
         case ".m4a":
-            raise NotAcceptedFileTypeError()
+            raise NotAcceptedFileTypeError
         case _:
-            raise NotAcceptedFileTypeError()
+            raise NotAcceptedFileTypeError
 
 
 def load_from_sources():
@@ -88,11 +88,11 @@ def load_from_sources():
 
 @cache
 def get_music_df() -> DataFrame:
-    df = DataFrame.from_records(asdict(m) for m in load_from_sources())
-    if df.empty:
+    music_df = DataFrame.from_records(asdict(m) for m in load_from_sources())
+    if music_df.empty:
         return DataFrame(columns=[*Music.__dataclass_fields__.keys(), "duration"])
-    df["duration"] = df["duration_timestamp"].round().apply(timestamp_to_str)
-    return df
+    music_df["duration"] = music_df["duration_timestamp"].round().apply(timestamp_to_str)
+    return music_df
 
 
 if __name__ == "__main__":

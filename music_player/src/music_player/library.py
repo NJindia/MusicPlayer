@@ -1,45 +1,45 @@
 import re
-from typing import Any, cast
+from typing import Any, cast, override
 
 import numpy as np
 import pandas as pd
 from PySide6.QtCore import (
     QAbstractTableModel,
-    Qt,
+    QEvent,
     QModelIndex,
+    QObject,
     QPersistentModelIndex,
     QPoint,
     QRect,
+    Qt,
     Signal,
-    QEvent,
     Slot,
-    QObject,
 )
-from PySide6.QtGui import QDragMoveEvent, QDropEvent, QFontMetrics, QFont, QPainter, QMouseEvent, QResizeEvent
+from PySide6.QtGui import QDragMoveEvent, QDropEvent, QFont, QFontMetrics, QMouseEvent, QPainter, QResizeEvent
 from PySide6.QtWidgets import (
-    QTableView,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
     QSizePolicy,
+    QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
-    QWidget,
+    QTableView,
     QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QScrollArea,
-    QHeaderView,
-    QStyle,
-    QPushButton,
-    QLineEdit,
+    QWidget,
 )
 from qdarktheme.qtpy.QtWidgets import QApplication
 
-from music_player.common_gui import paint_artists, get_artist_text_rect_text_tups, text_is_buffer
-from music_player.playlist import Playlist, CollectionBase
-from music_player.music_importer import get_music_df
+from music_player.common_gui import get_artist_text_rect_text_tups, paint_artists, text_is_buffer
 from music_player.constants import ID_ROLE
+from music_player.music_importer import get_music_df
+from music_player.playlist import CollectionBase, Playlist
 from music_player.signals import SharedSignals
-from music_player.view_types import PlaylistTreeView, LibraryTableView
-from music_player.utils import datetime_to_age_string, datetime_to_date_str, get_pixmap, get_empty_pixmap
+from music_player.utils import datetime_to_age_string, datetime_to_date_str, get_empty_pixmap, get_pixmap
+from music_player.view_types import LibraryTableView, PlaylistTreeView
 
 PADDING = 5
 ROW_HEIGHT = 50
@@ -66,6 +66,7 @@ def _get_meta_text(music_df: pd.DataFrame) -> str:
 
 
 class AlbumItemDelegate(QStyledItemDelegate):
+    @override
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
         view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
         text_rect, _, album_text = view.get_text_rect_tups_for_index(index)[0]
@@ -80,6 +81,7 @@ class AlbumItemDelegate(QStyledItemDelegate):
 
 
 class ArtistsItemDelegate(QStyledItemDelegate):
+    @override
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
         index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
         view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
@@ -96,6 +98,7 @@ class ArtistsItemDelegate(QStyledItemDelegate):
 
 
 class SongItemDelegate(QStyledItemDelegate):
+    @override
     def paint(
         self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
     ) -> None:
@@ -123,44 +126,38 @@ class MusicTableModel(QAbstractTableModel):
     re_pattern = re.compile(r"[\W_]+")
 
     def __init__(self, parent: "MusicLibraryTable"):
-        super(MusicTableModel, self).__init__(parent)
+        super().__init__(parent)
         self.music_data: pd.DataFrame = pd.DataFrame()
         self.display_df: pd.DataFrame = pd.DataFrame()
         self.search_df: pd.DataFrame = pd.DataFrame()
         self.view = parent
         self.modelReset.connect(self.update_dfs)
 
-    def update_dfs(self):
-        self.display_df = pd.DataFrame()
-        cols = self.music_data.columns
-        for col in ["title", "artists", "album", "date added", "duration"]:
-            self.display_df[col] = self.music_data[col] if col in cols else None
-
-        self.search_df = self.music_data[["title", "artists", "album"]].apply(
-            lambda col: col.astype(str).str.lower().replace(self.re_pattern, "", regex=True)
-        )
-
+    @override
     def rowCount(self, parent=None):
         """Returns number of rows in table."""
         return len(self.music_data)
 
+    @override
     def columnCount(self, parent=None):
         """Returns number of columns in table."""
         return len(self.display_df.columns)
 
+    @override
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = ...) -> Any:
         """Returns header data for given role."""
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
             return list(self.display_df.columns)[section].capitalize()
         return None
 
-    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = ...) -> Any:
+    @override
+    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = ...) -> Any:  # noqa: PLR0911
         """Returns data for given index."""
         if not index.isValid():
             return None
         if role == ID_ROLE:
             return int(self.display_df.iloc[[index.row()]].index[0])
-        if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
+        if role in {Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole}:
             return self.display_df.iloc[index.row(), index.column()]
         if role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
@@ -177,10 +174,12 @@ class MusicTableModel(QAbstractTableModel):
             return get_pixmap(self.music_data["album_cover_bytes"].iloc[index.row()], ICON_SIZE)
         return None
 
+    @override
     def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
         """Returns flags for given index."""
         return super().flags(index) | Qt.ItemFlag.ItemIsDragEnabled
 
+    @override
     def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
         # TODO: Sort by artist list
         sort_column = self.display_df.columns[column]
@@ -201,6 +200,16 @@ class MusicTableModel(QAbstractTableModel):
         )
         self.endResetModel()
 
+    def update_dfs(self):
+        self.display_df = pd.DataFrame()
+        cols = self.music_data.columns
+        for col in ["title", "artists", "album", "date added", "duration"]:
+            self.display_df[col] = self.music_data[col] if col in cols else None
+
+        self.search_df = self.music_data[["title", "artists", "album"]].apply(
+            lambda col: col.astype(str).str.lower().replace(self.re_pattern, "", regex=True)
+        )
+
 
 class TextLabel(QLabel):
     def __init__(self, font_size: int):
@@ -216,6 +225,12 @@ class TextLabel(QLabel):
         self.setFont(type_font)
         self.setStyleSheet("QLabel { padding: 0px; margin: 0px; } ")
 
+    @override
+    def setText(self, text: str):
+        self.original_text = text
+        self._elide_text()
+
+    @override
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._elide_text()
@@ -227,10 +242,6 @@ class TextLabel(QLabel):
             assert self.fontMetrics().horizontalAdvance(elided_text) <= current_width
             if self.text() != elided_text:
                 super().setText(elided_text)
-
-    def setText(self, text: str):
-        self.original_text = text
-        self._elide_text()
 
 
 class MusicLibraryScrollArea(QScrollArea):
@@ -248,6 +259,11 @@ class MusicLibraryScrollArea(QScrollArea):
         self.header = self.library.table_view.horizontalHeader()
         self.original_header_rect = self.header.rect()
         self.verticalScrollBar().valueChanged.connect(self.update_header)
+
+    @override
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self.library.setMaximumWidth(event.size().width())
 
     def _detach_header(self):
         if self.header.parent() is not self:
@@ -273,10 +289,6 @@ class MusicLibraryScrollArea(QScrollArea):
             self._detach_header()
         else:
             self._attach_header()
-
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        self.library.setMaximumWidth(event.size().width())
 
 
 class LibraryHeaderWidget(QWidget):
@@ -456,8 +468,26 @@ class TableHeader(QHeaderView):
         self.setMinimumSectionSize(self.minimum_section_size)
         self.sectionResized.connect(self._resize)
 
+    @override
+    def resizeEvent(self, event: QResizeEvent):
+        super().resizeEvent(event)
+        self.resize_sections()
+
+    @override
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        logical_index = self.logicalIndexAt(event.pos())
+        if logical_index == -1:
+            return
+        target_order = (
+            Qt.SortOrder.AscendingOrder
+            if self.sortIndicatorSection() != logical_index
+            else (Qt.SortOrder.DescendingOrder if self.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder else None)
+        )
+        args = (-1, Qt.SortOrder.AscendingOrder) if target_order is None else (logical_index, target_order)
+        self.setSortIndicator(*args)
+
     def _resize(self, logical_index: int, old_size: int, new_size: int):
-        self.blockSignals(True)
+        self.blockSignals(True)  # noqa: FBT003
         # Check if there's a next section to resize
         next_section_idx = next(
             (i for i in range(logical_index + 1, self.count()) if not self.isSectionHidden(i)), None
@@ -483,39 +513,23 @@ class TableHeader(QHeaderView):
 
         # Ensure the current section doesn't grow beyond the available space and doesn't shrink below its own minimum
         self._resize_section_if_needed(logical_index, max(min(new_size, max_size), self.minimum_section_size))
-        self.blockSignals(False)
-
-    def resizeEvent(self, event: QResizeEvent):
-        super().resizeEvent(event)
-        self.resize_sections()
+        self.blockSignals(False)  # noqa: FBT003
 
     def resize_sections(self):
         available_space = self.width() - (self.count() - self.hiddenSectionCount() - 3) * self.minimum_section_size
         sizes = np.asarray([self.sectionSize(i) for i in range(3)])
         col12_widths = [max(int(available_space * sizes[i] / sum(sizes)), self.minimum_section_size) for i in (1, 2)]
         col_widths = [available_space - sum(col12_widths), *col12_widths]
-        self.blockSignals(True)
+        self.blockSignals(True)  # noqa: FBT003
         for column in range(3):
             self._resize_section_if_needed(column, col_widths[column])
         self._resize_section_if_needed(DATE_ADDED_COL_IDX, self.minimum_section_size)
         self._resize_section_if_needed(DURATION_COL_IDX, self.minimum_section_size)
-        self.blockSignals(False)
+        self.blockSignals(False)  # noqa: FBT003
 
     def _resize_section_if_needed(self, logical_index: int, new_size: int, old_size: int | None = None):
         if (self.sectionSize(logical_index) if old_size is None else old_size) != new_size:
             self.resizeSection(logical_index, new_size)
-
-    def mouseDoubleClickEvent(self, event: QMouseEvent):
-        logical_index = self.logicalIndexAt(event.pos())
-        if logical_index == -1:
-            return
-        target_order = (
-            Qt.SortOrder.AscendingOrder
-            if self.sortIndicatorSection() != logical_index
-            else (Qt.SortOrder.DescendingOrder if self.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder else None)
-        )
-        args = (-1, Qt.SortOrder.AscendingOrder) if target_order is None else (logical_index, target_order)
-        self.setSortIndicator(*args)
 
 
 class MusicLibraryTable(LibraryTableView):
@@ -575,6 +589,7 @@ class MusicLibraryTable(LibraryTableView):
         self.viewport().installEventFilter(self)
         self.adjust_height_to_content()
 
+    @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
         source = event.source()
         playlist = cast(MusicLibraryWidget, self.parent()).playlist
@@ -585,6 +600,7 @@ class MusicLibraryTable(LibraryTableView):
         event.setDropAction(Qt.DropAction.IgnoreAction)
         event.ignore()
 
+    @override
     def dropEvent(self, event: QDropEvent, /):
         source = event.source()
         if isinstance(source, PlaylistTreeView):
@@ -594,6 +610,55 @@ class MusicLibraryTable(LibraryTableView):
                 CollectionBase, source.model().data(source.selectedIndexes()[0], PlaylistTreeView.collection_role)
             )
             self._signals.add_to_playlist_signal.emit(src_playlist.indices, dest_playlist)
+
+    @override
+    def mouseMoveEvent(self, event: QMouseEvent):
+        pos = event.pos()
+        index = self.indexAt(pos)
+        if not index.isValid():
+            return
+        for rect, data, shown_text in self.get_text_rect_tups_for_index(index):
+            if not text_is_buffer(shown_text) and rect.contains(pos):
+                self.hovered_text_rect, self.hovered_data = rect, data
+                self.setCursor(Qt.CursorShape.PointingHandCursor)
+                break
+        else:
+            self.hovered_text_rect = QRect()
+            self.hovered_data = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.viewport().update(self.visualRect(index))
+        super().mouseMoveEvent(event)
+
+    @override
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.pos()
+            if self.hovered_text_rect.contains(pos):
+                index = self.indexAt(pos)
+                match index.column():
+                    case 0:
+                        self.song_clicked.emit(index.row())
+                    case 1:
+                        self._signals.library_load_artist_signal.emit(self.hovered_data)
+                    case 2:
+                        self._signals.library_load_album_signal.emit(self.hovered_data)
+                    case _:
+                        raise NotImplementedError
+        super().mouseReleaseEvent(event)
+
+    @override
+    def leaveEvent(self, event: QEvent) -> None:
+        self.hovered_text_rect = QRect()
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.viewport().update()
+        super().leaveEvent(event)
+
+    @override
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if obj is self.viewport() and event.type() == QEvent.Type.Wheel:
+            event.ignore()  # Pass wheel events up to the parent
+            return True  # Event handled
+        return super().eventFilter(obj, event)
 
     def get_text_rect_tups_for_index(self, index: QModelIndex | QPersistentModelIndex) -> list[tuple[QRect, str, str]]:
         column = index.column()
@@ -633,52 +698,6 @@ class MusicLibraryTable(LibraryTableView):
             + sum(self.verticalHeader().sectionSize(row) for row in range(self.model_.rowCount()))
         )
         self.setMinimumHeight(total_height)
-
-    def mouseMoveEvent(self, event: QMouseEvent):
-        pos = event.pos()
-        index = self.indexAt(pos)
-        if not index.isValid():
-            return
-        for rect, data, shown_text in self.get_text_rect_tups_for_index(index):
-            if not text_is_buffer(shown_text) and rect.contains(pos):
-                self.hovered_text_rect, self.hovered_data = rect, data
-                self.setCursor(Qt.CursorShape.PointingHandCursor)
-                break
-        else:
-            self.hovered_text_rect = QRect()
-            self.hovered_data = None
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-        self.viewport().update(self.visualRect(index))
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent):
-        if event.button() == Qt.MouseButton.LeftButton:
-            pos = event.pos()
-            if self.hovered_text_rect.contains(pos):
-                index = self.indexAt(pos)
-                match index.column():
-                    case 0:
-                        self.song_clicked.emit(index.row())
-                    case 1:
-                        self._signals.library_load_artist_signal.emit(self.hovered_data)
-                    case 2:
-                        self._signals.library_load_album_signal.emit(self.hovered_data)
-                    case _:
-                        raise NotImplementedError
-        super().mouseReleaseEvent(event)
-
-    def leaveEvent(self, event: QEvent) -> None:
-        self.current_hovered_pos = QPoint()
-        self.hovered_text_rect = QRect()
-        self.setCursor(Qt.CursorShape.ArrowCursor)
-        self.viewport().update()
-        super().leaveEvent(event)
-
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        if obj is self.viewport() and event.type() == QEvent.Type.Wheel:
-            event.ignore()  # Pass wheel events up to the parent
-            return True  # Event handled
-        return super().eventFilter(obj, event)
 
     def hide_date_added(self):
         header = cast(TableHeader, self.horizontalHeader())
