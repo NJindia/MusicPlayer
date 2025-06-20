@@ -1,9 +1,9 @@
 from collections.abc import Callable
-from functools import partial
+from functools import cache, partial
 from typing import Literal
 
 from PySide6.QtCore import QModelIndex, QRect, Qt
-from PySide6.QtGui import QAction, QFont, QFontMetrics, QPainter
+from PySide6.QtGui import QAction, QFont, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -204,3 +204,19 @@ class NewFolderAction(QAction):
                 main_window, source_root_index, signals, mode="folder", move_from_index=move_collection_from_index
             ).exec()
         )
+
+
+@cache
+def get_play_button_icon(height: int | None = None) -> QIcon:
+    pm = QPixmap("../icons/play-button.svg")
+    if height is not None:
+        pm = pm.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
+    return QIcon(pm)
+
+
+@cache
+def get_shuffle_button_icon(height: int | None = None) -> QIcon:
+    pm = QPixmap("../icons/shuffle-button.svg")
+    if height is not None:
+        pm = pm.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
+    return QIcon(pm)

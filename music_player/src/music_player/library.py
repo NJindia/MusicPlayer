@@ -21,19 +21,25 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QTableView,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 from qdarktheme.qtpy.QtWidgets import QApplication
 
-from music_player.common_gui import get_artist_text_rect_text_tups, paint_artists, text_is_buffer
+from music_player.common_gui import (
+    get_artist_text_rect_text_tups,
+    get_play_button_icon,
+    get_shuffle_button_icon,
+    paint_artists,
+    text_is_buffer,
+)
 from music_player.constants import ID_ROLE
 from music_player.music_importer import get_music_df
 from music_player.playlist import CollectionBase, Playlist
@@ -319,8 +325,11 @@ class LibraryHeaderWidget(QWidget):
         header_meta_layout.addWidget(self.header_img)
         header_meta_layout.addLayout(header_text_layout)
 
-        play_button = QPushButton("Play")
-        play_shuffled_button = QPushButton("Shuffle")
+        play_button = QToolButton()
+        play_button.setIcon(get_play_button_icon())
+
+        play_shuffled_button = QToolButton()
+        play_shuffled_button.setIcon(get_shuffle_button_icon())
 
         search_bar = QLineEdit()
         search_bar.textChanged.connect(library.filter)

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from music_player.common_gui import get_play_button_icon, get_shuffle_button_icon
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD
 from music_player.signals import SharedSignals
 from music_player.utils import get_empty_pixmap, get_pixmap, timestamp_to_str
@@ -238,7 +239,7 @@ class MediaToolbar(QToolBar):
         media_control_vbox.addLayout(media_control_button_hbox)
 
         self.shuffle_button = OpacityButton()
-        self.shuffle_button.setIcon(QIcon("../icons/shuffle-button.svg"))
+        self.shuffle_button.setIcon(get_shuffle_button_icon())
         media_control_button_hbox.addWidget(self.shuffle_button)
 
         rewind_button = QToolButton()
@@ -247,7 +248,7 @@ class MediaToolbar(QToolBar):
         media_control_button_hbox.addWidget(rewind_button)
 
         self.play_button = QToolButton()
-        self.play_button.setIcon(QIcon("../icons/play-button.svg"))
+        self.play_button.setIcon(get_play_button_icon())
         self.play_button.clicked.connect(self.press_play_button)
         media_control_button_hbox.addWidget(self.play_button)
 
