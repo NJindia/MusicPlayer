@@ -213,7 +213,7 @@ class MainWindow(QMainWindow):
     def select_tree_view_item(self, proxy_index: QModelIndex):
         playlist = self.playlist_view.item_at_index(proxy_index, is_source=False).collection
         if not isinstance(playlist, Playlist):
-            raise NotImplementedError(proxy_index)
+            return
         self.library.load_playlist(playlist)
 
     @Slot()

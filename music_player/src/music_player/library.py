@@ -65,9 +65,6 @@ def _get_meta_text(music_df: pd.DataFrame) -> str:
 
 
 class AlbumItemDelegate(QStyledItemDelegate):
-    def __init__(self):
-        super().__init__()
-
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
         view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
         text_rect, _, album_text = view.get_text_rect_tups_for_index(index)[0]
@@ -82,9 +79,6 @@ class AlbumItemDelegate(QStyledItemDelegate):
 
 
 class ArtistsItemDelegate(QStyledItemDelegate):
-    def __init__(self):
-        super().__init__()
-
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
         index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
         view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
@@ -101,9 +95,6 @@ class ArtistsItemDelegate(QStyledItemDelegate):
 
 
 class SongItemDelegate(QStyledItemDelegate):
-    def __init__(self):
-        super().__init__()
-
     def paint(
         self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
     ) -> None:
@@ -562,11 +553,11 @@ class MusicLibraryTable(QTableView):
 
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
-        self.song_delegate = SongItemDelegate()
+        self.song_delegate = SongItemDelegate(self)
         self.setItemDelegateForColumn(0, self.song_delegate)
-        self.artists_delegate = ArtistsItemDelegate()
+        self.artists_delegate = ArtistsItemDelegate(self)
         self.setItemDelegateForColumn(1, self.artists_delegate)
-        self.album_delegate = AlbumItemDelegate()
+        self.album_delegate = AlbumItemDelegate(self)
         self.setItemDelegateForColumn(2, self.album_delegate)
 
         self.model_ = MusicTableModel(self)

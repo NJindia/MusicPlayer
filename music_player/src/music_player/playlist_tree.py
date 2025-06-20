@@ -15,6 +15,7 @@ from PySide6.QtCore import (
     QEvent,
     qCritical,
     qFatal,
+    QRect,
 )
 from PySide6.QtGui import (
     QStandardItemModel,
@@ -26,6 +27,8 @@ from PySide6.QtGui import (
     QMouseEvent,
     QDragMoveEvent,
     QDropEvent,
+    QPainter,
+    QDragLeaveEvent,
 )
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -71,12 +74,15 @@ INITIAL_SORT_ROLE = SORT_ROLE.ALPHABETICAL
 
 
 class TreeItemDelegate(QStyledItemDelegate):
-    def __init__(self):
-        super().__init__()
-
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex, /) -> QSize:
         default_size = super().sizeHint(option, index)
         return QSize(default_size.width(), PLAYLIST_ROW_HEIGHT)
+
+    def paint(self, painter: QPainter, option, index, /):
+        super().paint(painter, option, index)
+        if cast(PlaylistTree, self.parent()).drop_index_ == index:
+            rect = cast(QRect, option.rect)  # pyright: ignore[reportAttributeAccessIssue]
+            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 5, 5)
 
 
 class TreeModelItem(QStandardItem):
@@ -169,6 +175,7 @@ class PlaylistTree(QTreeView):
         super().__init__()
         self._signals = shared_signals
         self.is_main_view = is_main_view
+        self.drop_index_: QModelIndex | None = None
 
         self.setUniformRowHeights(True)
         self.setExpandsOnDoubleClick(True)
@@ -177,7 +184,7 @@ class PlaylistTree(QTreeView):
         self.setHeaderHidden(True)
 
         self.setIconSize(QSize(PLAYLIST_ROW_HEIGHT, PLAYLIST_ROW_HEIGHT))
-        delegate = TreeItemDelegate()
+        delegate = TreeItemDelegate(self)
         self.setItemDelegate(delegate)
         if self.is_main_view:
             self.setDragDropMode(QTreeView.DragDropMode.DragDrop)
@@ -190,14 +197,32 @@ class PlaylistTree(QTreeView):
     def model(self, /) -> PlaylistProxyModel:
         return cast(PlaylistProxyModel, super().model())
 
+    def _reset_drop_index(self):
+        if self.drop_index_ is None:
+            return
+        if self.drop_index_.isValid():
+            old_idx = self.drop_index_
+            self.drop_index_ = None
+            self.viewport().update(self.visualRect(old_idx))
+        else:
+            self.drop_index_ = None
+            self.setStyleSheet("")
+
+
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
+        self._reset_drop_index()
+        super().dragLeaveEvent(event)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.RightButton:
             super().mousePressEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:
         if not self.is_main_view:
-            qCritical("dropEvent triggered in non-main view PlaylistTree")
+            qFatal("dropEvent triggered in non-main view PlaylistTree")
 
+        self._reset_drop_index()
         if event.proposedAction() == Qt.DropAction.IgnoreAction:
             return
 
@@ -224,15 +249,21 @@ class PlaylistTree(QTreeView):
             lib_indices = source.selectionModel().selectedRows()
             df_indices = [source.model_.data(lib_index, ID_ROLE) for lib_index in lib_indices]
 
-            if drop_index.isValid() and self.model().data(drop_index, IS_FOLDER_ROLE):
+            if not drop_index.isValid() or self.model().data(drop_index, IS_FOLDER_ROLE):
                 source_drop_index = self.model().mapToSource(drop_index)
                 self._signals.create_playlist_signal.emit("New Playlist", source_drop_index, df_indices)
             else:
                 self._signals.add_to_playlist_signal.emit(df_indices, self.model().data_(drop_index, COLLECTION_ROLE))
 
+
     def dragMoveEvent(self, event: QDragMoveEvent, /):
+        def ignore_event():
+            event.setDropAction(Qt.DropAction.IgnoreAction)
+            event.ignore()
+            self._reset_drop_index()
+
         if not self.is_main_view:
-            qCritical("dragMoveEvent triggered in non-main view PlaylistTree")
+            qFatal("dragMoveEvent triggered in non-main view PlaylistTree")
         drop_index = self.indexAt(event.pos())
         if event.source() == self:
             selected_indices = self.selectedIndexes()
@@ -252,21 +283,27 @@ class PlaylistTree(QTreeView):
                     )
                 )
             ):
-                event.setDropAction(Qt.DropAction.IgnoreAction)
-                event.ignore()
+                ignore_event()
                 return
             if Qt.DropAction.MoveAction not in event.possibleActions():
                 qCritical("Move action should be possible")
             event.setDropAction(Qt.DropAction.MoveAction)
         else:
             if Qt.DropAction.CopyAction not in event.possibleActions():
-                qCritical("Copy action should be possible")
+                qFatal("Copy action should be possible")
             if drop_index.isValid() and self.model().data_(drop_index, IS_PROTECTED_ROLE):
-                event.setDropAction(Qt.DropAction.IgnoreAction)
-                event.ignore()
+                ignore_event()
                 return
             event.setDropAction(Qt.DropAction.CopyAction)
-
+        if drop_index != self.drop_index_:
+            self._reset_drop_index()
+            self.drop_index_ = drop_index
+            if drop_index.isValid():
+                self.setStyleSheet("")
+                self.viewport().update(self.visualRect(drop_index))
+            else:
+                print("SETTING")
+                self.setStyleSheet("QTreeView { border: 1px solid white; }")
         event.accept()
 
 
