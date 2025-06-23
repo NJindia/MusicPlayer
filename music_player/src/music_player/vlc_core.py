@@ -1,11 +1,10 @@
 import itertools
 from typing import Literal, cast, get_args
 
-import pandas as pd
 from vlc import Event, EventType, Instance, Media, MediaList, MediaListPlayer, MediaPlayer
 
-from music_player.music_importer import get_music_df
-from music_player.playlist import DOWNLOADED_SONGS_PLAYLIST_PATH, Playlist, get_playlist
+from music_player.database import get_database_manager
+from music_player.playlist import DbCollection, DbMusic
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
 
@@ -20,19 +19,30 @@ class VLCCore:
         self.media_player.pause()
         self.player_event_manager.event_detach(EventType.MediaPlayerPlaying)  # pyright: ignore[reportAttributeAccessIssue]
 
+    def load_media_from_music_ids(self, music_ids: tuple[int, ...]):
+        rows = (
+            get_database_manager().get_rows("SELECT file_path FROM music WHERE music_id IN %s", (music_ids,))
+            if music_ids
+            else []
+        )
+        paths = [r["file_path"] for r in rows]
+        self.media_list = self.instance.media_list_new(paths)
+        self.list_player.set_media_list(self.media_list)
+        self.list_indices = list(range(len(paths)))
+        self.db_indices = list(music_ids)
+
     def __init__(self):
         self.instance = cast(Instance, Instance("--no-xlib"))
 
         self.list_player: MediaListPlayer = self.instance.media_list_player_new()
 
-        self.current_playlist: Playlist = get_playlist(DOWNLOADED_SONGS_PLAYLIST_PATH)
-        paths = get_music_df().iloc[self.current_playlist.indices]["file_path"].to_list()
-        self.media_list: MediaList = self.instance.media_list_new(paths)
-        self.list_indices = list(range(len(paths)))
-        """The ordered list of indices in BOTH the `current_music_df` and `media_list` to play"""
-        self.current_music_df: pd.DataFrame = get_music_df().iloc[self.current_playlist.indices]
+        self.current_collection: DbCollection = DbCollection.from_db()
+        self.media_list: MediaList = self.instance.media_list_new()
+        self.db_indices: list[int] = []
+        self.list_indices: list[int] = []
+        """The ordered list of indices in BOTH the `db_indices` and `media_list` to play"""
         self.current_media_idx: int = 0
-        self.list_player.set_media_list(self.media_list)
+        self.load_media_from_music_ids(self.current_collection.get_music_ids())
 
         self.player_event_manager = self.media_player.event_manager()
         self.list_player_event_manager = self.list_player.event_manager()
@@ -50,8 +60,8 @@ class VLCCore:
         assert self.repeat_state == "NO_REPEAT"  # Should always start here TODO (for now)
 
     @property
-    def current_music(self) -> pd.Series:
-        return self.current_music_df.iloc[self.list_indices[self.current_media_idx]]
+    def current_music(self) -> DbMusic:
+        return DbMusic.from_db(self.db_indices[self.list_indices[self.current_media_idx]])
 
     @property
     def current_media(self) -> Media:

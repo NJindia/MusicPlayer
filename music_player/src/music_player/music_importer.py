@@ -1,14 +1,10 @@
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from pathlib import Path
 
 import soundfile as sf
-from dacite.cache import cache
 from mutagen.flac import FLAC
-from pandas import DataFrame
 from tqdm import tqdm
-
-from music_player.utils import timestamp_to_str
 
 
 class NotAcceptedFileTypeError(ValueError):
@@ -84,16 +80,3 @@ def load_from_sources():
         assert source.is_dir()
         for fp in tqdm(list(source.iterdir())):
             yield load_music(fp)
-
-
-@cache
-def get_music_df() -> DataFrame:
-    music_df = DataFrame.from_records(asdict(m) for m in load_from_sources())
-    if music_df.empty:
-        return DataFrame(columns=[*Music.__dataclass_fields__.keys(), "duration"])
-    music_df["duration"] = music_df["duration_timestamp"].round().apply(timestamp_to_str)
-    return music_df
-
-
-if __name__ == "__main__":
-    get_music_df()

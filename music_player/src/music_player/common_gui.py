@@ -206,17 +206,23 @@ class NewFolderAction(QAction):
         )
 
 
-@cache
-def get_play_button_icon(height: int | None = None) -> QIcon:
-    pm = QPixmap("../icons/play-button.svg")
+def _scaled_icon_from_svg(svg_path: str, height: int | None) -> QIcon:
+    pm = QPixmap(svg_path)
     if height is not None:
         pm = pm.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
     return QIcon(pm)
+
+
+@cache
+def get_play_button_icon(height: int | None = None) -> QIcon:
+    return _scaled_icon_from_svg("../icons/play-button.svg", height)
+
+
+@cache
+def get_pause_button_icon(height: int | None = None) -> QIcon:
+    return _scaled_icon_from_svg("../icons/pause-button.svg", height)
 
 
 @cache
 def get_shuffle_button_icon(height: int | None = None) -> QIcon:
-    pm = QPixmap("../icons/shuffle-button.svg")
-    if height is not None:
-        pm = pm.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
-    return QIcon(pm)
+    return _scaled_icon_from_svg("../icons/shuffle-button.svg", height)

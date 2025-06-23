@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import NewFolderAction, NewPlaylistAction
 from music_player.constants import ID_ROLE, MAX_SIDE_BAR_WIDTH
-from music_player.playlist import CollectionBase, Folder, Playlist, get_collections_by_parent_id
+from music_player.playlist import DbCollection, get_collections_by_parent_id
 from music_player.signals import SharedSignals
 from music_player.utils import get_colored_pixmap
 from music_player.view_types import LibraryTableView, PlaylistTreeView
@@ -85,8 +85,8 @@ class TreeItemDelegate(QStyledItemDelegate):
 
 
 class TreeModelItem(QStandardItem):
-    def __init__(self, collection: Playlist | Folder) -> None:
-        super().__init__(collection.title)
+    def __init__(self, collection: DbCollection) -> None:
+        super().__init__(collection.name)
         self.collection = collection
 
         font = QFont()
@@ -120,7 +120,7 @@ class TreeModelItem(QStandardItem):
         self.setIcon(QIcon(self.collection.get_thumbnail_pixmap(PLAYLIST_ROW_HEIGHT)))
 
     def sync_item(self, item: "TreeModelItem"):
-        self.setText(self.collection.title)
+        self.setText(self.collection.name)
         self.collection = item.collection
 
 
@@ -232,8 +232,8 @@ class PlaylistTree(PlaylistTreeView):
                     self.model().mapToSource(source_index), self.model().mapToSource(drop_index)
                 )
             else:
-                indices = cast(CollectionBase, self.model().data_(source_index, self.collection_role)).indices
-                dest_playlist = cast(Playlist, self.model().data_(drop_index, self.collection_role))
+                indices = cast(DbCollection, self.model().data_(source_index, self.collection_role)).indices
+                dest_playlist = cast(DbCollection, self.model().data_(drop_index, self.collection_role))
                 self._signals.add_to_playlist_signal.emit(indices, dest_playlist)
         else:
             if event.proposedAction() != Qt.DropAction.CopyAction:
@@ -430,7 +430,7 @@ class PlaylistTreeWidget(QWidget):
         assert child is not None
         dest_parent.appendRow(child)
 
-        src_item.collection.parent_id = dest_parent.collection.id if isinstance(dest_parent, TreeModelItem) else ""
+        src_item.collection._parent_id = dest_parent.collection.id if isinstance(dest_parent, TreeModelItem) else -1
         src_item.collection.save()
 
     def update_sort_button(self):
@@ -503,20 +503,21 @@ class PlaylistTreeWidget(QWidget):
 
         if item.collection.is_folder:
 
-            def get_recursive_children(parent_id: str) -> Iterator[CollectionBase]:
+            def get_recursive_children(parent_id: int) -> Iterator[DbCollection]:
                 for collection in get_collections_by_parent_id().get(parent_id, []):
                     if collection.is_folder:
                         yield from get_recursive_children(collection.id)
                     yield collection
 
             for child in list(get_recursive_children(item.collection.id)):
-                self.signals.delete_playlist_signal.emit(child)
+                self.signals.delete_collection_signal.emit(child)
             get_collections_by_parent_id.cache_clear()
-        self.signals.delete_playlist_signal.emit(item.collection)
+        self.signals.delete_collection_signal.emit(item.collection)
         print("TODO: PUSH CONFIRMATION")
 
     @Slot()
     def update_playlist(self, tl_source_index: QModelIndex, _: QModelIndex, roles: list[int]) -> None:
+        print("UPDATE")
         if not self.is_main_view:
             raise ValueError
         if Qt.ItemDataRole.DisplayRole in roles:
@@ -526,7 +527,7 @@ class PlaylistTreeWidget(QWidget):
             playlist = item.collection
             if playlist is None:
                 raise NotImplementedError
-            playlist.title = item.text()
+            playlist.name = item.text()
             playlist.save()
 
             if self.proxy_model.filterRegularExpression().pattern():
@@ -587,27 +588,30 @@ class PlaylistTreeWidget(QWidget):
     def _initialize_model(self) -> None:
         assert self.is_main_view
 
-        def _add_children_to_item(root_item_: QStandardItem, root_item_id_: str):
+        def _add_children_to_item(root_item_: QStandardItem, root_item_id_: int):
             for collection in get_collections_by_parent_id().get(root_item_id_, []):
                 item = TreeModelItem(collection)
                 root_item_.appendRow(item)
                 if collection.is_folder:
                     _add_children_to_item(item, collection.id)
 
-        _add_children_to_item(self.model_.invisibleRootItem(), "")
+        _add_children_to_item(self.model_.invisibleRootItem(), -1)
         self._update_flattened_model()  # TODO PASS ROOT ITEM TO MAKE THINGS QUICKER
 
-    def get_model_item(self, collection: Playlist | Folder) -> TreeModelItem:
+    def get_model_item(self, collection: DbCollection) -> TreeModelItem:
         return next(
             tree_model_item
             for tree_model_item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=True)
             if tree_model_item.collection.id == collection.id
         )
 
-    def refresh_playlist(self, playlist: Playlist):
-        item = self.get_model_item(playlist)
-        item.collection = playlist
+    def refresh_collection(self, collection: DbCollection, affected_sort_role: SortRole):
+        item = self.get_model_item(collection)
+        item.collection = collection
         item.update_icon()
+
+        if self.proxy_model.sortRole() == affected_sort_role.value:
+            self.proxy_model.invalidate()
 
 
 class SortRoleAction(QAction):

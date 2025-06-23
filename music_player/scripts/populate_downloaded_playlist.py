@@ -1,17 +1,21 @@
 import datetime
 
-from music_player.music_importer import get_music_df
-from music_player.playlist import Playlist, PlaylistItem
+from music_player.database import get_database_manager
+from music_player.music_importer import load_from_sources
+from music_player.playlist import DbCollection
 
-downloaded = get_music_df()["downloaded_datetime"]
-downloaded_playlist = Playlist(
-    parent_id="",
-    id="_",
-    title="Downloaded Songs",
-    created=datetime.datetime.now(tz=datetime.UTC),
-    last_updated=datetime.datetime.now(tz=datetime.UTC),
-    last_played=None,
-    thumbnail=None,
-    playlist_items=[PlaylistItem(index, row) for index, row in zip(downloaded.index, downloaded, strict=True)],
+downloaded = list(load_from_sources())
+downloaded_playlist = DbCollection(
+    id=-1,
+    collection_type="playlist",
+    _parent_id=-1,
+    name="Downloaded Songs",
+    _created=datetime.datetime.now(tz=datetime.UTC),
+    _last_updated=datetime.datetime.now(tz=datetime.UTC),
+    _last_played=None,
+    _thumbnail=None,
+    is_protected=True,
 )
+get_database_manager().reset_and_populate_database()
 downloaded_playlist.save()
+downloaded_playlist.add_music_ids(tuple(1 + i for i in range(len(downloaded))))

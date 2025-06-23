@@ -247,10 +247,10 @@ class MediaToolbar(QToolBar):
         rewind_button.clicked.connect(self.press_rewind_button)
         media_control_button_hbox.addWidget(rewind_button)
 
-        self.play_button = QToolButton()
-        self.play_button.setIcon(get_play_button_icon())
-        self.play_button.clicked.connect(self.press_play_button)
-        media_control_button_hbox.addWidget(self.play_button)
+        self.play_pause_button = QToolButton()
+        self.play_pause_button.setIcon(get_play_button_icon())
+        self.play_pause_button.clicked.connect(self.press_play_button)
+        media_control_button_hbox.addWidget(self.play_pause_button)
 
         self.skip_button = QToolButton()
         self.skip_button.setIcon(QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1))))

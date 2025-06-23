@@ -1,21 +1,33 @@
 import re
+from datetime import UTC, datetime
+from enum import Enum
 from typing import Any, cast, override
 
 import numpy as np
-import pandas as pd
 from PySide6.QtCore import (
-    QAbstractTableModel,
     QEvent,
     QModelIndex,
     QObject,
     QPersistentModelIndex,
     QPoint,
     QRect,
+    QSortFilterProxyModel,
     Qt,
     Signal,
     Slot,
 )
-from PySide6.QtGui import QDragMoveEvent, QDropEvent, QFont, QFontMetrics, QMouseEvent, QPainter, QResizeEvent
+from PySide6.QtGui import (
+    QDragMoveEvent,
+    QDropEvent,
+    QFont,
+    QFontMetrics,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPixmap,
+    QResizeEvent,
+)
+from PySide6.QtSql import QSqlQueryModel
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
@@ -35,28 +47,51 @@ from qdarktheme.qtpy.QtWidgets import QApplication
 
 from music_player.common_gui import (
     get_artist_text_rect_text_tups,
+    get_pause_button_icon,
     get_play_button_icon,
     get_shuffle_button_icon,
     paint_artists,
     text_is_buffer,
 )
 from music_player.constants import ID_ROLE
-from music_player.music_importer import get_music_df
-from music_player.playlist import CollectionBase, Playlist
+from music_player.database import get_database_manager
+from music_player.db_types import Album, Artist
+from music_player.playlist import CollectionBase, DbCollection
 from music_player.signals import SharedSignals
-from music_player.utils import datetime_to_age_string, datetime_to_date_str, get_empty_pixmap, get_pixmap
+from music_player.utils import (
+    datetime_to_age_string,
+    datetime_to_date_str,
+    get_empty_pixmap,
+    get_pixmap,
+    timestamp_to_str,
+)
 from music_player.view_types import LibraryTableView, PlaylistTreeView
+from music_player.vlc_core import VLCCore
 
 PADDING = 5
 ROW_HEIGHT = 50
 ICON_SIZE = ROW_HEIGHT - PADDING * 2
-ALBUM_COL_IDX = 2
-DATE_ADDED_COL_IDX = 3
-DURATION_COL_IDX = 4
 
 
-def _get_total_length_string(music_df: pd.DataFrame) -> str:
-    total_timestamp = round(sum(music_df["duration_timestamp"]) / 60)
+class ColIndex(Enum):
+    MUSIC_NAME = 0
+    ARTISTS = 1
+    ALBUM_NAME = 2
+    DATE_ADDED = 3
+    DURATION = 4
+
+
+COLUMN_MAP_BY_IDX = {
+    0: ("Title", "music_name"),
+    1: ("Artists", "artists"),  # This is a custom-handled column
+    2: ("Album", "album_name"),  # This is a relational column
+    3: ("Date Added", "downloaded_on"),  # TODO
+    4: ("Duration", "duration"),
+}
+
+
+def _get_total_length_string(total_timestamp: float) -> str:
+    total_timestamp = round(total_timestamp / 60)
     components: list[str] = []
     for item in ["minute", "hour", "day"]:
         num = total_timestamp % 60
@@ -65,10 +100,6 @@ def _get_total_length_string(music_df: pd.DataFrame) -> str:
         components.insert(0, f"{num} {item}{'s'[: num ^ 1]}")
         total_timestamp = total_timestamp // 60
     return " ".join(components)
-
-
-def _get_meta_text(music_df: pd.DataFrame) -> str:
-    return f"{len(music_df)} Track{'s'[: len(music_df) ^ 1]}, {_get_total_length_string(music_df)}"
 
 
 class AlbumItemDelegate(QStyledItemDelegate):
@@ -110,15 +141,16 @@ class SongItemDelegate(QStyledItemDelegate):
     ) -> None:
         painter.save()
 
-        pixmap = index.data(Qt.ItemDataRole.DecorationRole)
-
         view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
 
-        index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
-        icon_rect = QRect(index_rect.topLeft() + QPoint(0, PADDING), pixmap.size())
-        painter.drawPixmap(icon_rect, pixmap)
-        text_rect, _, elided_text = view.get_text_rect_tups_for_index(index)[0]
+        pixmap = index.data(Qt.ItemDataRole.DecorationRole)
 
+        if pixmap is not None:
+            index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
+            icon_rect = QRect(index_rect.topLeft() + QPoint(0, PADDING), pixmap.size())
+            painter.drawPixmap(icon_rect, pixmap)
+
+        text_rect, _, elided_text = view.get_text_rect_tups_for_index(index)[0]
         if view.hovered_text_rect == text_rect:
             font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
             font.setUnderline(True)
@@ -128,93 +160,103 @@ class SongItemDelegate(QStyledItemDelegate):
         painter.restore()
 
 
-class MusicTableModel(QAbstractTableModel):
+class ProxyModel(QSortFilterProxyModel):
+    @override
+    def columnCount(self, /, parent=...):
+        return 5
+
+
+class MusicTableModel(QSqlQueryModel):
     re_pattern = re.compile(r"[\W_]+")
+    _base_query = "SELECT * FROM library_music_view"
 
     def __init__(self, parent: "MusicLibraryTable"):
         super().__init__(parent)
-        self.music_data: pd.DataFrame = pd.DataFrame()
-        self.display_df: pd.DataFrame = pd.DataFrame()
-        self.search_df: pd.DataFrame = pd.DataFrame()
+        get_database_manager().get_qt_connection()
+        self.base_query = self._base_query
+        self.setQuery(self.base_query)
+
+        self.music_id_field_idx = self.record().indexOf("music_id")
+        self.music_name_field_idx = self.record().indexOf("music_name")
+        self.album_name_field_idx = self.record().indexOf("album_name")
+        self.album_id_field_idx = self.record().indexOf("album_id")
+        self.duration_field_idx = self.record().indexOf("duration")
+        self.cover_bytes_field_idx = self.record().indexOf("cover_bytes")
+
         self.view = parent
-        self.modelReset.connect(self.update_dfs)
-
-    @override
-    def rowCount(self, parent=None):
-        """Returns number of rows in table."""
-        return len(self.music_data)
-
-    @override
-    def columnCount(self, parent=None):
-        """Returns number of columns in table."""
-        return len(self.display_df.columns)
 
     @override
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = ...) -> Any:
         """Returns header data for given role."""
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            return list(self.display_df.columns)[section].capitalize()
+            return COLUMN_MAP_BY_IDX.get(section, ("", ""))[0]
         return None
 
     @override
-    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = ...) -> Any:  # noqa: PLR0911
+    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:  # noqa: PLR0911, PLR0912, C901
         """Returns data for given index."""
         if not index.isValid():
             return None
+
+        column_name, db_field = COLUMN_MAP_BY_IDX.get(index.column(), (None, None))
+        if not column_name or not db_field:
+            return None
+
         if role == ID_ROLE:
-            return int(self.display_df.iloc[[index.row()]].index[0])
+            return super().data(self.index(index.row(), self.music_id_field_idx))
+
         if role in {Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole}:
-            return self.display_df.iloc[index.row(), index.column()]
+            if column_name == "Artists":
+                return ["FAKE DATA", "2"]
+            res = super().data(self.index(index.row(), self.record().indexOf(db_field)), role)
+            if column_name == "Date Added":
+                return datetime_to_age_string(datetime.fromtimestamp(res.toSecsSinceEpoch(), tz=UTC))
+            if column_name == "Duration":
+                return timestamp_to_str(res)
+            return str(res)
         if role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
         if role == Qt.ItemDataRole.ToolTipRole:
-            display_cols = self.display_df.columns
-            if "date added" in display_cols and index.column() == display_cols.get_loc("date added"):
-                return self.music_data["_date_added"].iloc[index.row()]
-            data = self.data(index, Qt.ItemDataRole.DisplayRole)
+            data = super().data(self.index(index.row(), self.record().indexOf(db_field)), Qt.ItemDataRole.DisplayRole)
+            if column_name == "Date Added":
+                return datetime_to_date_str(datetime.fromtimestamp(data.toSecsSinceEpoch(), tz=UTC))
             text = ", ".join(data) if index.column() == 1 else data
             column_width = self.view.columnWidth(index.column()) - (ROW_HEIGHT if index.column() == 0 else PADDING * 2)
             if self.view.font_metrics.horizontalAdvance(text) > column_width:
                 return text
-        if role == Qt.ItemDataRole.DecorationRole and index.column() == 0:
-            return get_pixmap(self.music_data["album_cover_bytes"].iloc[index.row()], ICON_SIZE)
+        if role == Qt.ItemDataRole.DecorationRole and column_name == "Title":
+            cover_bytes = super().data(self.index(index.row(), self.cover_bytes_field_idx))
+            if cover_bytes:
+                return get_pixmap(bytes(cover_bytes), ICON_SIZE)  # Assumes get_pixmap utility
+            return None  # Return None if no cover
         return None
 
     @override
     def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
         """Returns flags for given index."""
-        return super().flags(index) | Qt.ItemFlag.ItemIsDragEnabled
+        return super().flags(index) | Qt.ItemFlag.ItemIsDragEnabled | ~Qt.ItemFlag.ItemIsEditable
 
-    @override
-    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:
-        # TODO: Sort by artist list
-        sort_column = self.display_df.columns[column]
-        match sort_column:
-            case "duration":
-                sort_key = "duration_timestamp"
-            case "date added":
-                sort_key = "_date_added"
+    def get_index(self, row: int) -> int:
+        return super().data(self.index(row, self.music_id_field_idx))
+
+    def get_visible_indices(self):
+        return [
+            self.get_index(row)
+            for row in range(self.rowCount())  # TODO IF HIDDEN?
+        ]
+
+    def get_foreign_key(self, index: QModelIndex | QPersistentModelIndex) -> int | None:
+        col = index.column()
+        match col:
+            case 1:  # Artists
+                raise NotImplementedError
+            case 2:  # Album
+                return super().data(self.index(index.row(), self.album_id_field_idx))
             case _:
-                sort_key = sort_column
-        self.beginResetModel()
-        self.music_data = (
-            self.music_data.sort_values(
-                sort_column, ascending=order == Qt.SortOrder.AscendingOrder, key=lambda _: self.music_data[sort_key]
-            )
-            if column != -1
-            else self.music_data.sort_index()
-        )
-        self.endResetModel()
+                return None
 
-    def update_dfs(self):
-        self.display_df = pd.DataFrame()
-        cols = self.music_data.columns
-        for col in ["title", "artists", "album", "date added", "duration"]:
-            self.display_df[col] = self.music_data[col] if col in cols else None
-
-        self.search_df = self.music_data[["title", "artists", "album"]].apply(
-            lambda col: col.astype(str).str.lower().replace(self.re_pattern, "", regex=True)
-        )
+    def get_total_timestamp(self):
+        return sum([super().data(self.index(row, self.duration_field_idx)) for row in range(self.rowCount())])
 
 
 class TextLabel(QLabel):
@@ -325,11 +367,17 @@ class LibraryHeaderWidget(QWidget):
         header_meta_layout.addWidget(self.header_img)
         header_meta_layout.addLayout(header_text_layout)
 
-        play_button = QToolButton()
-        play_button.setIcon(get_play_button_icon())
+        self.play_pause_button = QToolButton()
+        self.play_pause_button.setIcon(get_play_button_icon())
 
         play_shuffled_button = QToolButton()
         play_shuffled_button.setIcon(get_shuffle_button_icon())
+
+        self.save_button = QToolButton()
+        self.save_button.setIcon(QIcon("../icons/add-to.svg"))
+
+        more_button = QToolButton()
+        more_button.setIcon(QIcon("../icons/more-button.svg"))
 
         search_bar = QLineEdit()
         search_bar.textChanged.connect(library.filter)
@@ -337,8 +385,10 @@ class LibraryHeaderWidget(QWidget):
         search_bar.setPlaceholderText("Search")
 
         header_interactive_layout = QHBoxLayout()
-        header_interactive_layout.addWidget(play_button)
+        header_interactive_layout.addWidget(self.play_pause_button)
         header_interactive_layout.addWidget(play_shuffled_button)
+        header_interactive_layout.addWidget(self.save_button)
+        header_interactive_layout.addWidget(more_button)
         header_interactive_layout.addStretch()
         header_interactive_layout.addWidget(search_bar)
 
@@ -352,19 +402,31 @@ class LibraryHeaderWidget(QWidget):
 
 
 class MusicLibraryWidget(QWidget):
-    def __init__(self, playlist: Playlist, shared_signals: SharedSignals):
+    def __init__(self, collection: CollectionBase, shared_signals: SharedSignals, core: VLCCore):
         super().__init__()
         self.setStyleSheet("QWidget { margin: 0px; border: none; }")
-        self.playlist: Playlist | None = None
+        self.library_id: str = ""
+        self.core = core
 
         shared_signals.library_load_artist_signal.connect(self.load_artist)
         shared_signals.library_load_album_signal.connect(self.load_album)
-        shared_signals.delete_playlist_signal.connect(self.delete_playlist)
+        shared_signals.delete_collection_signal.connect(self.delete_collection)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Expanding)
 
         self.header_widget = LibraryHeaderWidget(self)
         self.table_view = MusicLibraryTable(shared_signals, self)
-        self.load_playlist(playlist)
+        self.header_widget.play_pause_button.clicked.connect(self.play_button_clicked)
+
+        self.collection: CollectionBase | None
+        if collection.collection_type == "playlist":
+            assert isinstance(collection, DbCollection)
+            self.load_playlist(collection)
+        elif collection.collection_type == "album":
+            self.load_album()
+        elif collection.collection_type == "artist":
+            self.load_artist()
+        else:
+            self.load_nothing()
 
         layout = QVBoxLayout()
         layout.addWidget(self.header_widget)
@@ -372,18 +434,38 @@ class MusicLibraryWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
+    def play_button_clicked(self):
+        self.table_view.song_clicked.emit(0)
+        self.header_widget.play_pause_button.setIcon(get_pause_button_icon())
+
     @Slot()
-    def delete_playlist(self, playlist: Playlist):
-        if playlist == self.playlist:
-            self.load_playlist(None)
-        playlist.delete()
+    def play_library(self) -> None:
+        self.table_view.song_clicked.emit(0)
+
+    @Slot()
+    def delete_collection(self, collection: DbCollection):
+        if collection == self.collection:
+            self.load_nothing()
+        collection.delete()
 
     @Slot()
     def filter(self, text: str):
-        cleaned_text = re.sub(self.table_view.model_.re_pattern, "", text).lower()
-        good_series = self.table_view.model_.search_df.apply(lambda col: col.str.contains(cleaned_text)).any(axis=1)
-        good_rows = np.where(good_series)[0]
-        bad_rows = np.where(~good_series)[0]
+        model = self.table_view.model_
+
+        def clean_text(_text: str):
+            return re.sub(model.re_pattern, "", _text).lower()
+
+        cleaned_text = clean_text(text)
+        good_rows: list[int] = []
+        bad_rows: list[int] = []
+        for row in range(model.rowCount()):
+            if (
+                cleaned_text in clean_text(model.data(model.index(row, ColIndex.MUSIC_NAME.value)))  # Title
+                or cleaned_text in clean_text(model.data(model.index(row, ColIndex.ALBUM_NAME.value)))  # Album
+            ):
+                good_rows.append(row)
+                continue
+            bad_rows.append(row)
         for row in bad_rows:
             if not self.table_view.isRowHidden(row):
                 self.table_view.hideRow(row)
@@ -392,72 +474,111 @@ class MusicLibraryWidget(QWidget):
                 self.table_view.showRow(row)
         self.table_view.adjust_height_to_content()
 
-    def load_playlist(self, playlist: Playlist | None):
-        playlist_df = get_music_df().iloc[playlist.indices if playlist else []].copy()
-        dates = [i.added_on for i in (playlist.playlist_items if playlist else [])]
-        playlist_df["_date_added"] = [datetime_to_date_str(d) for d in dates]
-        playlist_df["date added"] = [datetime_to_age_string(d) for d in dates]
-
-        if playlist is not None:
-            header_img_pixmap = playlist.get_thumbnail_pixmap(self.header_widget.header_img_size)
-            header_label_type_text = "Playlist"
-            header_label_title_text = playlist.title
-            header_label_meta_text = _get_meta_text(playlist_df)
-        else:
-            header_img_pixmap = get_empty_pixmap(self.header_widget.header_img_size)
-            header_label_type_text = ""
-            header_label_title_text = ""
-            header_label_meta_text = ""
-
-        self.header_widget.header_img.setPixmap(header_img_pixmap)
-        self.header_widget.header_label_type.setText(header_label_type_text)
-        self.header_widget.header_label_title.setText(header_label_title_text)
-        self.header_widget.header_label_meta.setText(header_label_meta_text)
-        self.header_widget.header_label_subtitle.setVisible(False)
-        self.table_view.show_date_added()
-
-        self.playlist = playlist
-        model = self.table_view.model_
-        model.beginResetModel()
-        model.music_data = playlist_df
-        model.endResetModel()
-
-    @Slot()
-    def load_artist(self, artist: str):
-        # TODO LOAD IMG
-        artist_df = get_music_df().loc[get_music_df()["artists"].apply(lambda x: artist in x)]
-        self.header_widget.header_label_type.setText("Artist")
-        self.header_widget.header_label_title.setText(artist)
-        self.header_widget.header_label_subtitle.setVisible(False)
-        self.header_widget.header_label_meta.setText(_get_meta_text(artist_df))
-        self.table_view.hide_date_added()
-
-        self.playlist = None
-        model = self.table_view.model_
-        model.beginResetModel()
-        model.music_data = artist_df
-        model.endResetModel()
-
-    @Slot()
-    def load_album(self, album: str):
-        self.playlist = None
-        album_df = get_music_df().loc[get_music_df()["album"] == album]
-        assert len(set(album_df["album_cover_bytes"])) == 1
-        assert len(set(album_df["album_artist"])) == 1  # TODO HANDLE THIS
-        self.header_widget.header_img.setPixmap(
-            get_pixmap(album_df.iloc[0]["album_cover_bytes"], self.header_widget.header_img_size)
+    def update_header_play_button(self):
+        if self.collection is None:
+            print("NOT IMPLEMENTED")
+        self.header_widget.play_pause_button.setIcon(
+            get_pause_button_icon()
+            if self.collection == self.core.current_collection and self.core.media_player.is_playing()
+            else get_play_button_icon()
         )
-        self.header_widget.header_label_type.setText("Album")
-        self.header_widget.header_label_title.setText(album)
-        self.header_widget.header_label_subtitle.setVisible(True)
-        self.header_widget.header_label_subtitle.setText(album_df.iloc[0]["album_artist"])
-        self.header_widget.header_label_meta.setText(_get_meta_text(album_df))
-        self.table_view.hide_date_added()
+
+    def _load(
+        self,
+        *,
+        new_collection,
+        img_pixmap: QPixmap,
+        header_label_type: str,
+        header_label_title: str,
+        header_label_subtitle: str | None,
+        show_date_added_col: bool | None,
+        base_query_append: str,
+        no_meta: bool = False,
+    ):
+        self.header_widget.header_img.setPixmap(img_pixmap)
+        self.header_widget.header_label_type.setText(header_label_type)
+        self.header_widget.header_label_title.setText(header_label_title)
+
+        if header_label_subtitle is None:
+            self.header_widget.header_label_subtitle.setVisible(False)
+        else:
+            self.header_widget.header_label_subtitle.setText(header_label_subtitle)
+            self.header_widget.header_label_subtitle.setVisible(True)
+
+        if show_date_added_col is not None:
+            if show_date_added_col:
+                self.table_view.show_date_added()
+            else:
+                self.table_view.hide_date_added()
+
+        self.collection = new_collection
+        self.update_header_play_button()
 
         model = self.table_view.model_
-        model.beginResetModel()
-        model.music_data = album_df
-        model.endResetModel()
+        model.setQuery(model.base_query + base_query_append)
+        if not no_meta:
+            num_tracks = model.rowCount()
+            total_timestamp = model.get_total_timestamp()
+            meta_text = f"{num_tracks} Track{'s'[: num_tracks ^ 1]}, {_get_total_length_string(total_timestamp)}"
+        else:
+            meta_text = ""
+        self.header_widget.header_label_meta.setText(meta_text)
+
+    def load_nothing(self):
+        self._load(
+            new_collection=None,
+            img_pixmap=get_empty_pixmap(self.header_widget.header_img_size),
+            header_label_type="",
+            header_label_title="",
+            header_label_subtitle=None,
+            show_date_added_col=None,
+            base_query_append="",
+            no_meta=True,
+        )
+
+    def load_playlist(self, playlist: DbCollection):
+        self.library_id = str(playlist.id)
+
+        self._load(
+            new_collection=playlist,
+            img_pixmap=playlist.get_thumbnail_pixmap(self.header_widget.header_img_size),
+            header_label_type="Playlist",
+            header_label_title=playlist.name,
+            header_label_subtitle=None,
+            show_date_added_col=True,
+            base_query_append="",  # TODO
+        )
+
+    @Slot()
+    def load_artist(self, artist_id: int):
+        artist = Artist.from_db(artist_id)
+        img_size = self.header_widget.header_img_size
+        pm = get_pixmap(artist.img, img_size) if artist.img else get_empty_pixmap(img_size)
+        self._load(
+            new_collection=artist,  # TODO
+            img_pixmap=pm,
+            header_label_type="Artist",
+            header_label_title=artist.name,
+            header_label_subtitle=None,
+            show_date_added_col=False,
+            base_query_append=f" WHERE artist_id = '{artist_id}' ",  # TODO
+        )
+
+    @Slot()
+    def load_album(self, album_id: int, *, is_db_collection: bool = False):  # TODO ENABLE LATER
+        self.library_id = f"album{album_id}"
+
+        # assert len(set(album_df["album_artist"])) == 1  # TODO HANDLE THIS
+        album = Album.from_db(album_id)
+        self._load(
+            new_collection=album,  # TODO
+            img_pixmap=get_pixmap(album.cover_bytes, self.header_widget.header_img_size),
+            header_label_type="Album",
+            header_label_title=album.name,
+            header_label_subtitle="",  # album_df.iloc[0]["album_artist"],
+            show_date_added_col=False,
+            base_query_append=f" WHERE album_id = '{album_id}' ",
+        )
 
 
 class TableHeader(QHeaderView):
@@ -532,8 +653,8 @@ class TableHeader(QHeaderView):
         self.blockSignals(True)  # noqa: FBT003
         for column in range(3):
             self._resize_section_if_needed(column, col_widths[column])
-        self._resize_section_if_needed(DATE_ADDED_COL_IDX, self.minimum_section_size)
-        self._resize_section_if_needed(DURATION_COL_IDX, self.minimum_section_size)
+        self._resize_section_if_needed(ColIndex.DATE_ADDED.value, self.minimum_section_size)
+        self._resize_section_if_needed(ColIndex.DURATION.value, self.minimum_section_size)
         self.blockSignals(False)  # noqa: FBT003
 
     def _resize_section_if_needed(self, logical_index: int, new_size: int, old_size: int | None = None):
@@ -585,15 +706,17 @@ class MusicLibraryTable(LibraryTableView):
         self.setItemDelegateForColumn(2, self.album_delegate)
 
         self.model_ = MusicTableModel(self)
-        self.setModel(self.model_)
+        proxy_model = ProxyModel()
+        proxy_model.setSourceModel(self.model_)
+        self.setModel(proxy_model)
         self.model_.modelReset.connect(self.adjust_height_to_content)
 
-        self.horizontalHeader().setSectionResizeMode(DATE_ADDED_COL_IDX, QHeaderView.ResizeMode.Fixed)
-        self.horizontalHeader().setSectionResizeMode(DURATION_COL_IDX, QHeaderView.ResizeMode.Fixed)
-        self.horizontalHeader().setSectionResizeMode(ALBUM_COL_IDX, QHeaderView.ResizeMode.Fixed)
+        self.horizontalHeader().setSectionResizeMode(ColIndex.DATE_ADDED.value, QHeaderView.ResizeMode.Fixed)
+        self.horizontalHeader().setSectionResizeMode(ColIndex.DURATION.value, QHeaderView.ResizeMode.Fixed)
+        self.horizontalHeader().setSectionResizeMode(ColIndex.ALBUM_NAME.value, QHeaderView.ResizeMode.Fixed)
 
         self.hovered_text_rect = QRect()
-        self.hovered_data: Any = None
+        self.hovered_data: int | None = None
 
         self.viewport().installEventFilter(self)
         self.adjust_height_to_content()
@@ -601,7 +724,7 @@ class MusicLibraryTable(LibraryTableView):
     @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
         source = event.source()
-        playlist = cast(MusicLibraryWidget, self.parent()).playlist
+        playlist = cast(MusicLibraryWidget, self.parent()).collection
         if playlist is not None and not playlist.is_protected and isinstance(source, PlaylistTreeView):
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
@@ -613,12 +736,12 @@ class MusicLibraryTable(LibraryTableView):
     def dropEvent(self, event: QDropEvent, /):
         source = event.source()
         if isinstance(source, PlaylistTreeView):
-            dest_playlist = cast(MusicLibraryWidget, self.parent()).playlist
+            dest_playlist = cast(MusicLibraryWidget, self.parent()).collection
             assert dest_playlist is not None
-            src_playlist = cast(
-                CollectionBase, source.model().data(source.selectedIndexes()[0], PlaylistTreeView.collection_role)
+            src_collection = cast(
+                DbCollection, source.model().data(source.selectedIndexes()[0], PlaylistTreeView.collection_role)
             )
-            self._signals.add_to_playlist_signal.emit(src_playlist.indices, dest_playlist)
+            self._signals.add_to_playlist_signal.emit(src_collection.indices, dest_playlist)
 
     @override
     def mouseMoveEvent(self, event: QMouseEvent):
@@ -626,9 +749,10 @@ class MusicLibraryTable(LibraryTableView):
         index = self.indexAt(pos)
         if not index.isValid():
             return
-        for rect, data, shown_text in self.get_text_rect_tups_for_index(index):
+        for rect, _, shown_text in self.get_text_rect_tups_for_index(index):
             if not text_is_buffer(shown_text) and rect.contains(pos):
-                self.hovered_text_rect, self.hovered_data = rect, data
+                self.hovered_text_rect = rect
+                self.hovered_data = self.model_.get_foreign_key(index)
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
                 break
         else:
@@ -709,17 +833,19 @@ class MusicLibraryTable(LibraryTableView):
         self.setMinimumHeight(total_height)
 
     def hide_date_added(self):
+        date_added_idx = ColIndex.DATE_ADDED.value
         header = cast(TableHeader, self.horizontalHeader())
-        if not header.isSectionHidden(DATE_ADDED_COL_IDX):
-            header.hideSection(DATE_ADDED_COL_IDX)
+        if not header.isSectionHidden(date_added_idx):
+            header.hideSection(date_added_idx)
             header.resize_sections()
-        if self.horizontalHeader().visualIndex(DATE_ADDED_COL_IDX) == DATE_ADDED_COL_IDX:  # It's in it's right spot
-            self.horizontalHeader().moveSection(DATE_ADDED_COL_IDX, DURATION_COL_IDX)
+        if self.horizontalHeader().visualIndex(date_added_idx) == date_added_idx:  # It's in it's right spot
+            self.horizontalHeader().moveSection(date_added_idx, ColIndex.DURATION.value)
 
     def show_date_added(self):
+        date_added_idx = ColIndex.DATE_ADDED.value
         header = cast(TableHeader, self.horizontalHeader())
-        if header.isSectionHidden(DATE_ADDED_COL_IDX):
-            header.showSection(DATE_ADDED_COL_IDX)
+        if header.isSectionHidden(date_added_idx):
+            header.showSection(date_added_idx)
             header.resize_sections()
-        if (date_index := header.visualIndex(DATE_ADDED_COL_IDX)) != DATE_ADDED_COL_IDX:
-            header.moveSection(date_index, DATE_ADDED_COL_IDX)
+        if (date_index := header.visualIndex(date_added_idx)) != date_added_idx:
+            header.moveSection(date_index, date_added_idx)
