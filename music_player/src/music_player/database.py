@@ -83,6 +83,11 @@ CREATE TABLE collection_children (
     FOREIGN KEY (collection_id) REFERENCES collections(collection_id),
     FOREIGN KEY (music_id) REFERENCES music(music_id)
 );
+
+CREATE MATERIALIZED VIEW music_view AS
+SELECT lmv.*, ma.artist_id, ma.sort_order AS artist_order FROM library_music_view AS lmv
+JOIN music_artists ma USING (music_id)
+JOIN artists AS a USING (artist_id);
 """
 
 INSERT_ALBUM_SQL = "INSERT INTO albums (album_name, release_date, cover_bytes) VALUES (%s, %s, %s) RETURNING album_id;"
