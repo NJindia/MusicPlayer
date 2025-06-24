@@ -4,6 +4,7 @@ from enum import Enum
 from functools import partial
 from typing import cast, override
 
+from line_profiler_pycharm import profile
 from PySide6.QtCore import (
     QEvent,
     QModelIndex,
@@ -48,7 +49,7 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import NewFolderAction, NewPlaylistAction
 from music_player.constants import ID_ROLE, MAX_SIDE_BAR_WIDTH
-from music_player.playlist import DbCollection, get_collections_by_parent_id
+from music_player.db_types import DbCollection, get_collections_by_parent_id
 from music_player.signals import SharedSignals
 from music_player.utils import get_colored_pixmap
 from music_player.view_types import LibraryTableView, PlaylistTreeView
@@ -170,7 +171,7 @@ class PlaylistProxyModel(QSortFilterProxyModel):
 
     def data_(self, index: QModelIndex, role: int):
         data = self.data(index, role)
-        assert data is not None
+        assert data is not None, (index, role)
         return data
 
 
@@ -232,9 +233,9 @@ class PlaylistTree(PlaylistTreeView):
                     self.model().mapToSource(source_index), self.model().mapToSource(drop_index)
                 )
             else:
-                indices = cast(DbCollection, self.model().data_(source_index, self.collection_role)).indices
+                music_ids = cast(DbCollection, self.model().data_(source_index, self.collection_role)).music_ids
                 dest_playlist = cast(DbCollection, self.model().data_(drop_index, self.collection_role))
-                self._signals.add_to_playlist_signal.emit(indices, dest_playlist)
+                self._signals.add_to_playlist_signal.emit(music_ids, dest_playlist)
         else:
             if event.proposedAction() != Qt.DropAction.CopyAction:
                 qFatal("If PlaylistTree.dropEvent source is not itself, DropAction should always be CopyAction")
@@ -567,7 +568,7 @@ class PlaylistTreeWidget(QWidget):
             else:
                 menu.addSeparator()
 
-            menu.addMenu(AddToPlaylistMenu(item.collection.indices, self.signals, menu, main_window, self))
+            menu.addMenu(AddToPlaylistMenu(list(item.collection.music_ids), self.signals, menu, main_window, self))
 
         args = menu, main_window, source_root_index, self.signals
         menu.addSeparator()
@@ -605,6 +606,7 @@ class PlaylistTreeWidget(QWidget):
             if tree_model_item.collection.id == collection.id
         )
 
+    @profile
     def refresh_collection(self, collection: DbCollection, affected_sort_role: SortRole):
         item = self.get_model_item(collection)
         item.collection = collection

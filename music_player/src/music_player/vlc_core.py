@@ -4,7 +4,7 @@ from typing import Literal, cast, get_args
 from vlc import Event, EventType, Instance, Media, MediaList, MediaListPlayer, MediaPlayer
 
 from music_player.database import get_database_manager
-from music_player.playlist import DbCollection, DbMusic
+from music_player.db_types import DbCollection, DbMusic
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
 
@@ -41,8 +41,7 @@ class VLCCore:
         self.db_indices: list[int] = []
         self.list_indices: list[int] = []
         """The ordered list of indices in BOTH the `db_indices` and `media_list` to play"""
-        self.current_media_idx: int = 0
-        self.load_media_from_music_ids(self.current_collection.get_music_ids())
+        self.current_media_idx: int = -1
 
         self.player_event_manager = self.media_player.event_manager()
         self.list_player_event_manager = self.list_player.event_manager()
@@ -87,4 +86,5 @@ class VLCCore:
         self.current_media_idx += 1
         if self.current_media_idx >= len(self.list_indices):
             self.list_player.stop()
-        self.list_player.play_item_at_index(self.list_indices[self.current_media_idx])
+        else:
+            self.list_player.play_item_at_index(self.list_indices[self.current_media_idx])

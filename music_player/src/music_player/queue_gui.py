@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import paint_artists
 from music_player.constants import QUEUE_ENTRY_HEIGHT, QUEUE_ENTRY_SPACING
-from music_player.playlist import DbMusic
+from music_player.db_types import DbMusic
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.vlc_core import VLCCore
@@ -41,6 +41,7 @@ class QueueSignal(QObject):
 
 
 class QueueEntryGraphicsItem(QGraphicsItem):
+    @profile
     def __init__(
         self, music: DbMusic, shared_signals: SharedSignals, *, manually_added: bool = False, start_width: int = 0
     ) -> None:
@@ -64,9 +65,9 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         self._song_font_metrics = QFontMetrics(self._song_font)
         text_padding_left = QUEUE_ENTRY_HEIGHT  # Space for album + spacing
 
-        font_rect = self._song_font_metrics.boundingRect(self.music.name)
-        song_width, song_height = font_rect.width() + 2, font_rect.height() + 2
-        self._song_text_rect = QRectF(text_padding_left, QUEUE_ENTRY_SPACING, song_width, song_height)
+        # song_width = self._song_font_metrics.horizontalAdvance(self.music.name)+ 2
+        song_height = self._song_font_metrics.height() + 2
+        self._song_text_rect = QRectF(text_padding_left, QUEUE_ENTRY_SPACING, 0, song_height)
 
         self._artist_font = QFont()
         self._artists_bounding_rect = QRect(
@@ -79,6 +80,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         return self._bounding_rect
 
     @override
+    @profile
     def paint(self, painter: QPainter, option, widget=None):
         # Paint album art
         if self.music.cover_bytes is not None:
@@ -177,19 +179,23 @@ class QueueEntryGraphicsView(QGraphicsView):
     def current_entries(self):
         return self.queue_entries
 
+    @profile
     def update_scene(self):
         for i, proxy in enumerate(self.current_entries):
             proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
-
+        assert len(self.current_entries) == len(self.scene().items()), (
+            f"{len(self.current_entries), len(self.scene().items())}"
+        )
         # TODO REMOVE BAD ENTRIES
 
-        assert all(e in self.scene().items() for e in self.current_entries)
         self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(self.scene().items())))  # Update scene size
         self.viewport().update()
 
-    def insert_queue_entry(self, queue_index: int, entry: QueueEntryGraphicsItem) -> None:
-        self.queue_entries.insert(queue_index, entry)
-        self.scene().addItem(entry)
+    @profile
+    def insert_queue_entries(self, queue_insert_index: int, entries: list[QueueEntryGraphicsItem]) -> None:
+        self.queue_entries = self.queue_entries[:queue_insert_index] + entries + self.queue_entries[queue_insert_index:]
+        for entry in entries:
+            self.scene().addItem(entry)
         self.update_scene()
 
     @staticmethod

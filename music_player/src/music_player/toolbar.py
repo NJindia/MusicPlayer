@@ -185,6 +185,7 @@ class MediaToolbar(QToolBar):
     @Slot()
     def press_play_button(self):
         """Start audio playback if none is playing, otherwise pause existing."""
+        print(self.core.current_media)
         self.core.list_player.pause() if self.core.list_player.is_playing() else self.core.list_player.play()
 
     @Slot()

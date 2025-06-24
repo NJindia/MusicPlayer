@@ -1,9 +1,11 @@
 import re
 from datetime import UTC, datetime
 from enum import Enum
+from functools import cache
 from typing import Any, cast, override
 
 import numpy as np
+from line_profiler_pycharm import profile
 from PySide6.QtCore import (
     QEvent,
     QModelIndex,
@@ -55,8 +57,7 @@ from music_player.common_gui import (
 )
 from music_player.constants import ID_ROLE
 from music_player.database import get_database_manager
-from music_player.db_types import Album, Artist
-from music_player.playlist import CollectionBase, DbCollection
+from music_player.db_types import DbAlbum, DbArtist, DbBase, DbCollection
 from music_player.signals import SharedSignals
 from music_player.utils import (
     datetime_to_age_string,
@@ -236,6 +237,7 @@ class MusicTableModel(QSqlQueryModel):
         """Returns flags for given index."""
         return super().flags(index) | Qt.ItemFlag.ItemIsDragEnabled | ~Qt.ItemFlag.ItemIsEditable
 
+    @cache
     def get_index(self, row: int) -> int:
         return super().data(self.index(row, self.music_id_field_idx))
 
@@ -402,7 +404,7 @@ class LibraryHeaderWidget(QWidget):
 
 
 class MusicLibraryWidget(QWidget):
-    def __init__(self, collection: CollectionBase, shared_signals: SharedSignals, core: VLCCore):
+    def __init__(self, collection: DbBase, shared_signals: SharedSignals, core: VLCCore):
         super().__init__()
         self.setStyleSheet("QWidget { margin: 0px; border: none; }")
         self.library_id: str = ""
@@ -417,7 +419,7 @@ class MusicLibraryWidget(QWidget):
         self.table_view = MusicLibraryTable(shared_signals, self)
         self.header_widget.play_pause_button.clicked.connect(self.play_button_clicked)
 
-        self.collection: CollectionBase | None
+        self.collection: DbBase | None
         if collection.collection_type == "playlist":
             assert isinstance(collection, DbCollection)
             self.load_playlist(collection)
@@ -483,6 +485,7 @@ class MusicLibraryWidget(QWidget):
             else get_play_button_icon()
         )
 
+    @profile
     def _load(
         self,
         *,
@@ -492,7 +495,7 @@ class MusicLibraryWidget(QWidget):
         header_label_title: str,
         header_label_subtitle: str | None,
         show_date_added_col: bool | None,
-        base_query_append: str,
+        music_ids_to_load: tuple[int, ...],
         no_meta: bool = False,
     ):
         self.header_widget.header_img.setPixmap(img_pixmap)
@@ -515,7 +518,11 @@ class MusicLibraryWidget(QWidget):
         self.update_header_play_button()
 
         model = self.table_view.model_
-        model.setQuery(model.base_query + base_query_append)
+        for row in range(model.rowCount()):
+            if model.get_index(row) in music_ids_to_load:
+                self.table_view.showRow(row)
+            else:
+                self.table_view.hideRow(row)
         if not no_meta:
             num_tracks = model.rowCount()
             total_timestamp = model.get_total_timestamp()
@@ -532,10 +539,11 @@ class MusicLibraryWidget(QWidget):
             header_label_title="",
             header_label_subtitle=None,
             show_date_added_col=None,
-            base_query_append="",
+            music_ids_to_load=(),
             no_meta=True,
         )
 
+    @profile
     def load_playlist(self, playlist: DbCollection):
         self.library_id = str(playlist.id)
 
@@ -546,12 +554,12 @@ class MusicLibraryWidget(QWidget):
             header_label_title=playlist.name,
             header_label_subtitle=None,
             show_date_added_col=True,
-            base_query_append="",  # TODO
+            music_ids_to_load=playlist.music_ids,  # TODO
         )
 
     @Slot()
     def load_artist(self, artist_id: int):
-        artist = Artist.from_db(artist_id)
+        artist = DbArtist.from_db(artist_id)
         img_size = self.header_widget.header_img_size
         pm = get_pixmap(artist.img, img_size) if artist.img else get_empty_pixmap(img_size)
         self._load(
@@ -561,7 +569,7 @@ class MusicLibraryWidget(QWidget):
             header_label_title=artist.name,
             header_label_subtitle=None,
             show_date_added_col=False,
-            base_query_append=f" WHERE artist_id = '{artist_id}' ",  # TODO
+            music_ids_to_load=artist.music_ids,
         )
 
     @Slot()
@@ -569,7 +577,7 @@ class MusicLibraryWidget(QWidget):
         self.library_id = f"album{album_id}"
 
         # assert len(set(album_df["album_artist"])) == 1  # TODO HANDLE THIS
-        album = Album.from_db(album_id)
+        album = DbAlbum.from_db(album_id)
         self._load(
             new_collection=album,  # TODO
             img_pixmap=get_pixmap(album.cover_bytes, self.header_widget.header_img_size),
@@ -577,7 +585,7 @@ class MusicLibraryWidget(QWidget):
             header_label_title=album.name,
             header_label_subtitle="",  # album_df.iloc[0]["album_artist"],
             show_date_added_col=False,
-            base_query_append=f" WHERE album_id = '{album_id}' ",
+            music_ids_to_load=album.music_ids,
         )
 
 
@@ -732,6 +740,7 @@ class MusicLibraryTable(LibraryTableView):
         event.setDropAction(Qt.DropAction.IgnoreAction)
         event.ignore()
 
+    @profile
     @override
     def dropEvent(self, event: QDropEvent, /):
         source = event.source()
@@ -741,7 +750,7 @@ class MusicLibraryTable(LibraryTableView):
             src_collection = cast(
                 DbCollection, source.model().data(source.selectedIndexes()[0], PlaylistTreeView.collection_role)
             )
-            self._signals.add_to_playlist_signal.emit(src_collection.indices, dest_playlist)
+            self._signals.add_to_playlist_signal.emit(src_collection.music_ids, dest_playlist)
 
     @override
     def mouseMoveEvent(self, event: QMouseEvent):

@@ -2,21 +2,22 @@
 import sys
 from datetime import UTC, datetime
 from functools import partial
-from itertools import count
 from typing import cast
 
 import numpy as np
 import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
 import vlc  # pyright: ignore[reportMissingTypeStubs]
+from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QAction, QIcon, QMouseEvent
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QWidget
+from tqdm import tqdm
 
 from music_player.common_gui import CreateMode, get_pause_button_icon, get_play_button_icon
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.database import get_database_manager
+from music_player.db_types import DbCollection, DbMusic, get_collections_by_parent_id, get_db_music_cache
 from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
-from music_player.playlist import DEFAULT_PLAYLIST_PATH, DbCollection, DbMusic, get_collections_by_parent_id
 from music_player.playlist_tree import AddToPlaylistMenu, PlaylistTreeWidget, SortRole, TreeModelItem
 from music_player.queue_gui import QueueEntryGraphicsItem, QueueEntryGraphicsView, QueueGraphicsView
 from music_player.signals import SharedSignals
@@ -33,7 +34,6 @@ class AddToQueueAction(QAction):
 
 class MainWindow(QMainWindow):
     media_changed_signal = Signal()
-    collection_id = count(len(list(DEFAULT_PLAYLIST_PATH.iterdir())))
 
     def __init__(self, core: VLCCore):
         super().__init__()
@@ -69,7 +69,6 @@ class MainWindow(QMainWindow):
 
         self.history = QueueEntryGraphicsView()
         self.queue = QueueGraphicsView(self.core, self.shared_signals)
-        self.shared_signals.clear_queue_signal.connect(self.clear_queue)
         self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
         self.queue.customContextMenuRequested.connect(self.queue_context_menu)
 
@@ -117,12 +116,12 @@ class MainWindow(QMainWindow):
     @Slot()
     def media_changed_ui(self):
         self.queue.update_first_queue_index()
-        assert self.last_played_music is not None
-        hist_entry = QueueEntryGraphicsItem(
-            self.last_played_music, self.shared_signals, start_width=self.history.viewport().width()
-        )
-        hist_entry.signal.song_clicked.connect(partial(self.play_history_entry, hist_entry))
-        self.history.insert_queue_entry(0, hist_entry)
+        if self.last_played_music is not None:  # None when nothing has been played yet
+            hist_entry = QueueEntryGraphicsItem(
+                self.last_played_music, self.shared_signals, start_width=self.history.viewport().width()
+            )
+            hist_entry.signal.song_clicked.connect(partial(self.play_history_entry, hist_entry))
+            self.history.insert_queue_entries(0, [hist_entry])
 
     def media_player_playing_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
@@ -141,6 +140,8 @@ class MainWindow(QMainWindow):
     def media_player_media_changed_callback(self, event: vlc.Event):
         print(f"Event: {event.type}")
         self.media_changed = True
+        if self.core.current_media_idx == -1:
+            self.core.current_media_idx = 0
         current_music = self.core.current_music
         self.toolbar.song_label.setText(f"{current_music.name}\n{', '.join(current_music.artists)}")
         if current_music.cover_bytes is not None:
@@ -185,16 +186,16 @@ class MainWindow(QMainWindow):
             self.core.current_media_idx = self.core.db_indices.index(last_music_played.id)
 
             # Replace any music/media that was added manually with the original lists
-            self.load_media(self.core.current_collection.get_music_ids())
+            self.load_media(self.core.current_collection.music_ids)
         self.queue.update_first_queue_index()
 
     @Slot()
-    def clear_queue(self):
-        pass
-
-    @Slot()
+    @profile
     def add_to_queue(self, music_db_indices: list[int]):
-        for music_db_index in music_db_indices:
+        print("CONNECT START")
+        items: list[QueueEntryGraphicsItem] = []
+        list_indices: list[int] = []
+        for music_db_index in tqdm(music_db_indices):
             music = DbMusic.from_db(music_db_index)
             if music_db_index in self.core.db_indices:
                 list_index = self.core.db_indices.index(music_db_index)
@@ -203,13 +204,19 @@ class MainWindow(QMainWindow):
                 self.core.list_player.set_media_list(self.core.media_list)  # pyright: ignore[reportUnknownMemberType]
                 self.core.db_indices.append(music_db_index)
                 list_index = len(self.core.db_indices) - 1
-            self.core.list_indices.insert(self.core.current_media_idx + 1, list_index)
-            self.queue.insert_queue_entry(
-                self.core.current_media_idx + 1,
-                QueueEntryGraphicsItem(
-                    music, self.shared_signals, manually_added=True, start_width=self.queue.viewport().width()
-                ),
+            list_indices.append(list_index)
+
+            item = QueueEntryGraphicsItem(
+                music, self.shared_signals, manually_added=True, start_width=self.queue.viewport().width()
             )
+            items.append(item)
+
+        insert_idx = self.core.current_media_idx + 1
+        self.core.list_indices = (
+            self.core.list_indices[:insert_idx] + list_indices + self.core.list_indices[insert_idx:]
+        )
+        self.queue.insert_queue_entries(insert_idx, items)
+        print("CONNECT END")
 
     @Slot()
     def remove_from_queue(self, item: QueueEntryGraphicsItem):
@@ -242,7 +249,7 @@ class MainWindow(QMainWindow):
             self.playlist_view.proxy_model.invalidate()
 
         self.core.current_collection = playlist
-        self.play_music(playlist.get_music_ids(), playlist_index)
+        self.play_music(playlist.music_ids, playlist_index)
 
     @Slot()
     def play_music(self, music_indices: tuple[int, ...], list_index: int):
@@ -308,8 +315,8 @@ class MainWindow(QMainWindow):
             _last_played=None,
             _thumbnail=None,
             is_protected=False,
-        ).save()
-        assert collection is not None
+        )
+        collection.save()
         get_collections_by_parent_id.cache_clear()
         item = TreeModelItem(collection)
         default_model_root_item.appendRow(item)  # pyright: ignore[reportUnknownMemberType]
@@ -326,9 +333,11 @@ class MainWindow(QMainWindow):
                         self.shared_signals.add_to_playlist_signal.emit(callback_value, collection)
 
     @Slot()
+    @profile
     def add_items_to_collection(self, music_db_indices: tuple[int, ...], playlist: DbCollection):
         playlist.add_music_ids(music_db_indices)
 
+        print("adds")
         if self.library.collection and playlist.id == self.library.collection.id:
             self.library.load_playlist(playlist)
         self.playlist_view.refresh_collection(playlist, SortRole.UPDATED)
@@ -342,6 +351,7 @@ class MainWindow(QMainWindow):
         self.playlist_view.refresh_collection(playlist, SortRole.UPDATED)
 
     @Slot()
+    @profile
     def library_context_menu(self, point: QPoint):
         table_view = self.library.table_view
         row_indices = table_view.selectionModel().selectedRows()
@@ -352,7 +362,7 @@ class MainWindow(QMainWindow):
             rows = [index.row()]
         else:
             rows = [i.row() for i in row_indices]
-        selected_song_indices = [table_view.model_.get_index(row) for row in rows]
+        selected_song_indices = sorted(table_view.model_.get_index(row) for row in rows)
         menu = QMenu(self)
 
         # Add to queue
@@ -391,6 +401,7 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     core = VLCCore()
     app = QApplication(sys.argv)
+    get_db_music_cache()  # TODO THIS COULD BE BETTER THAN FRONTLOADING
     qdarktheme.setup_theme()
     window = MainWindow(core)
     window.show()
