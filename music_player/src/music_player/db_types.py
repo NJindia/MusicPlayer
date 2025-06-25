@@ -1,5 +1,5 @@
+import contextlib
 from abc import ABC, abstractmethod
-from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
@@ -31,6 +31,10 @@ WHERE collection_id = %s;
 """
 
 
+def get_album_pixmap_key_base(album_id: int) -> str:
+    return f"album-{album_id}"
+
+
 @dataclass
 class DbBase(ABC):
     id: int
@@ -50,6 +54,11 @@ class DbBase(ABC):
     @abstractmethod
     @cached_property
     def music_ids(self) -> tuple[int, ...]:
+        pass
+
+    @abstractmethod
+    @cached_property
+    def pixmap_key_base(self) -> str:
         pass
 
 
@@ -72,6 +81,10 @@ class DbArtist(DbBase):
     def music_ids(self) -> tuple[int, ...]:
         query = "SELECT music_id FROM music_artists WHERE artist_id = %s ORDER BY sort_order"
         return tuple(row["music_id"] for row in get_database_manager().get_rows(query, (self.id,)))
+
+    @cached_property
+    def pixmap_key_base(self) -> str:
+        return f"artist-{self.id}"
 
 
 @dataclass  # (frozen=True)
@@ -99,6 +112,10 @@ class DbAlbum(DbBase):
     def music_ids(self) -> tuple[int, ...]:
         query = "SELECT music_id FROM music WHERE album_id = %s"
         return tuple(row["music_ids"] for row in get_database_manager().get_rows(query, (self.id,)))
+
+    @cached_property
+    def pixmap_key_base(self) -> str:
+        return get_album_pixmap_key_base(self.id)
 
 
 @dataclass(kw_only=True)
@@ -230,10 +247,8 @@ class DbCollection(DbBase):
 
     def cache_clear(self):
         self._get_default_playlist_thumbnail.cache_clear()
-        try:
+        with contextlib.suppress(AttributeError):
             del self.music_ids
-        except AttributeError:
-            pass
 
     @staticmethod
     @cache
@@ -242,23 +257,32 @@ class DbCollection(DbBase):
         print("thumbnail")
         if len(music_ids) == 0:
             return _empty_playlist_pixmap(height)
-        a_rows = get_database_manager().get_rows("SELECT album_id FROM music WHERE music_id IN %s", (music_ids,))
-        album_ids = [r["album_id"] for r in a_rows]
-        if len(album_ids) == 0:
-            return _empty_playlist_pixmap(height)
-        cover_album_ids = tuple(v[0] for v in Counter(album_ids).most_common(4))
-        c_rows = get_database_manager().get_rows(
-            "SELECT cover_bytes from albums WHERE album_id IN %s", (cover_album_ids,)
+        query = """
+        WITH input_ids (music_id) AS (
+            SELECT unnest(%s)
+        ),
+        album_ids AS (
+            SELECT album_id
+            FROM library_music_view
+            JOIN input_ids USING (music_id)
+            GROUP BY album_id
+            ORDER BY COUNT(*)
+            DESC LIMIT 4
         )
-        covers = [r.tobytes() for r in [_r["cover_bytes"] for _r in c_rows] if r]
+        SELECT DISTINCT ON (a.album_id) lmv.album_id, lmv.cover_bytes FROM album_ids a
+        JOIN library_music_view lmv USING (album_id) ORDER BY a.album_id"""
+        c_rows = get_database_manager().get_rows(query, (list(music_ids),))
+        id_cover_tups = [(str(row["album_id"]), bytes(row["cover_bytes"])) for row in c_rows if row["cover_bytes"]]
+        if not id_cover_tups:
+            return _empty_playlist_pixmap(height)
 
         combined_pixmap = QPixmap()
-        key = f"{b''.join(covers)}_{height}"
+        key = "_".join((*(album_id for album_id, _ in id_cover_tups), f"h{height}"))
         if QPixmapCache.find(key, combined_pixmap):
             return combined_pixmap
 
         # TODO REMOVE OLD KEY
-        pixmaps = [get_pixmap(cover, None) for cover in covers]
+        pixmaps = [get_pixmap(cover, None, album_id) for album_id, cover in id_cover_tups]
         if len(pixmaps) != 4:
             combined_pixmap = pixmaps[0]
         else:
@@ -284,7 +308,7 @@ class DbCollection(DbBase):
                     return _get_downloaded_songs_playlist_pixmap(height)
                 if self.thumbnail is None:
                     return self._get_default_playlist_thumbnail(self.music_ids, height)
-                return get_pixmap(self.thumbnail, height)
+                return get_pixmap(self.thumbnail, height, self.pixmap_key_base)
             case "folder":
                 return _get_folder_pixmap(height)
             case _:
@@ -293,6 +317,10 @@ class DbCollection(DbBase):
     @cached_property  # This shouldn't be able to change so this is fine
     def is_folder(self) -> bool:
         return self.collection_type == "folder"
+
+    @cached_property
+    def pixmap_key_base(self) -> str:
+        return f"playlist-{self.id}"
 
 
 T = TypeVar("T", bound=DbCollection)
@@ -353,21 +381,19 @@ class DbMusic:
     def from_db(cls, music_id: int) -> "DbMusic":
         return get_db_music_cache().get(music_id)
 
-    # @cached_property
-    # def artist_ids(self) -> list[int]:
-    #     artist_id_query = "SELECT artist_id FROM music_artists WHERE music_id = %s ORDER BY sort_order"
-    #     return [r["artist_id"] for r in get_database_manager().get_rows(artist_id_query, (self.id,))]
-    #
-    # @cached_property
-    # def artists(self) -> list[str]:
-    #     artist_name_query = "SELECT artist_name FROM artists WHERE artist_id IN %s"
-    #     return [r["artist_name"] for r in get_database_manager().get_rows(artist_name_query, (tuple(self.artist_ids),))]
+    @cached_property
+    def pixmap_key_base(self) -> str:
+        return get_album_pixmap_key_base(self.album_id)
 
 
 class _DbMusicCache:
     def __init__(self):
-        self._music_by_id = {
-            row["music_id"]: DbMusic(
+        self._music_by_id: dict[int, DbMusic] = {}
+        rows = get_database_manager().get_rows("SELECT * FROM music_view ORDER BY (music_id, artist_order)")
+        rows_by_music_id = {k: list(v) for k, v in groupby(rows, key=lambda r: r["music_id"])}
+        for music_id, rows in rows_by_music_id.items():
+            row = rows[0]
+            self._music_by_id[music_id] = DbMusic(
                 id=row["music_id"],
                 name=row["music_name"],
                 album_id=row["album_id"],
@@ -379,9 +405,9 @@ class _DbMusicCache:
                 file_path=Path(row["file_path"]),
                 downloaded_on=row["downloaded_on"],
                 cover_bytes=None if row["cover_bytes"] is None else bytes(row["cover_bytes"]),
+                artist_ids=[r["artist_id"] for r in rows],
+                artists=[r["artist_name"] for r in rows],
             )
-            for row in get_database_manager().get_rows("SELECT * FROM library_music_view")
-        }
 
     @profile
     def get(self, music_id: int) -> DbMusic:

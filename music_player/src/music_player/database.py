@@ -85,9 +85,10 @@ CREATE TABLE collection_children (
 );
 
 CREATE MATERIALIZED VIEW music_view AS
-SELECT lmv.*, ma.artist_id, ma.sort_order AS artist_order FROM library_music_view AS lmv
+SELECT lmv.*, a.artist_id, a.artist_name, ma.sort_order AS artist_order FROM library_music_view AS lmv
 JOIN music_artists ma USING (music_id)
 JOIN artists AS a USING (artist_id);
+DROP MATERIALIZED VIEW music_view;
 """
 
 INSERT_ALBUM_SQL = "INSERT INTO albums (album_name, release_date, cover_bytes) VALUES (%s, %s, %s) RETURNING album_id;"

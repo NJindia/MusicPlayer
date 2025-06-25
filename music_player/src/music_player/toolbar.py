@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from music_player.common_gui import get_play_button_icon, get_shuffle_button_icon
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD
 from music_player.signals import SharedSignals
-from music_player.utils import get_empty_pixmap, get_pixmap, timestamp_to_str
+from music_player.utils import timestamp_to_str
 from music_player.vlc_core import VLCCore
 
 
@@ -47,16 +47,6 @@ class AlbumButton(QToolButton):
         if self.music is None:
             return
         partial(self.signals.library_load_album_signal.emit, self.music["album"])
-
-    def set_music(self, music: pd.Series | None):
-        """Set the music for this button, updating the icon."""
-        self.music = music
-        if self.music is not None:
-            if self.music["album_cover_bytes"] is None:
-                raise NotImplementedError("NEED PLACEHOLDER FOR NO ALBUM COVER")
-            self.setIcon(QIcon(get_pixmap(self.music["album_cover_bytes"], self.iconSize().height())))
-        else:
-            self.setIcon(QIcon(get_empty_pixmap(self.iconSize().height())))
 
 
 class OpacityButton(QToolButton):

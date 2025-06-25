@@ -57,7 +57,7 @@ from music_player.common_gui import (
 )
 from music_player.constants import ID_ROLE
 from music_player.database import get_database_manager
-from music_player.db_types import DbAlbum, DbArtist, DbBase, DbCollection
+from music_player.db_types import DbAlbum, DbArtist, DbBase, DbCollection, get_album_pixmap_key_base
 from music_player.signals import SharedSignals
 from music_player.utils import (
     datetime_to_age_string,
@@ -228,7 +228,8 @@ class MusicTableModel(QSqlQueryModel):
         if role == Qt.ItemDataRole.DecorationRole and column_name == "Title":
             cover_bytes = super().data(self.index(index.row(), self.cover_bytes_field_idx))
             if cover_bytes:
-                return get_pixmap(bytes(cover_bytes), ICON_SIZE)  # Assumes get_pixmap utility
+                key_base = get_album_pixmap_key_base(super().data(self.index(index.row(), self.album_id_field_idx)))
+                return get_pixmap(bytes(cover_bytes), ICON_SIZE, key_base)
             return None  # Return None if no cover
         return None
 
@@ -561,7 +562,7 @@ class MusicLibraryWidget(QWidget):
     def load_artist(self, artist_id: int):
         artist = DbArtist.from_db(artist_id)
         img_size = self.header_widget.header_img_size
-        pm = get_pixmap(artist.img, img_size) if artist.img else get_empty_pixmap(img_size)
+        pm = get_pixmap(artist.img, img_size, artist.pixmap_key_base) if artist.img else get_empty_pixmap(img_size)
         self._load(
             new_collection=artist,  # TODO
             img_pixmap=pm,
@@ -574,13 +575,13 @@ class MusicLibraryWidget(QWidget):
 
     @Slot()
     def load_album(self, album_id: int, *, is_db_collection: bool = False):  # TODO ENABLE LATER
-        self.library_id = f"album{album_id}"
+        self.library_id = f"album-{album_id}"
 
         # assert len(set(album_df["album_artist"])) == 1  # TODO HANDLE THIS
         album = DbAlbum.from_db(album_id)
         self._load(
             new_collection=album,  # TODO
-            img_pixmap=get_pixmap(album.cover_bytes, self.header_widget.header_img_size),
+            img_pixmap=get_pixmap(album.cover_bytes, self.header_widget.header_img_size, album.pixmap_key_base),
             header_label_type="Album",
             header_label_title=album.name,
             header_label_subtitle="",  # album_df.iloc[0]["album_artist"],

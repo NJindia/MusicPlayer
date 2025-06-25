@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
 
+from line_profiler_pycharm import profile
 from PySide6.QtCore import QSize
 from PySide6.QtGui import QImage, QPixmap, QPixmapCache, Qt
 
@@ -51,9 +52,10 @@ def datetime_to_age_string(dt: datetime) -> str:
     return datetime_to_date_str(dt)
 
 
-def get_pixmap(source: bytes | Path, height: int | None) -> QPixmap:
+@profile
+def get_pixmap(source: bytes | Path, height: int | None, key_base: str) -> QPixmap:
     pixmap = QPixmap()
-    key = f"{source}_{height}"
+    key = f"{key_base}_{height}"
     if not QPixmapCache.find(key, pixmap):
         pixmap = QPixmap.fromImage(QImage.fromData(source)) if isinstance(source, bytes) else QPixmap(source)
         if height is not None:
