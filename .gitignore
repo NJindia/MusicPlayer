@@ -2,3 +2,4 @@
 .venv
 /music_player/export
 *.pyc
+*/__pycache__/
