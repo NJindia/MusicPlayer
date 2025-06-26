@@ -4,7 +4,7 @@ from pathlib import Path
 
 from line_profiler_pycharm import profile
 from PySide6.QtCore import QSize
-from PySide6.QtGui import QImage, QPixmap, QPixmapCache, Qt
+from PySide6.QtGui import QPixmap, QPixmapCache, Qt
 
 
 def length_timestamp_to_seconds(length_timestamp: str) -> int:
@@ -53,11 +53,13 @@ def datetime_to_age_string(dt: datetime) -> str:
 
 
 @profile
-def get_pixmap(source: bytes | Path, height: int | None, key_base: str) -> QPixmap:
+def get_pixmap(source: Path | None, height: int | None) -> QPixmap:
+    if source is None:
+        return get_empty_pixmap(height)
     pixmap = QPixmap()
-    key = f"{key_base}_{height}"
+    key = f"{source!s}_{height}"
     if not QPixmapCache.find(key, pixmap):
-        pixmap = QPixmap.fromImage(QImage.fromData(source)) if isinstance(source, bytes) else QPixmap(source)
+        pixmap = QPixmap(source)
         if height is not None:
             pixmap = pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
         QPixmapCache.insert(key, pixmap)

@@ -4,7 +4,7 @@ from typing import Literal, cast, get_args
 from vlc import Event, EventType, Instance, Media, MediaList, MediaListPlayer, MediaPlayer
 
 from music_player.database import get_database_manager
-from music_player.db_types import DbCollection, DbMusic
+from music_player.db_types import DbCollection, DbMusic, get_db_music_cache
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
 
@@ -60,7 +60,7 @@ class VLCCore:
 
     @property
     def current_music(self) -> DbMusic:
-        return DbMusic.from_db(self.db_indices[self.list_indices[self.current_media_idx]])
+        return get_db_music_cache().get(self.db_indices[self.list_indices[self.current_media_idx]])
 
     @property
     def current_media(self) -> Media:

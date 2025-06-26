@@ -1,19 +1,19 @@
-import contextlib
 from abc import ABC, abstractmethod
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from functools import cache, cached_property
 from itertools import groupby
 from pathlib import Path
-from typing import Literal, Optional, TypeVar
+from typing import Literal, TypeVar
 
 from line_profiler_pycharm import profile
 from psycopg2.extras import RealDictRow
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QPixmap, QPixmapCache
 
-from music_player.database import get_database_manager
+from music_player.database import PATH_TO_IMGS, get_database_manager
 from music_player.utils import get_colored_pixmap, get_pixmap
 
 CollectionType = Literal["folder", "playlist", "artist", "album"]
@@ -51,10 +51,11 @@ class DbBase(ABC):
     def from_db(cls, db_id: int) -> "DbBase":
         pass
 
-    @abstractmethod
-    @cached_property
-    def music_ids(self) -> tuple[int, ...]:
-        pass
+    #
+    # @abstractmethod
+    # @cached_property
+    # def music_ids(self) -> tuple[int, ...]:
+    #     pass
 
     @abstractmethod
     @cached_property
@@ -64,7 +65,7 @@ class DbBase(ABC):
 
 @dataclass  # (frozen=True)
 class DbArtist(DbBase):
-    img: bytes | None
+    img_path: Path | None
 
     @classmethod
     def from_db(cls, db_id: int) -> "DbArtist":
@@ -72,7 +73,7 @@ class DbArtist(DbBase):
         return cls(
             id=row["artist_id"],
             name=row["artist_name"],
-            img=bytes(row["artist_img"]) if row["artist_img"] else None,
+            img_path=Path(row["artist_img"]) if row["artist_img"] else None,
             collection_type="artist",
             is_protected=True,
         )
@@ -90,7 +91,7 @@ class DbArtist(DbBase):
 @dataclass  # (frozen=True)
 class DbAlbum(DbBase):
     release_date: str
-    cover_bytes: bytes
+    img_path: Path | None
 
     @classmethod
     def from_db(cls, db_id: int) -> "DbAlbum":
@@ -99,7 +100,7 @@ class DbAlbum(DbBase):
             id=row["album_id"],
             name=row["album_name"],
             release_date=row["release_date"],
-            cover_bytes=bytes(row["cover_bytes"]),
+            img_path=Path(row["img_path"]) if row["img_path"] else None,
             collection_type="album",
             is_protected=True,
         )
@@ -118,16 +119,35 @@ class DbAlbum(DbBase):
         return get_album_pixmap_key_base(self.id)
 
 
+collection_query = """
+SELECT
+    c.*,
+    ARRAY_AGG(cc.music_id) as music_ids,
+    ARRAY_AGG(cc.added_on) as added_on,
+    ARRAY_AGG(m.album_id) as album_ids,
+    ARRAY_AGG(a.img_path) as img_paths
+FROM collections c
+LEFT JOIN collection_children cc USING (collection_id)
+LEFT JOIN music m USING (music_id)
+LEFT JOIN albums a USING (album_id)
+WHERE (%(collectionId)s IS NULL) OR (c.collection_id = %(collectionId)s)
+GROUP BY c.collection_id
+"""
+
+
 @dataclass(kw_only=True)
 class DbCollection(DbBase):
     _parent_id: int
     _created: datetime
     _last_updated: datetime
     _last_played: datetime | None
-    _thumbnail: bytes | None
+    _thumbnail_path: Path | None
+    music_ids: list[int]
+    music_added_on: list[datetime]
+    album_ids: list[int]
+    album_img_path_counter: Counter[Path]
 
-    @cached_property
-    def music_ids(self) -> tuple[int, ...]:
+    def _music_ids(self) -> tuple[int, ...]:
         match self.collection_type:
             case "folder":
 
@@ -138,16 +158,11 @@ class DbCollection(DbBase):
                         yield from collection.music_ids
 
                 return tuple(traverse(self.id))
-            case "playlist":
-                music = get_database_manager().get_rows(
-                    "SELECT music_id FROM collection_children WHERE collection_id = %s", (self.id,)
-                )
-                return tuple(row["music_id"] for row in music)
         raise ValueError
 
     @classmethod
     def from_db(cls, db_id: int = 1) -> "DbCollection":
-        row = get_database_manager().get_row("SELECT * FROM collections WHERE collection_id = %s", (db_id,))
+        row = get_database_manager().get_row_k(collection_query, collectionId=db_id)
         return cls.from_db_row(row)
 
     @classmethod
@@ -161,7 +176,11 @@ class DbCollection(DbBase):
             _created=db_row["created"],
             _last_updated=db_row["last_updated"],
             _last_played=db_row["last_played"],
-            _thumbnail=db_row["thumbnail"],
+            _thumbnail_path=db_row["thumbnail"],
+            music_ids=db_row["music_ids"],
+            music_added_on=db_row["added_on"],
+            album_ids=db_row["album_ids"],
+            album_img_path_counter=Counter(Path(p) for p in db_row["img_paths"] if p is not None),
         )
 
     @property
@@ -181,14 +200,14 @@ class DbCollection(DbBase):
         return self._last_played
 
     @property
-    def thumbnail(self) -> bytes | None:
-        return self._thumbnail
+    def thumbnail_path(self) -> Path | None:
+        return self._thumbnail_path
 
     def delete(self):
         assert not self.is_protected
         get_database_manager().execute_query("DELETE FROM collections WHERE collection_id = %s", (self.id,))
 
-    def save(self) -> Optional["DbCollection"]:
+    def save(self):
         if self.id == -1:
             row = get_database_manager().get_row(
                 INSERT_COLLECTION_SQL,
@@ -199,26 +218,27 @@ class DbCollection(DbBase):
                     self.created,
                     self.last_updated,
                     self.last_played,
-                    self.thumbnail,
+                    self.thumbnail_path,
                     self.is_protected,
                 ),
                 commit=True,
             )
             self.id = row["collection_id"]
-        get_database_manager().execute_query(
-            UPDATE_COLLECTION_SQL,
-            (
-                self.parent_id,
-                self.collection_type,
-                self.name,
-                self.created,
-                self.last_updated,
-                self.last_played,
-                self.thumbnail,
-                self.is_protected,
-                self.id,
-            ),
-        )
+        else:
+            get_database_manager().execute_query(
+                UPDATE_COLLECTION_SQL,
+                (
+                    self.parent_id,
+                    self.collection_type,
+                    self.name,
+                    self.created,
+                    self.last_updated,
+                    self.last_played,
+                    self.thumbnail_path,
+                    self.is_protected,
+                    self.id,
+                ),
+            )
 
     def mark_as_played(self):
         self._last_played = datetime.now(tz=UTC)
@@ -230,59 +250,42 @@ class DbCollection(DbBase):
         update_query = "UPDATE collections SET last_updated = %s WHERE collection_id = %s"
         get_database_manager().execute_query(update_query, (self.last_updated, self.id))
 
+    @profile
     def add_music_ids(self, music_ids: tuple[int, ...]) -> None:
         assert self.collection_type == "playlist"
+        added_on = datetime.now(tz=UTC)
+        self.music_ids = list(music_ids) + self.music_ids
+        self.music_added_on = [added_on] * len(music_ids) + self.music_added_on
+        music = [get_db_music_cache().get(i) for i in music_ids]
+        self.album_ids = [m.album_id for m in music] + self.album_ids
+        self.album_img_path_counter += Counter(m.img_path for m in music)
+
         add_music_id_sql = "INSERT INTO collection_children (collection_id, music_id, added_on) VALUES %s"
-        args = [(self.id, music_id, datetime.now(tz=UTC)) for music_id in music_ids]
+        args = [(self.id, music_id, added_on) for music_id in music_ids]
         get_database_manager().execute_values(add_music_id_sql, args)
         self.mark_as_updated()
-        self.cache_clear()
 
     def remove_music_ids(self, music_ids: tuple[int, ...]) -> None:
         assert self.collection_type == "playlist"
         delete_music_id_sql = "DELETE FROM collection_children WHERE collection_id = %s AND music_id IN %s"
         get_database_manager().execute_query(delete_music_id_sql, (self.id, music_ids))
         self.mark_as_updated()
-        self.cache_clear()
 
-    def cache_clear(self):
-        self._get_default_playlist_thumbnail.cache_clear()
-        with contextlib.suppress(AttributeError):
-            del self.music_ids
-
-    @staticmethod
-    @cache
     @profile
-    def _get_default_playlist_thumbnail(music_ids: list[int], height: int) -> QPixmap:
+    def _get_default_playlist_thumbnail(self, height: int) -> QPixmap:
         print("thumbnail")
-        if len(music_ids) == 0:
+        if not self.album_img_path_counter:
             return _empty_playlist_pixmap(height)
-        query = """
-        WITH input_ids (music_id) AS (
-            SELECT unnest(%s)
-        ),
-        album_ids AS (
-            SELECT album_id
-            FROM library_music_view
-            JOIN input_ids USING (music_id)
-            GROUP BY album_id
-            ORDER BY COUNT(*)
-            DESC LIMIT 4
-        )
-        SELECT DISTINCT ON (a.album_id) lmv.album_id, lmv.cover_bytes FROM album_ids a
-        JOIN library_music_view lmv USING (album_id) ORDER BY a.album_id"""
-        c_rows = get_database_manager().get_rows(query, (list(music_ids),))
-        id_cover_tups = [(str(row["album_id"]), bytes(row["cover_bytes"])) for row in c_rows if row["cover_bytes"]]
-        if not id_cover_tups:
-            return _empty_playlist_pixmap(height)
+
+        most_common_paths = [c[0] for c in self.album_img_path_counter.most_common(4)]
 
         combined_pixmap = QPixmap()
-        key = "_".join((*(album_id for album_id, _ in id_cover_tups), f"h{height}"))
+        key = "_".join((*(str(p) for p in most_common_paths), f"h{height}"))
         if QPixmapCache.find(key, combined_pixmap):
             return combined_pixmap
 
         # TODO REMOVE OLD KEY
-        pixmaps = [get_pixmap(cover, None, album_id) for album_id, cover in id_cover_tups]
+        pixmaps = [get_pixmap(PATH_TO_IMGS / path, None) for path in most_common_paths]
         if len(pixmaps) != 4:
             combined_pixmap = pixmaps[0]
         else:
@@ -306,9 +309,9 @@ class DbCollection(DbBase):
             case "playlist":
                 if self.is_protected:
                     return _get_downloaded_songs_playlist_pixmap(height)
-                if self.thumbnail is None:
-                    return self._get_default_playlist_thumbnail(self.music_ids, height)
-                return get_pixmap(self.thumbnail, height, self.pixmap_key_base)
+                if self.thumbnail_path is None:
+                    return self._get_default_playlist_thumbnail(height)
+                return get_pixmap(self.thumbnail_path, height, self.pixmap_key_base)
             case "folder":
                 return _get_folder_pixmap(height)
             case _:
@@ -347,16 +350,15 @@ def _get_downloaded_songs_playlist_pixmap(height: int) -> QPixmap:
 
 @cache
 def get_collections_by_parent_id() -> dict[int, list[DbCollection]]:
-    collections = get_collections()
+    collections = [
+        DbCollection.from_db_row(row)
+        for row in get_database_manager().get_rows(collection_query, {"collectionId": None})
+    ]
 
     def parent_key(collection: DbCollection) -> int:
         return collection.parent_id
 
     return {k: list(v) for k, v in groupby(sorted(collections, key=parent_key), key=parent_key)}
-
-
-def get_collections() -> list[DbCollection]:
-    return [DbCollection.from_db_row(row) for row in get_database_manager().get_rows("SELECT * FROM collections")]
 
 
 @dataclass(frozen=True)
@@ -371,15 +373,34 @@ class DbMusic:
     isrc: str
     file_path: Path
     downloaded_on: datetime
-    cover_bytes: bytes | None
+    img_path: Path | None
     artist_ids: list[int]
     artists: list[str]
 
     @classmethod
-    @cache
-    @profile
+    def from_db_rows(cls, rows: list[RealDictRow]) -> "DbMusic":
+        row = rows[0]
+        return DbMusic(
+            id=row["music_id"],
+            name=row["music_name"],
+            album_id=row["album_id"],
+            album_name=row["album_name"],
+            lyrics_by_timestamp=row["lyrics_by_timestamp"],
+            release_date=row["release_date"],
+            duration=row["duration"],
+            isrc=row["isrc"],
+            file_path=Path(row["file_path"]),
+            downloaded_on=row["downloaded_on"],
+            img_path=None if row["img_path"] is None else Path(row["img_path"]),
+            artist_ids=[r["artist_id"] for r in rows],
+            artists=[r["artist_name"] for r in rows],
+        )
+
+    @classmethod
     def from_db(cls, music_id: int) -> "DbMusic":
-        return get_db_music_cache().get(music_id)
+        query = "SELECT * FROM music_view WHERE music_id = %s ORDER BY (music_id, artist_order)"  # TODO ARRAY_AGG
+        rows = get_database_manager().get_rows(query, (music_id,))
+        return DbMusic.from_db_rows(rows)
 
     @cached_property
     def pixmap_key_base(self) -> str:
@@ -392,22 +413,7 @@ class _DbMusicCache:
         rows = get_database_manager().get_rows("SELECT * FROM music_view ORDER BY (music_id, artist_order)")
         rows_by_music_id = {k: list(v) for k, v in groupby(rows, key=lambda r: r["music_id"])}
         for music_id, rows in rows_by_music_id.items():
-            row = rows[0]
-            self._music_by_id[music_id] = DbMusic(
-                id=row["music_id"],
-                name=row["music_name"],
-                album_id=row["album_id"],
-                album_name=row["album_name"],
-                lyrics_by_timestamp=row["lyrics_by_timestamp"],
-                release_date=row["release_date"],
-                duration=row["duration"],
-                isrc=row["isrc"],
-                file_path=Path(row["file_path"]),
-                downloaded_on=row["downloaded_on"],
-                cover_bytes=None if row["cover_bytes"] is None else bytes(row["cover_bytes"]),
-                artist_ids=[r["artist_id"] for r in rows],
-                artists=[r["artist_name"] for r in rows],
-            )
+            self._music_by_id[music_id] = DbMusic.from_db_rows(rows)
 
     @profile
     def get(self, music_id: int) -> DbMusic:
@@ -417,6 +423,5 @@ class _DbMusicCache:
 
 
 @cache
-@profile
 def get_db_music_cache() -> _DbMusicCache:
     return _DbMusicCache()

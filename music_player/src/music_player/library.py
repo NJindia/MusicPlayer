@@ -56,8 +56,8 @@ from music_player.common_gui import (
     text_is_buffer,
 )
 from music_player.constants import ID_ROLE
-from music_player.database import get_database_manager
-from music_player.db_types import DbAlbum, DbArtist, DbBase, DbCollection, get_album_pixmap_key_base
+from music_player.database import PATH_TO_IMGS, get_database_manager
+from music_player.db_types import DbAlbum, DbArtist, DbBase, DbCollection
 from music_player.signals import SharedSignals
 from music_player.utils import (
     datetime_to_age_string,
@@ -182,7 +182,7 @@ class MusicTableModel(QSqlQueryModel):
         self.album_name_field_idx = self.record().indexOf("album_name")
         self.album_id_field_idx = self.record().indexOf("album_id")
         self.duration_field_idx = self.record().indexOf("duration")
-        self.cover_bytes_field_idx = self.record().indexOf("cover_bytes")
+        self.album_img_path_field_idx = self.record().indexOf("img_path")
 
         self.view = parent
 
@@ -226,10 +226,9 @@ class MusicTableModel(QSqlQueryModel):
             if self.view.font_metrics.horizontalAdvance(text) > column_width:
                 return text
         if role == Qt.ItemDataRole.DecorationRole and column_name == "Title":
-            cover_bytes = super().data(self.index(index.row(), self.cover_bytes_field_idx))
-            if cover_bytes:
-                key_base = get_album_pixmap_key_base(super().data(self.index(index.row(), self.album_id_field_idx)))
-                return get_pixmap(bytes(cover_bytes), ICON_SIZE, key_base)
+            img_path = super().data(self.index(index.row(), self.album_img_path_field_idx))
+            if img_path:
+                return get_pixmap(PATH_TO_IMGS / img_path, ICON_SIZE)
             return None  # Return None if no cover
         return None
 
@@ -546,6 +545,7 @@ class MusicLibraryWidget(QWidget):
 
     @profile
     def load_playlist(self, playlist: DbCollection):
+        t = datetime.now()
         self.library_id = str(playlist.id)
 
         self._load(
@@ -555,17 +555,17 @@ class MusicLibraryWidget(QWidget):
             header_label_title=playlist.name,
             header_label_subtitle=None,
             show_date_added_col=True,
-            music_ids_to_load=playlist.music_ids,  # TODO
+            music_ids_to_load=playlist.music_ids,
         )
+        print("LOAD END", (datetime.now() - t).microseconds / 1000)
 
     @Slot()
     def load_artist(self, artist_id: int):
         artist = DbArtist.from_db(artist_id)
         img_size = self.header_widget.header_img_size
-        pm = get_pixmap(artist.img, img_size, artist.pixmap_key_base) if artist.img else get_empty_pixmap(img_size)
         self._load(
             new_collection=artist,  # TODO
-            img_pixmap=pm,
+            img_pixmap=get_pixmap(artist.img_path, img_size),
             header_label_type="Artist",
             header_label_title=artist.name,
             header_label_subtitle=None,
@@ -581,7 +581,7 @@ class MusicLibraryWidget(QWidget):
         album = DbAlbum.from_db(album_id)
         self._load(
             new_collection=album,  # TODO
-            img_pixmap=get_pixmap(album.cover_bytes, self.header_widget.header_img_size, album.pixmap_key_base),
+            img_pixmap=get_pixmap(album.img_path, self.header_widget.header_img_size),
             header_label_type="Album",
             header_label_title=album.name,
             header_label_subtitle="",  # album_df.iloc[0]["album_artist"],

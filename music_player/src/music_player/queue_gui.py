@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import paint_artists
 from music_player.constants import QUEUE_ENTRY_HEIGHT, QUEUE_ENTRY_SPACING
-from music_player.db_types import DbMusic
+from music_player.db_types import DbMusic, get_db_music_cache
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap
 from music_player.vlc_core import VLCCore
@@ -83,8 +83,8 @@ class QueueEntryGraphicsItem(QGraphicsItem):
     @profile
     def paint(self, painter: QPainter, option, widget=None):
         # Paint album art
-        if self.music.cover_bytes is not None:
-            pixmap = get_pixmap(self.music.cover_bytes, self._album_rect.size().toSize().height())
+        if self.music.img_path is not None:
+            pixmap = get_pixmap(self.music.img_path, self._album_rect.size().toSize().height())
             painter.drawPixmap(self._album_rect.topLeft(), pixmap)
 
         # Paint song name rect
@@ -215,7 +215,7 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         self.queue_entries = []
         self.scene().clear()
         for i, db_index in enumerate(self.core.db_indices):
-            qe = QueueEntryGraphicsItem(DbMusic.from_db(db_index), self.shared_signals)
+            qe = QueueEntryGraphicsItem(get_db_music_cache().get(db_index), self.shared_signals)
             qe.signal.song_clicked.connect(self.play_queue_song)
             self.scene().addItem(qe)
 

@@ -1,5 +1,6 @@
 # pyright: strict
 import sys
+from collections import Counter
 from datetime import UTC, datetime
 from functools import partial
 from typing import cast
@@ -144,10 +145,8 @@ class MainWindow(QMainWindow):
             self.core.current_media_idx = 0
         current_music = self.core.current_music
         self.toolbar.song_label.setText(f"{current_music.name}\n{', '.join(current_music.artists)}")
-        if current_music.cover_bytes is not None:
-            self.toolbar.album_button.setIcon(
-                QIcon(get_pixmap(current_music.cover_bytes, None, current_music.pixmap_key_base))
-            )
+        if current_music.img_path is not None:
+            self.toolbar.album_button.setIcon(QIcon(get_pixmap(current_music.img_path, None)))
 
         # when VLC emits the MediaPlayerEnded event, it does in a separate thread
         if QThread.currentThread().isMainThread():
@@ -188,7 +187,7 @@ class MainWindow(QMainWindow):
             self.core.current_media_idx = self.core.db_indices.index(last_music_played.id)
 
             # Replace any music/media that was added manually with the original lists
-            self.load_media(self.core.current_collection.music_ids)
+            self.load_media(tuple(self.core.current_collection.music_ids))
         self.queue.update_first_queue_index()
 
     @Slot()
@@ -198,7 +197,7 @@ class MainWindow(QMainWindow):
         items: list[QueueEntryGraphicsItem] = []
         list_indices: list[int] = []
         for music_db_index in tqdm(music_db_indices):
-            music = DbMusic.from_db(music_db_index)
+            music = get_db_music_cache().get(music_db_index)
             if music_db_index in self.core.db_indices:
                 list_index = self.core.db_indices.index(music_db_index)
             else:  # Music not in media list, needs to be added
@@ -315,8 +314,12 @@ class MainWindow(QMainWindow):
             _created=datetime.now(tz=UTC),
             _last_updated=datetime.now(tz=UTC),
             _last_played=None,
-            _thumbnail=None,
+            _thumbnail_path=None,
             is_protected=False,
+            music_ids=[],
+            music_added_on=[],
+            album_ids=[],
+            album_img_path_counter=Counter(),
         )
         collection.save()
         get_collections_by_parent_id.cache_clear()

@@ -1,10 +1,13 @@
+import io
 import os
 from functools import cache
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 import psycopg2
+from PIL import Image
 from psycopg2._json import Json
-from psycopg2.extras import RealDictCursor, execute_values
+from psycopg2.extras import RealDictCursor, RealDictRow, execute_values
 from PySide6.QtSql import QSqlDatabase
 
 from music_player.music_importer import Music, load_from_sources
@@ -16,7 +19,9 @@ CREATE TABLE albums (
 	album_id SERIAL PRIMARY KEY ,
     album_name VARCHAR(255) NOT NULL,
 	release_date DATE NOT NULL,
-	cover_bytes BYTEA
+	img_path TEXT GENERATED ALWAYS AS (
+	    'albums/' || (album_id) || '.jpeg'
+	) STORED
 );
 
 CREATE TABLE artists (
@@ -43,7 +48,7 @@ CREATE MATERIALIZED VIEW library_music_view AS
 SELECT
     m.*,
     a.album_name,
-    a.cover_bytes,
+    a.img_path,
     (
         COALESCE(music_name)    || CHR(31) ||
         COALESCE(album_name)
@@ -80,18 +85,19 @@ CREATE TABLE collection_children (
     music_id INT NOT NULL,
     added_on TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (collection_id, music_id),
-    FOREIGN KEY (collection_id) REFERENCES collections(collection_id),
+    FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE CASCADE,
     FOREIGN KEY (music_id) REFERENCES music(music_id)
 );
 
+DROP MATERIALIZED VIEW IF EXISTS music_view;
 CREATE MATERIALIZED VIEW music_view AS
 SELECT lmv.*, a.artist_id, a.artist_name, ma.sort_order AS artist_order FROM library_music_view AS lmv
 JOIN music_artists ma USING (music_id)
 JOIN artists AS a USING (artist_id);
-DROP MATERIALIZED VIEW music_view;
+REFRESH MATERIALIZED VIEW music_view;
 """
 
-INSERT_ALBUM_SQL = "INSERT INTO albums (album_name, release_date, cover_bytes) VALUES (%s, %s, %s) RETURNING album_id;"
+INSERT_ALBUM_SQL = "INSERT INTO albums (album_name, release_date) VALUES (%s, %s) RETURNING album_id, img_path;"
 
 INSERT_ARTIST_SQL = "INSERT INTO artists (artist_name, artist_img) VALUES (%s, %s) RETURNING artist_id;"
 
@@ -107,21 +113,23 @@ TRUNCATE_ALL_SQL = """
 TRUNCATE TABLE music_artists, albums, music, artists, collections, collection_children RESTART IDENTITY CASCADE;
 """
 
+PATH_TO_IMGS = Path("../images/")
+
 
 def _insert_music(cursor: RealDictCursor, music: Music):
-    cursor.execute("SELECT album_id FROM albums WHERE album_name=%s LIMIT 1", (music.album,))
+    cursor.execute("SELECT album_id, img_path FROM albums WHERE album_name=%s LIMIT 1", (music.album,))
     album_row = cursor.fetchone()
     if album_row is None:
-        cursor.execute(INSERT_ALBUM_SQL, (music.album, music.release_date, music.album_cover_bytes))
-        album_id = cursor.fetchone()["album_id"]  # pyright: ignore[reportOptionalSubscript]
-    else:
-        album_id = album_row["album_id"]
+        cursor.execute(INSERT_ALBUM_SQL, (music.album, music.release_date))
+        album_row = cast(RealDictRow, cursor.fetchone())
+        if music.album_cover_bytes:
+            Image.open(io.BytesIO(music.album_cover_bytes)).save(PATH_TO_IMGS / album_row["img_path"])
 
     cursor.execute(
         INSERT_MUSIC_SQL,
         (
             music.title,
-            album_id,
+            album_row["album_id"],
             Json({ts.isoformat() if ts else ts: lyrics for ts, lyrics in music.lyrics_by_timestamp.items()}),
             music.release_date,
             music.duration_timestamp,
@@ -181,6 +189,20 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def get_row_k(self, query: str, *, commit: bool = False, **kwargs: dict[str, Any]):
+        return self.get_rows_k(query, commit=commit, **kwargs)[0]
+
+    def get_rows_k(self, query: str, *, commit: bool = False, **kwargs: dict[str, Any]):
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(query, kwargs)
+                if commit:
+                    conn.commit()
+                return cursor.fetchall()
+        finally:
+            conn.close()
+
     def get_row(self, query: str, args: tuple[Any, ...] | None = None, *, commit: bool = False):
         return self.get_rows(query, args, commit=commit)[0]
 
@@ -202,7 +224,9 @@ class DatabaseManager:
                 cursor.execute(TRUNCATE_ALL_SQL)
                 for music in load_from_sources():
                     _insert_music(cursor, music)
-                cursor.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY library_music_view;")
+                cursor.execute(
+                    "REFRESH MATERIALIZED VIEW CONCURRENTLY library_music_view; REFRESH MATERIALIZED VIEW music_view;"
+                )
             conn.commit()
         finally:
             conn.close()
