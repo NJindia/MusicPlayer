@@ -107,7 +107,7 @@ class _CreateDialog(QDialog):
         signals: SharedSignals,
         mode: CreateMode,
         move_from_index: QModelIndex | None = None,
-        df_indices_to_add: list[int] | None = None,
+        music_ids_to_add: list[int] | None = None,
     ) -> None:
         super().__init__(parent)
         self.source_root_index = source_root_index
@@ -143,7 +143,7 @@ class _CreateDialog(QDialog):
         self.confirm_button.setEnabled(False)
         self.confirm_button.setText("Create")
         self.confirm_button.setStyleSheet("QPushButton { border-radius: 5px; }")
-        self.confirm_button.released.connect(partial(self.create_clicked, move_from_index, df_indices_to_add))
+        self.confirm_button.released.connect(partial(self.create_clicked, move_from_index, music_ids_to_add))
 
         button_layout = QHBoxLayout()
         button_layout.addStretch()
@@ -158,14 +158,14 @@ class _CreateDialog(QDialog):
     def update_confirm_button(self, text: str) -> None:
         self.confirm_button.setEnabled(bool(text))
 
-    def create_clicked(self, move_from_index: QModelIndex | None, df_indices_to_add: list[int] | None) -> None:
+    def create_clicked(self, move_from_index: QModelIndex | None, music_ids_to_add: list[int] | None) -> None:
         base_args = self.name.text(), self.source_root_index
         match self.mode:
             case "playlist":
                 assert move_from_index is None
-                self.signals.create_playlist_signal.emit(*base_args, df_indices_to_add or [])
+                self.signals.create_playlist_signal.emit(*base_args, music_ids_to_add or [])
             case "folder":
-                assert df_indices_to_add is None
+                assert music_ids_to_add is None
                 self.signals.create_folder_signal.emit(*base_args, move_from_index or QModelIndex())
             case _:
                 raise ValueError(f"Unknown mode: {self.mode}")
@@ -179,12 +179,12 @@ class NewPlaylistAction(QAction):
         main_window: QMainWindow,
         source_root_index: QModelIndex,
         signals: SharedSignals,
-        df_indices_to_add: list[int] | None = None,
+        music_ids_to_add: list[int] | None = None,
     ) -> None:
         super().__init__("New playlist", parent)
         self.triggered.connect(
             lambda: _CreateDialog(
-                main_window, source_root_index, signals, mode="playlist", df_indices_to_add=df_indices_to_add
+                main_window, source_root_index, signals, mode="playlist", music_ids_to_add=music_ids_to_add
             ).exec()
         )
 

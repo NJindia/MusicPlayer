@@ -243,14 +243,14 @@ class PlaylistTree(PlaylistTreeView):
                 qFatal("Bad source")
                 return
             lib_indices = source.selectionModel().selectedRows()
-            df_indices = [source.model().data(lib_index, ID_ROLE) for lib_index in lib_indices]
+            music_ids = [source.model().data(lib_index, ID_ROLE) for lib_index in lib_indices]
 
             if not drop_index.isValid() or self.model().data_(drop_index, self.is_folder_role):
                 source_drop_index = self.model().mapToSource(drop_index)
-                self._signals.create_playlist_signal.emit("New Playlist", source_drop_index, df_indices)
+                self._signals.create_playlist_signal.emit("New Playlist", source_drop_index, music_ids)
             else:
                 self._signals.add_to_playlist_signal.emit(
-                    df_indices, self.model().data_(drop_index, self.collection_role)
+                    music_ids, self.model().data_(drop_index, self.collection_role)
                 )
 
     @override
@@ -723,7 +723,7 @@ class MoveToFolderMenu(QMenu):
 class AddToPlaylistMenu(QMenu):
     def __init__(
         self,
-        selected_song_indices: list[int],
+        selected_music_ids: list[int],
         shared_signals: SharedSignals,
         parent_menu: QMenu,
         parent: QMainWindow,
@@ -742,7 +742,7 @@ class AddToPlaylistMenu(QMenu):
             flattened_model=main_playlist_view.flattened_model_,
         )
         self.playlist_tree_widget.tree_view.clicked.connect(
-            partial(self.add_items_to_playlist_at_index, selected_song_indices)
+            partial(self.add_items_to_playlist_at_index, selected_music_ids)
         )
         widget_action = QWidgetAction(self)
         widget_action.setDefaultWidget(self.playlist_tree_widget)
@@ -752,12 +752,12 @@ class AddToPlaylistMenu(QMenu):
             parent,
             self.playlist_tree_widget.model_.invisibleRootItem().index(),
             self.signals,
-            selected_song_indices,
+            selected_music_ids,
         )
 
         self.addActions([widget_action, new_playlist_action])
 
-    def add_items_to_playlist_at_index(self, selected_song_indices: list[int], proxy_index: QModelIndex):
+    def add_items_to_playlist_at_index(self, selected_music_ids: list[int], proxy_index: QModelIndex):
         playlist = self.playlist_tree_widget.item_at_index(proxy_index, is_source=False).collection
-        self.signals.add_to_playlist_signal.emit(selected_song_indices, playlist)
+        self.signals.add_to_playlist_signal.emit(selected_music_ids, playlist)
         self.parent_menu.close()
