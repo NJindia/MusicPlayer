@@ -10,7 +10,7 @@ import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
 import vlc  # pyright: ignore[reportMissingTypeStubs]
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QAction, QIcon, QMouseEvent
+from PySide6.QtGui import QAction, QIcon, QMouseEvent, QPixmapCache, QImageReader
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QWidget
 from tqdm import tqdm
 
@@ -406,6 +406,7 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     core = VLCCore()
     app = QApplication(sys.argv)
+    QPixmapCache.setCacheLimit(102400)  # 100MB
     get_db_music_cache()  # TODO THIS COULD BE BETTER THAN FRONTLOADING
     qdarktheme.setup_theme()
     window = MainWindow(core)

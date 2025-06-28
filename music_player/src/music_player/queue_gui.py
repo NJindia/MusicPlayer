@@ -65,7 +65,6 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         self._song_font_metrics = QFontMetrics(self._song_font)
         text_padding_left = QUEUE_ENTRY_HEIGHT  # Space for album + spacing
 
-        # song_width = self._song_font_metrics.horizontalAdvance(self.music.name)+ 2
         song_height = self._song_font_metrics.height() + 2
         self._song_text_rect = QRectF(text_padding_left, QUEUE_ENTRY_SPACING, 0, song_height)
 

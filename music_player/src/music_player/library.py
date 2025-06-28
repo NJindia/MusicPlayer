@@ -1,4 +1,5 @@
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import Enum
 from functools import cache
@@ -495,7 +496,7 @@ class MusicLibraryWidget(QWidget):
         header_label_title: str,
         header_label_subtitle: str | None,
         show_date_added_col: bool | None,
-        music_ids_to_load: tuple[int, ...],
+        music_ids_to_load: Sequence[int],
         no_meta: bool = False,
     ):
         self.header_widget.header_img.setPixmap(img_pixmap)
@@ -730,8 +731,13 @@ class MusicLibraryTable(LibraryTableView):
         self.viewport().installEventFilter(self)
         self.adjust_height_to_content()
 
+    def startDrag(self, supportedActions, /):
+        print("STARTED")
+        super().startDrag(supportedActions)
+
     @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
+        print("MOVE")
         source = event.source()
         playlist = cast(MusicLibraryWidget, self.parent()).collection
         if playlist is not None and not playlist.is_protected and isinstance(source, PlaylistTreeView):

@@ -3,7 +3,7 @@ from functools import cache
 from pathlib import Path
 
 from line_profiler_pycharm import profile
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QSize, QThread
 from PySide6.QtGui import QPixmap, QPixmapCache, Qt
 
 
@@ -54,11 +54,13 @@ def datetime_to_age_string(dt: datetime) -> str:
 
 @profile
 def get_pixmap(source: Path | None, height: int | None) -> QPixmap:
+    assert QThread.currentThread().isMainThread()
     if source is None:
         return get_empty_pixmap(height)
     pixmap = QPixmap()
     key = f"{source!s}_{height}"
     if not QPixmapCache.find(key, pixmap):
+        print(f"key: {key}, {QPixmapCache.cacheLimit()}")
         pixmap = QPixmap(source)
         if height is not None:
             pixmap = pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)

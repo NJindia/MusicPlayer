@@ -73,7 +73,7 @@ class DbArtist(DbBase):
         return cls(
             id=row["artist_id"],
             name=row["artist_name"],
-            img_path=Path(row["artist_img"]) if row["artist_img"] else None,
+            img_path=PATH_TO_IMGS / Path(row["artist_img"]) if row["artist_img"] else None,
             collection_type="artist",
             is_protected=True,
         )
@@ -100,7 +100,7 @@ class DbAlbum(DbBase):
             id=row["album_id"],
             name=row["album_name"],
             release_date=row["release_date"],
-            img_path=Path(row["img_path"]) if row["img_path"] else None,
+            img_path=PATH_TO_IMGS / Path(row["img_path"]) if row["img_path"] else None,
             collection_type="album",
             is_protected=True,
         )
@@ -180,7 +180,7 @@ class DbCollection(DbBase):
             music_ids=db_row["music_ids"],
             music_added_on=db_row["added_on"],
             album_ids=db_row["album_ids"],
-            album_img_path_counter=Counter(Path(p) for p in db_row["img_paths"] if p is not None),
+            album_img_path_counter=Counter(PATH_TO_IMGS / Path(p) for p in db_row["img_paths"] if p is not None),
         )
 
     @property
@@ -273,7 +273,6 @@ class DbCollection(DbBase):
 
     @profile
     def _get_default_playlist_thumbnail(self, height: int) -> QPixmap:
-        print("thumbnail")
         if not self.album_img_path_counter:
             return _empty_playlist_pixmap(height)
 
@@ -285,7 +284,7 @@ class DbCollection(DbBase):
             return combined_pixmap
 
         # TODO REMOVE OLD KEY
-        pixmaps = [get_pixmap(PATH_TO_IMGS / path, None) for path in most_common_paths]
+        pixmaps = [get_pixmap(path, None) for path in most_common_paths]
         if len(pixmaps) != 4:
             combined_pixmap = pixmaps[0]
         else:
@@ -305,13 +304,24 @@ class DbCollection(DbBase):
         return combined_pixmap
 
     def get_thumbnail_pixmap(self, height: int) -> QPixmap:
+        key = f"collection_{self.id}_{height}"
+        pixmap = QPixmap()
+        if QPixmapCache.find(key, pixmap):
+            return pixmap
         match self.collection_type:
             case "playlist":
                 if self.is_protected:
-                    return _get_downloaded_songs_playlist_pixmap(height)
-                if self.thumbnail_path is None:
-                    return self._get_default_playlist_thumbnail(height)
-                return get_pixmap(self.thumbnail_path, height, self.pixmap_key_base)
+                    pixmap = get_colored_pixmap(
+                        QPixmap("../icons/playlist/downloaded_songs.svg"), Qt.GlobalColor.black
+                    ).scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
+                else:
+                    pixmap = (
+                        self._get_default_playlist_thumbnail(height)
+                        if self.thumbnail_path is None
+                        else get_pixmap(self.thumbnail_path, height)
+                    )
+                QPixmapCache.insert(key, pixmap)
+                return pixmap
             case "folder":
                 return _get_folder_pixmap(height)
             case _:
@@ -339,13 +349,6 @@ def _empty_playlist_pixmap(height: int) -> QPixmap:
 @cache
 def _get_folder_pixmap(height: int) -> QPixmap:
     return QPixmap("../icons/playlist/folder.svg").scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
-
-
-@cache
-def _get_downloaded_songs_playlist_pixmap(height: int) -> QPixmap:
-    return get_colored_pixmap(QPixmap("../icons/playlist/downloaded_songs.svg"), Qt.GlobalColor.black).scaledToHeight(
-        height, Qt.TransformationMode.SmoothTransformation
-    )
 
 
 @cache
@@ -391,7 +394,7 @@ class DbMusic:
             isrc=row["isrc"],
             file_path=Path(row["file_path"]),
             downloaded_on=row["downloaded_on"],
-            img_path=None if row["img_path"] is None else Path(row["img_path"]),
+            img_path=None if row["img_path"] is None else PATH_TO_IMGS / Path(row["img_path"]),
             artist_ids=[r["artist_id"] for r in rows],
             artists=[r["artist_name"] for r in rows],
         )
