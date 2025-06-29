@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from pathlib import Path
+from typing import Any, cast
 
-import soundfile as sf
-from mutagen.flac import FLAC
+from mutagen.flac import FLAC, Picture, VCFLACDict
 from tqdm import tqdm
 
 
@@ -24,10 +24,6 @@ class Music:
     file_path: Path
     album_cover_bytes: bytes | None
     downloaded_datetime: datetime
-
-    @property
-    def data_sr(self):
-        return sf.read(self.file_path)
 
 
 SOURCES: list[Path] = [Path("../export/")]
@@ -50,24 +46,24 @@ def load_music(path: Path) -> Music:
     match path.suffix:
         case ".flac":
             md = FLAC(path)
-            assert md.tags is not None
+            assert isinstance(md.tags, VCFLACDict)  # pyright: ignore[reportUnknownMemberType]
+            tags = cast(dict[str, list[Any]], md.tags)
+            pictures = cast(list[Picture], md.pictures)  # pyright: ignore[reportUnknownMemberType]
             return Music(
-                title=md.tags["TITLE"][0],  # pyright: ignore[reportIndexIssue]
-                artists=[s.strip() for s in md.tags["ARTIST"][0].split(",")],  # pyright: ignore[reportIndexIssue]
-                album=md.tags["ALBUM"][0],  # pyright: ignore[reportIndexIssue]
-                album_artist=md.tags["ALBUMARTIST"][0],  # pyright: ignore[reportIndexIssue]
-                duration_timestamp=md.info.length,
-                isrc=md.tags["ISRC"][0],  # pyright: ignore[reportIndexIssue]
+                title=tags["TITLE"][0],
+                artists=[s.strip() for s in tags["ARTIST"][0].split(",")],
+                album=tags["ALBUM"][0],
+                album_artist=tags["ALBUMARTIST"][0],
+                duration_timestamp=cast(float, md.info.length),  # pyright: ignore[reportUnknownMemberType]
+                isrc=tags["ISRC"][0],
                 release_date=datetime.strptime(
-                    md.tags["DATE"][0],  # pyright: ignore[reportIndexIssue]
+                    tags["DATE"][0],
                     "%Y-%m-%dT%H:%M:%S.%f%z",
                 ).date(),
-                lyrics_by_timestamp=_parse_lyrics(md.tags["LYRICS"][0])  # pyright: ignore[reportIndexIssue]
-                if "LYRICS" in md.tags  # pyright: ignore[reportOperatorIssue]
-                else {},
+                lyrics_by_timestamp=_parse_lyrics(tags["LYRICS"][0]) if "LYRICS" in tags else {},
                 file_path=path,
-                album_cover_bytes=md.pictures[0].data if md.pictures else None,  # pyright: ignore[reportIndexIssue]
-                downloaded_datetime=datetime.fromtimestamp(path.stat().st_ctime, tz=UTC),
+                album_cover_bytes=cast(bytes, pictures[0].data) if pictures else None,  # pyright: ignore[reportUnknownMemberType]
+                downloaded_datetime=datetime.fromtimestamp(path.stat().st_birthtime, tz=UTC),
             )
         case ".m4a":
             raise NotAcceptedFileTypeError

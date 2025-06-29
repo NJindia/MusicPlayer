@@ -1,5 +1,21 @@
 {
+  "strict": [
+    "music_player/src/**/*.py"
+  ],
   "venvPath": ".",
   "venv": ".venv",
-  "pythonVersion": "3.13"
+  "pythonVersion": "3.13",
+  "useLibraryCodeForTypes": true,
+  "reportCallInDefaultInitializer": "warning",
+  "reportPropertyTypeMismatch": "warning",
+  "reportUninitializedInstanceVariable": "error",
+  "reportUnnecessaryTypeIgnoreComment": "information",
+  "executionEnvironments": [
+    {
+      "root": "",
+      "extraPaths": [
+        "src"
+      ]
+    }
+  ]
 }

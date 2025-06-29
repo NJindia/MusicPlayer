@@ -1,6 +1,6 @@
 from typing import override
 
-from line_profiler_pycharm import profile
+from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QObject, QRect, QRectF, Qt, Signal, Slot
 from PySide6.QtGui import QFont, QFontMetrics, QPainter, QResizeEvent
 from PySide6.QtWidgets import (
@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QGraphicsSceneMouseEvent,
     QGraphicsView,
     QScrollArea,
+    QStyleOptionGraphicsItem,
     QVBoxLayout,
     QWidget,
 )
@@ -80,7 +81,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
 
     @override
     @profile
-    def paint(self, painter: QPainter, option, widget=None):
+    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None):
         # Paint album art
         if self.music.img_path is not None:
             pixmap = get_pixmap(self.music.img_path, self._album_rect.size().toSize().height())
@@ -91,7 +92,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         elided_text = self._song_font_metrics.elidedText(self.music.name, Qt.TextElideMode.ElideRight, available_width)
         self._song_text_rect.setWidth(self._song_font_metrics.horizontalAdvance(elided_text))
         self._song_font.setUnderline(self._song_text_rect == self._hovered_text_rect)
-        painter.setFont(self._song_font)
+        painter.setFont(self._song_font)  # pyright: ignore[reportUnknownMemberType]
         painter.drawText(self._song_text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_text)
 
         # Paint artist name rect(s)
@@ -180,14 +181,13 @@ class QueueEntryGraphicsView(QGraphicsView):
 
     @profile
     def update_scene(self):
+        scene_items = self.scene().items()  # pyright: ignore[reportUnknownMemberType]
         for i, proxy in enumerate(self.current_entries):
             proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
-        assert len(self.current_entries) == len(self.scene().items()), (
-            f"{len(self.current_entries), len(self.scene().items())}"
-        )
+        assert len(self.current_entries) == len(scene_items), f"{len(self.current_entries), len(scene_items)}"
         # TODO REMOVE BAD ENTRIES
 
-        self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(self.scene().items())))  # Update scene size
+        self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(scene_items)))  # Update scene size
         self.viewport().update()
 
     @profile

@@ -7,7 +7,7 @@ from typing import Any, cast
 import psycopg2
 from PIL import Image
 from psycopg2._json import Json
-from psycopg2.extras import RealDictCursor, RealDictRow, execute_values
+from psycopg2.extras import RealDictCursor, RealDictRow, execute_values  # pyright: ignore[reportUnknownVariableType]
 from PySide6.QtSql import QSqlDatabase
 
 from music_player.music_importer import Music, load_from_sources
@@ -119,15 +119,15 @@ PATH_TO_IMGS = Path("../images/")
 
 
 def _insert_music(cursor: RealDictCursor, music: Music):
-    cursor.execute("SELECT album_id, img_path FROM albums WHERE album_name=%s LIMIT 1", (music.album,))
+    cursor.execute("SELECT album_id, img_path FROM albums WHERE album_name=%s LIMIT 1", (music.album,))  # pyright: ignore[reportUnknownMemberType]
     album_row = cursor.fetchone()
     if album_row is None:
-        cursor.execute(INSERT_ALBUM_SQL, (music.album, music.release_date))
+        cursor.execute(INSERT_ALBUM_SQL, (music.album, music.release_date))  # pyright: ignore[reportUnknownMemberType]
         album_row = cast(RealDictRow, cursor.fetchone())
         if music.album_cover_bytes:
             Image.open(io.BytesIO(music.album_cover_bytes)).save(PATH_TO_IMGS / album_row["img_path"])
 
-    cursor.execute(
+    cursor.execute(  # pyright: ignore[reportUnknownMemberType]
         INSERT_MUSIC_SQL,
         (
             music.title,
@@ -140,15 +140,15 @@ def _insert_music(cursor: RealDictCursor, music: Music):
             music.downloaded_datetime,
         ),
     )
-    music_id = cursor.fetchone()["music_id"]  # pyright: ignore[reportOptionalSubscript]
+    music_id = cast(int, cursor.fetchone()["music_id"])  # pyright: ignore[reportOptionalSubscript]
 
     artist_ids: list[int] = []
     for artist in music.artists:
-        cursor.execute("SELECT artist_id from artists WHERE artist_name=%s LIMIT 1", (artist,))
+        cursor.execute("SELECT artist_id from artists WHERE artist_name=%s LIMIT 1", (artist,))  # pyright: ignore[reportUnknownMemberType]
         artist_row = cursor.fetchone()
         if artist_row is None:
-            cursor.execute(INSERT_ARTIST_SQL, (artist, None))
-            artist_ids.append(cursor.fetchone()["artist_id"])  # pyright: ignore[reportOptionalSubscript]
+            cursor.execute(INSERT_ARTIST_SQL, (artist, None))  # pyright: ignore[reportUnknownMemberType]
+            artist_ids.append(cast(int, cursor.fetchone()["artist_id"]))  # pyright: ignore[reportOptionalSubscript]
         else:
             artist_ids.append(artist_row["artist_id"])
     args = [(music_id, artist_id, i + 1) for i, artist_id in enumerate(artist_ids)]
@@ -182,7 +182,7 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def execute_query(self, query, args: tuple[Any, ...] | None = None):
+    def execute_query(self, query: str, args: tuple[Any, ...] | None = None):
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
@@ -198,7 +198,7 @@ class DatabaseManager:
         conn = self._get_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, kwargs)
+                cursor.execute(query, kwargs)  # pyright: ignore[reportUnknownMemberType]
                 if commit:
                     conn.commit()
                 return cursor.fetchall()
@@ -212,7 +212,7 @@ class DatabaseManager:
         conn = self._get_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, args)
+                cursor.execute(query, args)  # pyright: ignore[reportUnknownMemberType]
                 if commit:
                     conn.commit()
                 return cursor.fetchall()
@@ -223,10 +223,10 @@ class DatabaseManager:
         conn = self._get_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(TRUNCATE_ALL_SQL)
+                cursor.execute(TRUNCATE_ALL_SQL)  # pyright: ignore[reportUnknownMemberType]
                 for music in load_from_sources():
                     _insert_music(cursor, music)
-                cursor.execute(
+                cursor.execute(  # pyright: ignore[reportUnknownMemberType]
                     "REFRESH MATERIALIZED VIEW CONCURRENTLY library_music_view; REFRESH MATERIALIZED VIEW music_view;"
                 )
             conn.commit()

@@ -1,7 +1,7 @@
 import itertools
 from typing import Literal, cast, get_args
 
-from vlc import Event, EventType, Instance, Media, MediaList, MediaListPlayer, MediaPlayer
+from vlc import Event, EventManager, EventType, Instance, Media, MediaList, MediaListPlayer, MediaPlayer
 
 from music_player.database import get_database_manager
 from music_player.db_types import DbCollection, DbMusic, get_db_music_cache
@@ -17,7 +17,7 @@ def index_media_list(media_list: MediaList, media: Media) -> int:
 class VLCCore:
     def on_playing(self, _: Event):
         self.media_player.pause()
-        self.player_event_manager.event_detach(EventType.MediaPlayerPlaying)  # pyright: ignore[reportAttributeAccessIssue]
+        self.player_event_manager.event_detach(EventType.MediaPlayerPlaying)
 
     def load_media_from_music_ids(self, music_ids: tuple[int, ...]):
         rows = (
@@ -32,7 +32,7 @@ class VLCCore:
         self.db_indices = list(music_ids)
 
     def __init__(self):
-        self.instance = cast(Instance, Instance("--no-xlib"))
+        self.instance = Instance("--no-xlib")
 
         self.list_player: MediaListPlayer = self.instance.media_list_player_new()
 
@@ -43,14 +43,11 @@ class VLCCore:
         """The ordered list of indices in BOTH the `db_indices` and `media_list` to play"""
         self.current_media_idx: int = -1
 
-        self.player_event_manager = self.media_player.event_manager()
-        self.list_player_event_manager = self.list_player.event_manager()
+        self.player_event_manager = cast(EventManager, self.media_player.event_manager())  # pyright: ignore[reportUnknownMemberType]
+        self.list_player_event_manager = cast(EventManager, self.list_player.event_manager())  # pyright: ignore[reportUnknownMemberType]
 
         if self.media_list.count():
-            self.player_event_manager.event_attach(
-                EventType.MediaPlayerPlaying,  # pyright: ignore[reportAttributeAccessIssue]
-                self.on_playing,
-            )
+            self.player_event_manager.event_attach(EventType.MediaPlayerPlaying, self.on_playing)
             self.list_player.next()
         assert not self.media_player.is_playing()
 
@@ -63,7 +60,7 @@ class VLCCore:
         return get_db_music_cache().get(self.db_indices[self.list_indices[self.current_media_idx]])
 
     @property
-    def current_media(self) -> Media:
+    def current_media(self) -> Media | None:
         """The currently playing media"""
         return self.media_player.get_media()  # TODO: IS LIST REF FASTER?
 

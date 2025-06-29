@@ -1,4 +1,3 @@
-# pyright: strict
 import sys
 from collections import Counter
 from collections.abc import Sequence
@@ -8,10 +7,10 @@ from typing import cast
 
 import numpy as np
 import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
-import vlc  # pyright: ignore[reportMissingTypeStubs]
+import vlc
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QAction, QIcon, QMouseEvent, QPixmapCache
+from PySide6.QtGui import QAction, QMouseEvent, QPixmapCache
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QWidget
 from tqdm import tqdm
 
@@ -24,7 +23,6 @@ from music_player.playlist_tree import AddToPlaylistMenu, PlaylistTreeWidget, So
 from music_player.queue_gui import QueueEntryGraphicsItem, QueueEntryGraphicsView, QueueGraphicsView
 from music_player.signals import SharedSignals
 from music_player.toolbar import MediaToolbar
-from music_player.utils import get_pixmap
 from music_player.vlc_core import VLCCore
 
 
@@ -90,29 +88,14 @@ class MainWindow(QMainWindow):
         w.setLayout(main_ui)
         self.setCentralWidget(w)
 
-        self.core.player_event_manager.event_attach(  # pyright: ignore[reportUnknownMemberType]
-            vlc.EventType.MediaPlayerPlaying,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-            self.media_player_playing_callback,
-        )
-        self.core.player_event_manager.event_attach(  # pyright: ignore[reportUnknownMemberType]
-            vlc.EventType.MediaPlayerPaused,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-            self.media_player_paused_callback,
-        )
-        self.core.player_event_manager.event_attach(  # pyright: ignore[reportUnknownMemberType]
-            vlc.EventType.MediaPlayerStopped,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-            self.media_player_paused_callback,
-        )
-        self.core.player_event_manager.event_attach(  # pyright: ignore[reportUnknownMemberType]
-            vlc.EventType.MediaPlayerTimeChanged,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-            self.toolbar.media_slider.update_ui_live,
-        )
-        self.core.player_event_manager.event_attach(  # pyright: ignore[reportUnknownMemberType]
-            vlc.EventType.MediaPlayerEndReached,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-            self.media_player_ended_callback,
-        )
-        self.core.list_player_event_manager.event_attach(  # pyright: ignore[reportUnknownMemberType]
-            vlc.EventType.MediaListPlayerNextItemSet,  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-            self.media_player_media_changed_callback,
+        player_emanager = self.core.player_event_manager
+        player_emanager.event_attach(vlc.EventType.MediaPlayerPlaying, self.media_player_playing_callback)
+        player_emanager.event_attach(vlc.EventType.MediaPlayerPaused, self.media_player_paused_callback)
+        player_emanager.event_attach(vlc.EventType.MediaPlayerStopped, self.media_player_paused_callback)
+        player_emanager.event_attach(vlc.EventType.MediaPlayerTimeChanged, self.toolbar.media_slider.update_ui_live)
+        player_emanager.event_attach(vlc.EventType.MediaPlayerEndReached, self.media_player_ended_callback)
+        self.core.list_player_event_manager.event_attach(
+            vlc.EventType.MediaListPlayerNextItemSet, self.media_player_media_changed_callback
         )
 
     @Slot()
@@ -143,8 +126,7 @@ class MainWindow(QMainWindow):
             self.core.current_media_idx = 0
         current_music = self.core.current_music
         self.toolbar.song_label.setText(f"{current_music.name}\n{', '.join(current_music.artists)}")
-        if current_music.img_path is not None:
-            self.toolbar.album_button.setIcon(QIcon(get_pixmap(current_music.img_path, None)))
+        self.toolbar.album_button.change_music(current_music)
 
         # when VLC emits the MediaPlayerEnded event, it does in a separate thread
         if QThread.currentThread().isMainThread():
@@ -198,8 +180,8 @@ class MainWindow(QMainWindow):
             if music_db_index in self.core.db_indices:
                 list_index = self.core.db_indices.index(music_db_index)
             else:  # Music not in media list, needs to be added
-                self.core.media_list.add_media(music.file_path)  # pyright: ignore[reportUnknownMemberType]
-                self.core.list_player.set_media_list(self.core.media_list)  # pyright: ignore[reportUnknownMemberType]
+                self.core.media_list.add_media(music.file_path)
+                self.core.list_player.set_media_list(self.core.media_list)
                 self.core.db_indices.append(music_db_index)
                 list_index = len(self.core.db_indices) - 1
             list_indices.append(list_index)
@@ -227,7 +209,7 @@ class MainWindow(QMainWindow):
     def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
         self.core.current_media_idx = 0
         self.load_media((queue_entry.music.id,))
-        self.core.list_player.play_item_at_index(0)  # pyright: ignore[reportUnknownMemberType]
+        self.core.list_player.play_item_at_index(0)
         self.queue.update_first_queue_index()
 
     @Slot()

@@ -6,11 +6,17 @@ import aiohttp
 from rich.logging import RichHandler
 from rich.markdown import Markdown
 from rich.traceback import install
-from streamrip import __version__
-from streamrip.config import DEFAULT_CONFIG_PATH, Config, OutdatedConfigError, set_user_defaults
-from streamrip.console import console
-from streamrip.rip.cli import latest_streamrip_version
-from streamrip.rip.main import Main
+from streamrip import __version__  # pyright: ignore[reportMissingTypeStubs]
+from streamrip.config import (  # pyright: ignore[reportMissingTypeStubs]
+    DEFAULT_CONFIG_PATH,
+    Config,
+    OutdatedConfigError,
+    set_user_defaults,
+)
+from streamrip.console import console  # pyright: ignore[reportMissingTypeStubs]
+from streamrip.rip.cli import latest_streamrip_version  # pyright: ignore[reportMissingTypeStubs]
+from streamrip.rip.main import Main  # pyright: ignore[reportMissingTypeStubs]
+from streamrip.utils.ssl_utils import print_ssl_error_help  # pyright: ignore[reportMissingTypeStubs]
 
 logger = logging.getLogger(__name__)
 CODECS = ("ALAC", "FLAC", "OGG", "MP3", "AAC")
@@ -114,8 +120,6 @@ async def url(urls: list[str], config: Config | None):
                     console.print(Markdown(str(notes)))
 
     except aiohttp.ClientConnectorCertificateError as e:
-        from streamrip.utils.ssl_utils import print_ssl_error_help
-
         console.print(f"[red]SSL Certificate verification error: {e}[/red]")
         print_ssl_error_help()
 

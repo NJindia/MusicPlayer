@@ -8,7 +8,7 @@ from itertools import groupby
 from pathlib import Path
 from typing import Literal, TypeVar
 
-from line_profiler_pycharm import profile
+from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from psycopg2.extras import RealDictRow
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QPixmap, QPixmapCache
@@ -42,6 +42,7 @@ class DbBase(ABC):
     _collection_type: CollectionType
     _is_protected: bool
     _img_path: Path | None
+    _music_ids: tuple[int, ...]
 
     def __post_init__(self):
         assert self._id != ""
@@ -67,29 +68,34 @@ class DbBase(ABC):
     def img_path(self) -> Path | None:
         return self._img_path
 
+    @property
+    def music_ids(self) -> tuple[int, ...]:
+        return self._music_ids
+
     @classmethod
     @abstractmethod
-    def from_db(cls, db_id: int) -> "DbBase":
-        pass
+    def from_db(cls, db_id: int) -> "DbBase": ...
 
 
 @dataclass  # (frozen=True)
 class DbArtist(DbBase):
     @classmethod
     def from_db(cls, db_id: int) -> "DbArtist":
-        row = get_database_manager().get_row("SELECT * FROM artists WHERE artist_id = %s", (db_id,))
+        query = """
+        SELECT a.*, ARRAY_AGG(ma.music_id) AS music_ids
+        FROM artists a
+        JOIN music_artists ma USING (artist_id)
+        WHERE artist_id = %s
+        GROUP BY a.artist_id"""
+        row = get_database_manager().get_row(query, (db_id,))
         return cls(
             _id=row["artist_id"],
             _name=row["artist_name"],
             _img_path=PATH_TO_IMGS / Path(row["artist_img"]) if row["artist_img"] else None,
             _collection_type="artist",
             _is_protected=True,
+            _music_ids=tuple(row["music_ids"]),
         )
-
-    @cached_property
-    def music_ids(self) -> tuple[int, ...]:
-        query = "SELECT music_id FROM music_artists WHERE artist_id = %s ORDER BY sort_order"
-        return tuple(row["music_id"] for row in get_database_manager().get_rows(query, (self.id,)))
 
 
 @dataclass  # (frozen=True)
@@ -98,7 +104,13 @@ class DbAlbum(DbBase):
 
     @classmethod
     def from_db(cls, db_id: int) -> "DbAlbum":
-        row = get_database_manager().get_row("SELECT * FROM albums WHERE album_id = %s", (db_id,))
+        query = """
+        SELECT a.*, ARRAY_AGG(m.music_id) AS music_ids
+        FROM albums a
+        JOIN music m USING (album_id)
+        WHERE album_id = %s
+        GROUP BY a.album_id"""
+        row = get_database_manager().get_row(query, (db_id,))
         return cls(
             _id=row["album_id"],
             _name=row["album_name"],
@@ -106,16 +118,12 @@ class DbAlbum(DbBase):
             _collection_type="album",
             _is_protected=True,
             release_date=row["release_date"],
+            _music_ids=tuple(row["music_ids"]),
         )
 
     @property
     def artists(self) -> list[DbArtist]:
         raise NotImplementedError
-
-    @cached_property
-    def music_ids(self) -> tuple[int, ...]:
-        query = "SELECT music_id FROM music WHERE album_id = %s"
-        return tuple(row["music_ids"] for row in get_database_manager().get_rows(query, (self.id,)))
 
 
 collection_query = """
@@ -174,7 +182,7 @@ class DbCollection(DbBase):
             _created=db_row["created"],
             _last_updated=db_row["last_updated"],
             _last_played=db_row["last_played"],
-            _music_ids=db_row["music_ids"],
+            _music_ids=tuple(db_row["music_ids"]),
             _music_added_on=db_row["added_on"],
             _album_img_path_counter=Counter(PATH_TO_IMGS / Path(p) for p in db_row["img_paths"] if p is not None),
         )

@@ -6,7 +6,7 @@ from functools import cache
 from typing import Any, cast, override
 
 import numpy as np
-from line_profiler_pycharm import profile
+from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import (
     QByteArray,
     QDataStream,
@@ -27,6 +27,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QDrag, QDragMoveEvent, QDropEvent, QFont, QIcon, QMouseEvent, QPainter, QPixmap, QResizeEvent
 from PySide6.QtSql import QSqlQueryModel
 from PySide6.QtWidgets import (
+    QApplication,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -41,7 +42,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from qdarktheme.qtpy.QtWidgets import QApplication
 
 from music_player.common_gui import (
     get_artist_text_rect_text_tups,
@@ -103,26 +103,31 @@ def postgres_array_agg_to_list(agg: str) -> list[str]:
     return [r.strip('"') for r in agg[1:-1].split(",")]  # TODO
 
 
+def _paint_hoverable_elided_text(
+    painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
+) -> None:
+    widget = cast(MusicLibraryTable, option.widget)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    text_rect, _, elided_text = widget.get_text_rect_tups_for_index(index)[0]
+    if widget.hovered_text_rect == text_rect:
+        font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
+        font.setUnderline(True)
+        painter.setFont(font)  # pyright: ignore[reportUnknownMemberType]
+    painter.drawText(text_rect, option.displayAlignment | Qt.TextFlag.TextSingleLine, elided_text)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
+
+
 class AlbumItemDelegate(QStyledItemDelegate):
     @override
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
-        view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
-        text_rect, _, album_text = view.get_text_rect_tups_for_index(index)[0]
-
         painter.save()
-        if view.hovered_text_rect == text_rect:
-            font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
-            font.setUnderline(True)
-            painter.setFont(font)
-        painter.drawText(text_rect, option.displayAlignment | Qt.TextFlag.TextSingleLine, album_text)  # pyright: ignore[reportAttributeAccessIssue]
+        _paint_hoverable_elided_text(painter, option, index)
         painter.restore()
 
 
 class ArtistsItemDelegate(QStyledItemDelegate):
     @override
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex):
-        index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
-        view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
+        index_rect = cast(QRect, option.rect)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+        view = cast(MusicLibraryTable, option.widget)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
         text_rect = index_rect.adjusted(PADDING, PADDING, -PADDING, -PADDING)
 
         paint_artists(
@@ -130,7 +135,7 @@ class ArtistsItemDelegate(QStyledItemDelegate):
             painter,
             option,
             text_rect,
-            option.font,  # pyright: ignore[reportAttributeAccessIssue]
+            cast(QFont, option.font),  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
             lambda r: r == view.hovered_text_rect,
         )
 
@@ -140,30 +145,19 @@ class SongItemDelegate(QStyledItemDelegate):
     def paint(
         self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
     ) -> None:
-        painter.save()
-
-        view: MusicLibraryTable = option.widget  # pyright: ignore[reportAttributeAccessIssue]
-
         pixmap = index.data(Qt.ItemDataRole.DecorationRole)
 
+        painter.save()
         if pixmap is not None:
-            index_rect: QRect = option.rect  # pyright: ignore[reportAttributeAccessIssue]
-            icon_rect = QRect(index_rect.topLeft() + QPoint(0, PADDING), pixmap.size())
+            icon_rect = QRect(cast(QRect, option.rect).topLeft() + QPoint(0, PADDING), pixmap.size())  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
             painter.drawPixmap(icon_rect, pixmap)
-
-        text_rect, _, elided_text = view.get_text_rect_tups_for_index(index)[0]
-        if view.hovered_text_rect == text_rect:
-            font = QFont(option.font)  # pyright: ignore[reportAttributeAccessIssue]
-            font.setUnderline(True)
-            painter.setFont(font)
-        painter.drawText(text_rect, option.displayAlignment | Qt.TextFlag.TextSingleLine, elided_text)  # pyright: ignore[reportAttributeAccessIssue]
-
+        _paint_hoverable_elided_text(painter, option, index)
         painter.restore()
 
 
 class ProxyModel(QSortFilterProxyModel):
     @override
-    def columnCount(self, /, parent=...):
+    def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]
         return 5
 
 
@@ -189,7 +183,7 @@ class MusicTableModel(QSqlQueryModel):
         self.view = parent
 
     @override
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = ...) -> Any:
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         """Returns header data for given role."""
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
             return COLUMN_MAP_BY_IDX.get(section, ("", ""))[0]
@@ -270,7 +264,6 @@ class MusicTableModel(QSqlQueryModel):
             case 1:  # Artists
                 artist_names = super().data(self.index(index.row(), self.artist_names_field_idx))
                 artist_idx = artist_names.index(original_text)
-                print(original_text)
                 return super().data(self.index(index.row(), self.artist_ids_field_idx))[artist_idx]
             case 2:  # Album
                 return super().data(self.index(index.row(), self.album_id_field_idx))
@@ -292,7 +285,7 @@ class TextLabel(QLabel):
         type_font.setBold(True)
         type_font.setPointSize(font_size)
         self.original_text = ""
-        self.setFont(type_font)
+        self.setFont(type_font)  # pyright: ignore[reportUnknownMemberType]
         self.setStyleSheet("QLabel { padding: 0px; margin: 0px; } ")
 
     @override
@@ -322,7 +315,7 @@ class MusicLibraryScrollArea(QScrollArea):
         self.setWidgetResizable(True)
         self.setWidget(self.library)
 
-        self.setMinimumWidth(500 + QApplication.style().pixelMetric(QStyle.PM_ScrollBarExtent))  # pyright: ignore[reportAttributeAccessIssue]
+        self.setMinimumWidth(500 + QApplication.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent))
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -509,13 +502,12 @@ class MusicLibraryWidget(QWidget):
     def _load(
         self,
         *,
-        new_collection,
+        new_collection: DbBase | None,
         img_pixmap: QPixmap,
         header_label_type: str,
         header_label_title: str,
         header_label_subtitle: str | None,
         show_date_added_col: bool | None,
-        music_ids_to_load: Sequence[int],
         no_meta: bool = False,
     ):
         self.header_widget.header_img.setPixmap(img_pixmap)
@@ -539,7 +531,7 @@ class MusicLibraryWidget(QWidget):
 
         model = self.table_view.model_
         for row in range(model.rowCount()):
-            if model.get_music_id(row) in music_ids_to_load:
+            if new_collection is not None and model.get_music_id(row) in new_collection.music_ids:
                 self.table_view.showRow(row)
             else:
                 self.table_view.hideRow(row)
@@ -559,7 +551,6 @@ class MusicLibraryWidget(QWidget):
             header_label_title="",
             header_label_subtitle=None,
             show_date_added_col=None,
-            music_ids_to_load=(),
             no_meta=True,
         )
 
@@ -575,7 +566,6 @@ class MusicLibraryWidget(QWidget):
             header_label_title=playlist.name,
             header_label_subtitle=None,
             show_date_added_col=True,
-            music_ids_to_load=playlist.music_ids,
         )
         print("LOAD END", (datetime.now(tz=UTC) - t).microseconds / 1000)
 
@@ -590,7 +580,6 @@ class MusicLibraryWidget(QWidget):
             header_label_title=artist.name,
             header_label_subtitle=None,
             show_date_added_col=False,
-            music_ids_to_load=artist.music_ids,
         )
 
     @Slot()
@@ -606,7 +595,6 @@ class MusicLibraryWidget(QWidget):
             header_label_title=album.name,
             header_label_subtitle="",  # album_df.iloc[0]["album_artist"],
             show_date_added_col=False,
-            music_ids_to_load=album.music_ids,
         )
 
 
@@ -722,7 +710,7 @@ class MusicLibraryTable(LibraryTableView):
         self.verticalHeader().setVisible(False)
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
-        self.setFont(QFont())
+        self.setFont(QFont())  # pyright: ignore[reportUnknownMemberType]
 
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
@@ -743,7 +731,7 @@ class MusicLibraryTable(LibraryTableView):
         self.horizontalHeader().setSectionResizeMode(ColIndex.DURATION.value, QHeaderView.ResizeMode.Fixed)
         self.horizontalHeader().setSectionResizeMode(ColIndex.ALBUM_NAME.value, QHeaderView.ResizeMode.Fixed)
 
-        self.hovered_text_rect = QRect()
+        self.hovered_text_rect: QRect = QRect()
         self.hovered_data: int | None = None
 
         self.viewport().installEventFilter(self)
@@ -777,7 +765,7 @@ class MusicLibraryTable(LibraryTableView):
         painter.end()
 
         drag.setPixmap(pixmap)
-        drag.setMimeData(self.model().mimeData(indices))
+        drag.setMimeData(self.model().mimeData(indices))  # pyright: ignore[reportUnknownMemberType]
         drag.exec(supportedActions)
 
     @override

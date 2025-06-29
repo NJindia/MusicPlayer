@@ -4,7 +4,7 @@ from enum import Enum
 from functools import partial
 from typing import cast, override
 
-from line_profiler_pycharm import profile
+from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import (
     QEvent,
     QModelIndex,
@@ -79,21 +79,21 @@ class TreeItemDelegate(QStyledItemDelegate):
         return QSize(default_size.width(), PLAYLIST_ROW_HEIGHT)
 
     @override
-    def paint(self, painter: QPainter, option, index, /):
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex, /):
         super().paint(painter, option, index)
         if cast(PlaylistTree, self.parent()).drop_index_ == index:
-            rect = cast(QRect, option.rect)  # pyright: ignore[reportAttributeAccessIssue]
+            rect = cast(QRect, option.rect)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
             painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 5, 5)
 
 
 class TreeModelItem(QStandardItem):
     def __init__(self, collection: DbCollection) -> None:
         super().__init__(collection.name)
-        self.collection = collection
+        self.collection: DbCollection = collection
 
         font = QFont()
         font.setPointSize(14)
-        self.setFont(font)
+        self.setFont(font)  # pyright: ignore[reportUnknownMemberType]
         self.setEditable(False)
         self.update_icon()
 
@@ -371,12 +371,12 @@ class PlaylistTreeWidget(QWidget):
             label_font = QFont()
             label_font.setPointSize(20)
             label_font.setBold(True)
-            label.setFont(label_font)
+            label.setFont(label_font)  # pyright: ignore[reportUnknownMemberType]
             label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
 
             create_menu = QMenu(self)
             args = create_menu, main_window, self.model_.invisibleRootItem().index(), self.signals
-            create_menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
+            create_menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])  # pyright: ignore[reportUnknownMemberType]
 
             new_button = QToolButton(self)
             new_button.setText("+ New")
@@ -437,7 +437,7 @@ class PlaylistTreeWidget(QWidget):
 
         child = src_parent.takeRow(source_idx.row())[0]
         assert child is not None
-        dest_parent.appendRow(child)
+        dest_parent.appendRow(child)  # pyright: ignore[reportUnknownMemberType]
 
         src_item.collection.parent_id = dest_parent.collection.id if isinstance(dest_parent, TreeModelItem) else -1
 
@@ -479,11 +479,11 @@ class PlaylistTreeWidget(QWidget):
         self.sort_menu.update_active_action()
 
     def source_model(self):
-        return cast(QStandardItemModel, self.proxy_model.sourceModel())
+        return self.proxy_model.sourceModel()
 
-    def item_at_index(
-        self, index: QModelIndex, *, is_source: bool
-    ) -> TreeModelItem:  # , get_default_model_item: bool = False
+    def item_at_index(self, index: QModelIndex, *, is_source: bool) -> TreeModelItem:
+        if not index.isValid():
+            raise ValueError
         assert not isinstance(index.model(), QSortFilterProxyModel if is_source else QStandardItemModel)
         item = self.source_model().itemFromIndex(index if is_source else self.proxy_model.mapToSource(index))
         assert isinstance(item, TreeModelItem)
@@ -504,7 +504,7 @@ class PlaylistTreeWidget(QWidget):
     @Slot()
     def delete_collection(self, proxy_index: QModelIndex) -> None:
         item = self.flattened_proxy_index_to_default_model_item(proxy_index)
-        parent = item.parent()
+        parent = cast(QStandardItem | None, item.parent())
         parent_index = (parent or self.model_.invisibleRootItem()).index()
         self.model_.beginRemoveRows(parent_index, item.row(), item.row())
         (self.model_ if parent is None else parent).removeRow(item.row())
@@ -530,12 +530,7 @@ class PlaylistTreeWidget(QWidget):
             raise ValueError
         if Qt.ItemDataRole.DisplayRole in roles:
             item = self.item_at_index(tl_source_index, is_source=True)
-            if item is None:
-                raise ValueError
-            playlist = item.collection
-            if playlist is None:
-                raise NotImplementedError
-            playlist.rename(item.text())
+            item.collection.rename(item.text())
 
             if self.proxy_model.filterRegularExpression().pattern():
                 self.model_.blockSignals(True)  # noqa: FBT003
@@ -555,9 +550,11 @@ class PlaylistTreeWidget(QWidget):
             # Set root for adding playlist/folder
             if item.collection.is_folder:  # Folder is a valid root
                 source_root_index = self.proxy_model.mapToSource(proxy_index)
-            elif (parent := item.parent()) is not None:  # Not top-level
+            elif (
+                (p := item.parent()) is not None  # pyright: ignore[reportUnnecessaryComparison]
+            ):  # If not top-level parent *is* None
                 assert self.source_model() != self.flattened_model_, "Should only have top-level for flattened!"
-                source_root_index = parent.index()
+                source_root_index = p.index()
 
             if not item.collection.is_protected:
                 rename_action = QAction("Rename", self.tree_view)
@@ -568,7 +565,7 @@ class PlaylistTreeWidget(QWidget):
 
                 move_to_folder_menu = MoveToFolderMenu(item.index(), self.signals, menu, main_window, self)
 
-                menu.addActions([rename_action, delete_action])
+                menu.addActions([rename_action, delete_action])  # pyright: ignore[reportUnknownMemberType]
                 menu.addSeparator()
                 menu.addMenu(move_to_folder_menu)
             else:
@@ -578,7 +575,7 @@ class PlaylistTreeWidget(QWidget):
 
         args = menu, main_window, source_root_index, self.signals
         menu.addSeparator()
-        menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])
+        menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])  # pyright: ignore[reportUnknownMemberType]
 
         menu.popup(self.tree_view.mapToGlobal(point))
 
@@ -589,7 +586,7 @@ class PlaylistTreeWidget(QWidget):
         self.flattened_model_.beginResetModel()
         self.flattened_model_.clear()
         for item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=self.is_main_view):
-            self.flattened_model_.appendRow(TreeModelItem(item.collection))
+            self.flattened_model_.appendRow(TreeModelItem(item.collection))  # pyright: ignore[reportUnknownMemberType]
         self.flattened_model_.endResetModel()
 
     def _initialize_model(self) -> None:
@@ -598,7 +595,7 @@ class PlaylistTreeWidget(QWidget):
         def _add_children_to_item(root_item_: QStandardItem, root_item_id_: int):
             for collection in get_collections_by_parent_id().get(root_item_id_, []):
                 item = TreeModelItem(collection)
-                root_item_.appendRow(item)
+                root_item_.appendRow(item)  # pyright: ignore[reportUnknownMemberType]
                 if collection.is_folder:
                     _add_children_to_item(item, collection.id)
 
@@ -645,7 +642,7 @@ class SortMenu(QMenu):
         self.sort_alphabetical_action = SortRoleAction(SortRole.ALPHABETICAL, parent, self)
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
-        self.addActions([self.sort_updated_action, self.sort_played_action, self.sort_alphabetical_action])
+        self.addActions([self.sort_updated_action, self.sort_played_action, self.sort_alphabetical_action])  # pyright: ignore[reportUnknownMemberType]
 
         self.update_active_action()
 
@@ -761,7 +758,7 @@ class AddToPlaylistMenu(QMenu):
             selected_music_ids,
         )
 
-        self.addActions([widget_action, new_playlist_action])
+        self.addActions([widget_action, new_playlist_action])  # pyright: ignore[reportUnknownMemberType]
 
     def add_items_to_playlist_at_index(self, selected_music_ids: Sequence[int], proxy_index: QModelIndex):
         playlist = self.playlist_tree_widget.item_at_index(proxy_index, is_source=False).collection

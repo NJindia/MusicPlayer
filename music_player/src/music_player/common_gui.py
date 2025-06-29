@@ -1,6 +1,6 @@
 from collections.abc import Callable, Sequence
 from functools import cache, partial
-from typing import Literal
+from typing import Literal, cast
 
 from PySide6.QtCore import QModelIndex, QRect, Qt
 from PySide6.QtGui import QAction, QFont, QFontMetrics, QIcon, QPainter, QPixmap
@@ -31,7 +31,7 @@ def get_artist_text_rect_text_tups(artists: list[str], text_rect: QRect, font_me
     elided_text = font_metrics.elidedText(text, Qt.TextElideMode.ElideRight, text_rect.width())
     unconsumed_start_idx: int = 0
     text_rect_text_tups: list[tuple[QRect, str, str]] = []
-    for i, artist in enumerate(artists):
+    for artist in artists:
         if unconsumed_start_idx == len(elided_text):
             break
         elided_artist_text = (
@@ -74,7 +74,7 @@ def paint_artists(
     font: QFont,
     hover_condition: Callable[[QRect], bool],
 ) -> list[QRect]:
-    font_metrics: QFontMetrics = option.fontMetrics  # pyright: ignore[reportAttributeAccessIssue]
+    font_metrics = cast(QFontMetrics, option.fontMetrics)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
     text_flag = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter  # TODO SINGLE LINE?
     found_hovered: bool = False
@@ -87,7 +87,7 @@ def paint_artists(
         else:
             font.setUnderline(False)
         painter.save()
-        painter.setFont(font)
+        painter.setFont(font)  # pyright: ignore[reportUnknownMemberType]
 
         painter.drawText(artist_text_rect, text_flag, text)
         painter.restore()
@@ -122,7 +122,7 @@ class _CreateDialog(QDialog):
         font = QFont()
         font.setPointSize(12)
         font.setBold(True)
-        header.setFont(font)
+        header.setFont(font)  # pyright: ignore[reportUnknownMemberType]
 
         close_button = QPushButton(self)
         close_button.setText("X")

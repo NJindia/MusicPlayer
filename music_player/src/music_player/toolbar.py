@@ -1,7 +1,6 @@
 from functools import cache, partial
 from typing import Literal
 
-import pandas as pd
 import vlc
 from PySide6.QtCore import QSize, Qt, Slot
 from PySide6.QtGui import QIcon, QPixmap, QTransform
@@ -19,8 +18,9 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import get_play_button_icon, get_shuffle_button_icon
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD
+from music_player.db_types import DbMusic
 from music_player.signals import SharedSignals
-from music_player.utils import timestamp_to_str
+from music_player.utils import get_pixmap, timestamp_to_str
 from music_player.vlc_core import VLCCore
 
 
@@ -31,10 +31,10 @@ def expanding_widget() -> QWidget:
 
 
 class AlbumButton(QToolButton):
-    def __init__(self, music: pd.Series | None, shared_signals: SharedSignals, height_linewidth: tuple[int, int]):
+    def __init__(self, album_id: int, shared_signals: SharedSignals, height_linewidth: tuple[int, int]):
         super().__init__()
-        self.music = music
-        self.signals = shared_signals
+        self._album_id = album_id
+        self._signals = shared_signals
 
         height = height_linewidth[0] - height_linewidth[1] * 2
         button_size = QSize(height, height)
@@ -43,10 +43,14 @@ class AlbumButton(QToolButton):
 
         self.clicked.connect(self.button_clicked)
 
+    def change_music(self, new_music: DbMusic):
+        self._album_id = new_music.album_id
+        self.setIcon(QIcon(get_pixmap(new_music.img_path, self.height())))
+
     def button_clicked(self):
-        if self.music is None:
+        if not self._album_id:
             return
-        partial(self.signals.library_load_album_signal.emit, self.music["album"])
+        partial(self._signals.library_load_album_signal.emit, self._album_id)
 
 
 class OpacityButton(QToolButton):
@@ -194,14 +198,14 @@ class MediaToolbar(QToolBar):
             case "NO_REPEAT":
                 self.repeat_button.setIcon(QIcon("../icons/repeat-button.svg"))
                 self.repeat_button.button_off()
-                self.core.list_player.set_playback_mode(vlc.PlaybackMode.default)  # pyright: ignore[reportAttributeAccessIssue]
+                self.core.list_player.set_playback_mode(vlc.PlaybackMode.default)
             case "REPEAT_QUEUE":
                 self.repeat_button.button_on()
-                self.core.list_player.set_playback_mode(vlc.PlaybackMode.loop)  # pyright: ignore[reportAttributeAccessIssue]
+                self.core.list_player.set_playback_mode(vlc.PlaybackMode.loop)
             case "REPEAT_ONE":
                 self.repeat_button.setIcon(QIcon("../icons/repeat-1-button.svg"))
                 self.repeat_button.button_on()
-                self.core.list_player.set_playback_mode(vlc.PlaybackMode.repeat)  # pyright: ignore[reportAttributeAccessIssue]
+                self.core.list_player.set_playback_mode(vlc.PlaybackMode.repeat)
 
     def __init__(self, core: VLCCore, shared_signals: SharedSignals):
         super().__init__(floatable=False, movable=False, orientation=Qt.Orientation.Horizontal)
@@ -211,8 +215,7 @@ class MediaToolbar(QToolBar):
         self.setIconSize(QSize(100, 100))
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 
-        current_music = None  # TODO REMEMBER LAST SESSION self.core.current_music
-        self.album_button = AlbumButton(current_music, shared_signals, (100, 0))
+        self.album_button = AlbumButton(0, shared_signals, (100, 0))
         self.addWidget(self.album_button)
 
         self.song_label = QLabel()  # current_music.title)

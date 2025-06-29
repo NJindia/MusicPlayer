@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
 
-from line_profiler_pycharm import profile
+from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QSize, QThread
 from PySide6.QtGui import QPixmap, QPixmapCache, Qt
 
