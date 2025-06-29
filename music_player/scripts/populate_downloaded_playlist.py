@@ -2,11 +2,11 @@ import datetime
 from collections import Counter
 
 from music_player.database import get_database_manager
-from music_player.db_types import DbCollection
+from music_player.db_types import DbStoredCollection
 from music_player.music_importer import load_from_sources
 
 downloaded = list(load_from_sources())
-downloaded_playlist = DbCollection(
+downloaded_playlist = DbStoredCollection(
     _id=-1,
     _collection_type="playlist",
     _parent_id=-1,

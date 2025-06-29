@@ -17,7 +17,13 @@ from tqdm import tqdm
 from music_player.common_gui import AddToQueueAction, CreateMode, get_pause_button_icon, get_play_button_icon
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.database import get_database_manager
-from music_player.db_types import DbCollection, DbMusic, get_collections_by_parent_id, get_db_music_cache
+from music_player.db_types import (
+    DbCollection,
+    DbMusic,
+    DbStoredCollection,
+    get_collections_by_parent_id,
+    get_db_music_cache,
+)
 from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
 from music_player.playlist_tree import AddToPlaylistMenu, PlaylistTreeWidget, SortRole, TreeModelItem
 from music_player.queue_gui import QueueEntryGraphicsItem, QueueEntryGraphicsView, QueueGraphicsView
@@ -41,7 +47,7 @@ class MainWindow(QMainWindow):
 
         main_ui = QHBoxLayout()
         self.shared_signals = SharedSignals()
-        self.shared_signals.play_playlist_signal.connect(self.play_playlist)
+        self.shared_signals.play_collection_signal.connect(self.play_collection)
 
         self.playlist_view = PlaylistTreeWidget(self, self, self.shared_signals, is_main_view=True)
         self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
@@ -51,7 +57,7 @@ class MainWindow(QMainWindow):
         )
         main_ui.addWidget(self.playlist_view, 1)
 
-        self.library = MusicLibraryWidget(self.core.current_collection, self.shared_signals, self.core)
+        self.library = MusicLibraryWidget(self.shared_signals, self.core)
         self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_collection)
         self.shared_signals.create_playlist_signal.connect(partial(self.create, "playlist"))
         self.shared_signals.create_folder_signal.connect(partial(self.create, "folder"))
@@ -108,11 +114,11 @@ class MainWindow(QMainWindow):
             self.media_changed = False
             self.toolbar.media_slider.update_after_label()
         if self.library.collection == self.core.current_collection:
-            self.library.header_widget.play_pause_button.setIcon(get_pause_button_icon())
+            self.library.header_widget.set_play_pause_button_state(is_play_button=False)
 
     def media_player_paused_callback(self, _: vlc.Event):
         self.toolbar.play_pause_button.setIcon(get_play_button_icon())
-        self.library.header_widget.play_pause_button.setIcon(get_play_button_icon())
+        self.library.header_widget.set_play_pause_button_state(is_play_button=True)
 
     def media_player_media_changed_callback(self, _: vlc.Event):
         self.media_changed = True
@@ -151,16 +157,17 @@ class MainWindow(QMainWindow):
             self.shuffle_indices(self.core.current_media_idx + 1)
         else:
             self.toolbar.shuffle_button.button_off()
-            self.core.list_indices = list(range(len(self.core.list_indices)))
+            if self.core.current_collection:
+                self.core.list_indices = list(range(len(self.core.list_indices)))
 
-            # Get index of original playlist music that was most recently played, and start queue from there
-            last_music_played = next(
-                qe for qe in self.queue.queue_entries[self.core.current_media_idx :: -1] if not qe.manually_added
-            ).music
-            self.core.current_media_idx = self.core.db_indices.index(last_music_played.id)
+                # Get index of original playlist music that was most recently played, and start queue from there
+                last_music_played = next(
+                    qe for qe in self.queue.queue_entries[self.core.current_media_idx :: -1] if not qe.manually_added
+                ).music
+                self.core.current_media_idx = self.core.db_indices.index(last_music_played.id)
 
-            # Replace any music/media that was added manually with the original lists
-            self.load_media(self.core.current_collection.music_ids)
+                # Replace any music/media that was added manually with the original lists
+                self.load_media(self.core.current_collection.music_ids)
         self.queue.update_first_queue_index()
 
     @Slot()
@@ -208,22 +215,21 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def play_song_from_library(self, lib_index: int):
-        if self.library.collection is not None:
-            self.shared_signals.play_playlist_signal.emit(self.library.collection, lib_index)
-        else:
-            self.play_music(self.library.table_view.model_.get_visible_music_ids(), lib_index)
+        assert self.library.collection is not None
+        self.shared_signals.play_collection_signal.emit(self.library.collection, lib_index)
 
     @Slot()
-    def play_playlist(self, playlist: DbCollection, playlist_index: int):
-        if not playlist.music_ids:
+    def play_collection(self, collection: DbCollection, collection_index: int):
+        self.core.current_collection = collection
+        if not collection.music_ids:
             return
-        playlist.mark_as_played()
+        if isinstance(collection, DbStoredCollection):
+            collection.mark_as_played()
 
         if self.playlist_view.proxy_model.sortRole() == SortRole.PLAYED.value:
             self.playlist_view.proxy_model.invalidate()
 
-        self.core.current_collection = playlist
-        self.play_music(playlist.music_ids, playlist_index)
+        self.play_music(collection.music_ids, collection_index)
 
     @Slot()
     def play_music(self, music_indices: tuple[int, ...], list_index: int):
@@ -261,7 +267,7 @@ class MainWindow(QMainWindow):
         playlist = self.playlist_view.item_at_index(proxy_index, is_source=False).collection
         if playlist.is_folder:
             raise NotImplementedError
-        self.shared_signals.play_playlist_signal.emit(playlist, 0)
+        self.shared_signals.play_collection_signal.emit(playlist, 0)
 
     @Slot()
     def create(
@@ -279,7 +285,7 @@ class MainWindow(QMainWindow):
         else:
             default_model_root_item = invis_root
             parent_id = -1
-        collection = DbCollection(
+        collection = DbStoredCollection(
             _id=-1,
             _name=name,
             _collection_type=mode,
@@ -311,7 +317,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     @profile
-    def add_items_to_collection(self, music_db_indices: Sequence[int], playlist: DbCollection):
+    def add_items_to_collection(self, music_db_indices: Sequence[int], playlist: DbStoredCollection):
         playlist.add_music_ids(music_db_indices)
 
         print("adds")
@@ -322,7 +328,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def remove_items_from_playlist(self, item_indices: tuple[int, ...]):
         playlist = self.library.collection
-        assert isinstance(playlist, DbCollection)
+        assert isinstance(playlist, DbStoredCollection)
         playlist.remove_music_ids(item_indices)
         self.library.load_playlist(playlist)
         self.playlist_view.refresh_collection(playlist, SortRole.UPDATED)
@@ -339,7 +345,7 @@ class MainWindow(QMainWindow):
             rows = [index.row()]
         else:
             rows = [i.row() for i in row_indices]
-        selected_song_indices = sorted(table_view.model_.get_music_id(row) for row in rows)
+        selected_song_indices = sorted(table_view.model().get_music_id(row) for row in rows)
         menu = QMenu(self)
 
         # Add to queue
@@ -353,11 +359,14 @@ class MainWindow(QMainWindow):
         if self.library.collection:
             # Remove from current playlist
             remove_from_curr_playlist_action = QAction("Remove from this playlist", menu)
-            remove_from_curr_playlist_action.triggered.connect(partial(self.remove_items_from_playlist, rows))
+            remove_from_curr_playlist_action.triggered.connect(
+                partial(self.remove_items_from_playlist, tuple(selected_song_indices))
+            )
             menu.addSeparator()
             menu.addAction(remove_from_curr_playlist_action)
 
         if len(selected_song_indices) == 1:
+            print(selected_song_indices)
             selected_music = DbMusic.from_db(selected_song_indices[0])
             menu.addSeparator()
 

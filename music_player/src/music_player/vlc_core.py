@@ -36,7 +36,7 @@ class VLCCore:
 
         self.list_player: MediaListPlayer = self.instance.media_list_player_new()
 
-        self.current_collection: DbCollection = DbCollection.from_db()
+        self.current_collection: DbCollection | None = None
         self.media_list: MediaList = self.instance.media_list_new()
         self.db_indices: list[int] = []
         self.list_indices: list[int] = []

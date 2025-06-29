@@ -50,7 +50,7 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import AddToQueueAction, NewFolderAction, NewPlaylistAction
 from music_player.constants import ID_ROLE, MAX_SIDE_BAR_WIDTH
-from music_player.db_types import DbCollection, get_collections_by_parent_id
+from music_player.db_types import DbStoredCollection, get_collections_by_parent_id
 from music_player.signals import SharedSignals
 from music_player.utils import get_colored_pixmap
 from music_player.view_types import LibraryTableView, PlaylistTreeView
@@ -87,9 +87,9 @@ class TreeItemDelegate(QStyledItemDelegate):
 
 
 class TreeModelItem(QStandardItem):
-    def __init__(self, collection: DbCollection) -> None:
+    def __init__(self, collection: DbStoredCollection) -> None:
         super().__init__(collection.name)
-        self.collection: DbCollection = collection
+        self.collection: DbStoredCollection = collection
 
         font = QFont()
         font.setPointSize(14)
@@ -241,8 +241,8 @@ class PlaylistTree(PlaylistTreeView):
                     self.model().mapToSource(source_index), self.model().mapToSource(drop_index)
                 )
             else:
-                music_ids = cast(DbCollection, self.model().data_(source_index, self.collection_role)).music_ids
-                dest_playlist = cast(DbCollection, self.model().data_(drop_index, self.collection_role))
+                music_ids = cast(DbStoredCollection, self.model().data_(source_index, self.collection_role)).music_ids
+                dest_playlist = cast(DbStoredCollection, self.model().data_(drop_index, self.collection_role))
                 self._signals.add_to_playlist_signal.emit(music_ids, dest_playlist)
         else:
             if event.proposedAction() != Qt.DropAction.CopyAction:
@@ -511,7 +511,7 @@ class PlaylistTreeWidget(QWidget):
 
         if item.collection.is_folder:
 
-            def get_recursive_children(parent_id: int) -> Iterator[DbCollection]:
+            def get_recursive_children(parent_id: int) -> Iterator[DbStoredCollection]:
                 for collection in get_collections_by_parent_id().get(parent_id, []):
                     if collection.is_folder:
                         yield from get_recursive_children(collection.id)
@@ -605,7 +605,7 @@ class PlaylistTreeWidget(QWidget):
         _add_children_to_item(self.model_.invisibleRootItem(), -1)
         self._update_flattened_model()  # TODO PASS ROOT ITEM TO MAKE THINGS QUICKER
 
-    def get_model_item(self, collection: DbCollection) -> TreeModelItem:
+    def get_model_item(self, collection: DbStoredCollection) -> TreeModelItem:
         return next(
             tree_model_item
             for tree_model_item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=True)
@@ -613,7 +613,7 @@ class PlaylistTreeWidget(QWidget):
         )
 
     @profile
-    def refresh_collection(self, collection: DbCollection, affected_sort_role: SortRole):
+    def refresh_collection(self, collection: DbStoredCollection, affected_sort_role: SortRole):
         item = self.get_model_item(collection)
         item.collection = collection
         item.update_icon()

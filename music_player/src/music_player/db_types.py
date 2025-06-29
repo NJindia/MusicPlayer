@@ -31,12 +31,8 @@ WHERE collection_id = %s;
 """
 
 
-def get_album_pixmap_key_base(album_id: int) -> str:
-    return f"album-{album_id}"
-
-
-@dataclass
-class DbBase(ABC):
+@dataclass(eq=False)
+class DbCollection(ABC):
     _id: int
     _name: str
     _collection_type: CollectionType
@@ -47,6 +43,11 @@ class DbBase(ABC):
     def __post_init__(self):
         assert self._id != ""
         assert self._name != ""
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, DbCollection):
+            return self.id == other.id
+        return False
 
     @property
     def id(self) -> int:
@@ -74,11 +75,11 @@ class DbBase(ABC):
 
     @classmethod
     @abstractmethod
-    def from_db(cls, db_id: int) -> "DbBase": ...
+    def from_db(cls, db_id: int) -> "DbCollection": ...
 
 
-@dataclass  # (frozen=True)
-class DbArtist(DbBase):
+@dataclass(eq=False)
+class DbArtist(DbCollection):
     @classmethod
     def from_db(cls, db_id: int) -> "DbArtist":
         query = """
@@ -98,8 +99,8 @@ class DbArtist(DbBase):
         )
 
 
-@dataclass  # (frozen=True)
-class DbAlbum(DbBase):
+@dataclass(eq=False)
+class DbAlbum(DbCollection):
     release_date: str
 
     @classmethod
@@ -129,10 +130,10 @@ class DbAlbum(DbBase):
 collection_query = """
 SELECT
     c.*,
-    ARRAY_AGG(cc.music_id) as music_ids,
-    ARRAY_AGG(cc.added_on) as added_on,
-    ARRAY_AGG(m.album_id) as album_ids,
-    ARRAY_AGG(a.img_path) as img_paths
+    ARRAY_REMOVE(ARRAY_AGG(cc.music_id ORDER BY cc.sort_order DESC), NULL) as music_ids,
+    ARRAY_REMOVE(ARRAY_AGG(cc.added_on ORDER BY cc.sort_order DESC), NULL) as added_on,
+    ARRAY_REMOVE(ARRAY_AGG(m.album_id ORDER BY cc.sort_order DESC), NULL) as album_ids,
+    ARRAY_REMOVE(ARRAY_AGG(a.img_path ORDER BY cc.sort_order DESC), NULL) as img_paths
 FROM collections c
 LEFT JOIN collection_children cc USING (collection_id)
 LEFT JOIN music m USING (music_id)
@@ -142,8 +143,8 @@ GROUP BY c.collection_id
 """
 
 
-@dataclass(kw_only=True)
-class DbCollection(DbBase):
+@dataclass(kw_only=True, eq=False)
+class DbStoredCollection(DbCollection):
     _parent_id: int
     _created: datetime
     _last_updated: datetime
@@ -166,12 +167,12 @@ class DbCollection(DbBase):
     #     raise ValueError
 
     @classmethod
-    def from_db(cls, db_id: int = 1) -> "DbCollection":
+    def from_db(cls, db_id: int = 1) -> "DbStoredCollection":
         row = get_database_manager().get_row_k(collection_query, collectionId=db_id)
         return cls.from_db_row(row)
 
     @classmethod
-    def from_db_row(cls, db_row: RealDictRow) -> "DbCollection":
+    def from_db_row(cls, db_row: RealDictRow) -> "DbStoredCollection":
         return cls(
             _id=db_row["collection_id"],
             _name=db_row["name"],
@@ -277,7 +278,7 @@ class DbCollection(DbBase):
         self._album_img_path_counter += Counter(m.img_path for m in music if m.img_path is not None)
 
         add_music_id_sql = "INSERT INTO collection_children (collection_id, music_id, added_on) VALUES %s"
-        args = [(self.id, music_id, added_on) for music_id in music_ids]
+        args = [(self.id, music_id, added_on) for music_id in reversed(music_ids)]
         get_database_manager().execute_values(add_music_id_sql, args)
         self.mark_as_updated()
 
@@ -347,12 +348,8 @@ class DbCollection(DbBase):
     def is_folder(self) -> bool:
         return self.collection_type == "folder"
 
-    @cached_property
-    def pixmap_key_base(self) -> str:
-        return f"playlist-{self.id}"
 
-
-T = TypeVar("T", bound=DbCollection)
+T = TypeVar("T", bound=DbStoredCollection)
 
 
 @cache
@@ -368,12 +365,13 @@ def _get_folder_pixmap(height: int) -> QPixmap:
 
 
 @cache
-def get_collections_by_parent_id() -> dict[int, list[DbCollection]]:
+def get_collections_by_parent_id() -> dict[int, list[DbStoredCollection]]:
     collections = [
-        DbCollection.from_db_row(row) for row in get_database_manager().get_rows_k(collection_query, collectionId=None)
+        DbStoredCollection.from_db_row(row)
+        for row in get_database_manager().get_rows_k(collection_query, collectionId=None)
     ]
 
-    def parent_key(collection: DbCollection) -> int:
+    def parent_key(collection: DbStoredCollection) -> int:
         return collection.parent_id
 
     return {k: list(v) for k, v in groupby(sorted(collections, key=parent_key), key=parent_key)}
@@ -419,10 +417,6 @@ class DbMusic:
         query = "SELECT * FROM music_view WHERE music_id = %s ORDER BY (music_id, artist_order)"  # TODO ARRAY_AGG
         rows = get_database_manager().get_rows(query, (music_id,))
         return DbMusic.from_db_rows(rows)
-
-    @cached_property
-    def pixmap_key_base(self) -> str:
-        return get_album_pixmap_key_base(self.album_id)
 
 
 class _DbMusicCache:

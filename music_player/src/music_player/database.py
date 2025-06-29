@@ -42,6 +42,15 @@ CREATE TABLE music (
     FOREIGN KEY (album_id) REFERENCES albums(album_id)
 );
 
+CREATE TABLE music_artists (
+	music_id INT NOT NULL,
+    artist_id INT NOT NULL,
+    sort_order INT NOT NULL,
+    PRIMARY KEY (music_id, artist_id),
+    FOREIGN KEY (music_id) REFERENCES music(music_id),
+	FOREIGN KEY (artist_id) REFERENCES artists(artist_id)
+);
+
 DROP MATERIALIZED VIEW IF EXISTS library_music_view;
 CREATE MATERIALIZED VIEW library_music_view AS
 SELECT
@@ -62,14 +71,7 @@ CREATE INDEX idx_library_search_gin ON library_music_view
 USING GIN (search_vector gin_trgm_ops);
 REFRESH MATERIALIZED VIEW CONCURRENTLY library_music_view;
 
-CREATE TABLE music_artists (
-	music_id INT NOT NULL,
-    artist_id INT NOT NULL,
-    sort_order INT NOT NULL,
-    PRIMARY KEY (music_id, artist_id),
-    FOREIGN KEY (music_id) REFERENCES music(music_id),
-	FOREIGN KEY (artist_id) REFERENCES artists(artist_id)
-);
+
 CREATE TABLE collections (
     collection_id SERIAL PRIMARY KEY,
     type VARCHAR(25) NOT NULL,
@@ -86,6 +88,7 @@ CREATE TABLE collection_children (
     collection_id INT NOT NULL,
     music_id INT NOT NULL,
     added_on TIMESTAMPTZ NOT NULL,
+    sort_order SERIAL,
     PRIMARY KEY (collection_id, music_id),
     FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE CASCADE,
     FOREIGN KEY (music_id) REFERENCES music(music_id)

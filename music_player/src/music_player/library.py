@@ -53,7 +53,7 @@ from music_player.common_gui import (
 )
 from music_player.constants import ID_ROLE
 from music_player.database import PATH_TO_IMGS, get_database_manager
-from music_player.db_types import DbAlbum, DbArtist, DbBase, DbCollection
+from music_player.db_types import DbAlbum, DbArtist, DbCollection, DbStoredCollection
 from music_player.signals import SharedSignals
 from music_player.utils import (
     datetime_to_age_string,
@@ -99,7 +99,7 @@ def _get_total_length_string(total_timestamp: float) -> str:
     return " ".join(components)
 
 
-def postgres_array_agg_to_list(agg: str) -> list[str]:
+def pg_array_agg_to_list(agg: str) -> list[str]:
     return [r.strip('"') for r in agg[1:-1].split(",")]  # TODO
 
 
@@ -155,21 +155,13 @@ class SongItemDelegate(QStyledItemDelegate):
         painter.restore()
 
 
-class ProxyModel(QSortFilterProxyModel):
-    @override
-    def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
-        return 5
-
-
 class MusicTableModel(QSqlQueryModel):
     re_pattern = re.compile(r"[\W_]+")
-    _base_query = "SELECT * FROM library_music_view"
 
     def __init__(self, parent: "MusicLibraryTable"):
         super().__init__(parent)
         get_database_manager().get_qt_connection()
-        self.base_query = self._base_query
-        self.setQuery(self.base_query)
+        self.setQuery("SELECT * FROM library_music_view")
 
         self.music_id_field_idx = self.record().indexOf("music_id")
         self.music_name_field_idx = self.record().indexOf("music_name")
@@ -205,7 +197,7 @@ class MusicTableModel(QSqlQueryModel):
         if role in {Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole}:
             res = super().data(self.index(index.row(), self.record().indexOf(db_field)), role)
             if column_name == "Artists":
-                return postgres_array_agg_to_list(res)
+                return pg_array_agg_to_list(res)
             if column_name == "Date Added":
                 return datetime_to_age_string(datetime.fromtimestamp(res.toSecsSinceEpoch(), tz=UTC))
             if column_name == "Duration":
@@ -217,7 +209,7 @@ class MusicTableModel(QSqlQueryModel):
             data = super().data(self.index(index.row(), self.record().indexOf(db_field)), Qt.ItemDataRole.DisplayRole)
             if column_name == "Date Added":
                 return datetime_to_date_str(datetime.fromtimestamp(data.toSecsSinceEpoch(), tz=UTC))
-            text = ", ".join(postgres_array_agg_to_list(data)) if column_name == "Artists" else data
+            text = ", ".join(pg_array_agg_to_list(data)) if column_name == "Artists" else data
             column_width = self.view.columnWidth(index.column()) - (ROW_HEIGHT if index.column() == 0 else PADDING * 2)
             if self.view.fontMetrics().horizontalAdvance(text) > column_width:
                 return text
@@ -262,9 +254,10 @@ class MusicTableModel(QSqlQueryModel):
         col = index.column()
         match col:
             case 1:  # Artists
-                artist_names = super().data(self.index(index.row(), self.artist_names_field_idx))
-                artist_idx = artist_names.index(original_text)
-                return super().data(self.index(index.row(), self.artist_ids_field_idx))[artist_idx]
+                artist_names = self.data(self.index(index.row(), ColIndex.ARTISTS.value))
+                artist_idx: int = artist_names.index(original_text)
+                artist_ids = pg_array_agg_to_list(super().data(self.index(index.row(), self.artist_ids_field_idx)))
+                return int(artist_ids[artist_idx])
             case 2:  # Album
                 return super().data(self.index(index.row(), self.album_id_field_idx))
             case _:
@@ -272,6 +265,48 @@ class MusicTableModel(QSqlQueryModel):
 
     def get_total_timestamp(self):
         return sum([super().data(self.index(row, self.duration_field_idx)) for row in range(self.rowCount())])
+
+
+class ProxyModel(QSortFilterProxyModel):
+    def __init__(self):
+        super().__init__()
+        self._music_ids: tuple[int, ...] = ()
+
+    @override
+    def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
+        return 5
+
+    @override
+    def rowCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
+        return len(self._music_ids)
+
+    @override
+    def sourceModel(self, /) -> MusicTableModel:
+        return cast(MusicTableModel, super().sourceModel())
+
+    @override
+    def invalidateFilter(self, /):
+        self.layoutAboutToBeChanged.emit()
+        super().invalidateFilter()
+        self.layoutChanged.emit()
+
+    @override
+    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex, /):
+        if not self._music_ids:
+            return False
+        source_model = self.sourceModel()
+        data = source_model.data(source_model.index(source_row, 0, source_parent), ID_ROLE)
+        assert data
+        return data in self._music_ids
+
+    def set_music_ids(self, music_ids: tuple[int, ...]):
+        if music_ids != self._music_ids:
+            self._music_ids = music_ids
+            self.invalidateFilter()
+
+    def get_music_id(self, row: int):
+        source_model_index = self.mapToSource(self.index(row, 0))
+        return self.sourceModel().get_music_id(source_model_index.row())
 
 
 class TextLabel(QLabel):
@@ -383,7 +418,7 @@ class LibraryHeaderWidget(QWidget):
         header_meta_layout.addLayout(header_text_layout)
 
         self.play_pause_button = QToolButton()
-        self.play_pause_button.setIcon(get_play_button_icon())
+        self.set_play_pause_button_state(is_play_button=True)
 
         play_shuffled_button = QToolButton()
         play_shuffled_button.setIcon(get_shuffle_button_icon())
@@ -415,9 +450,13 @@ class LibraryHeaderWidget(QWidget):
         header_layout.addLayout(header_interactive_layout)
         self.setLayout(header_layout)
 
+    def set_play_pause_button_state(self, *, is_play_button: bool):
+        self.play_pause_button.setProperty("is_play_button", is_play_button)
+        self.play_pause_button.setIcon(get_play_button_icon() if is_play_button else get_pause_button_icon())
+
 
 class MusicLibraryWidget(QWidget):
-    def __init__(self, collection: DbBase, shared_signals: SharedSignals, core: VLCCore):
+    def __init__(self, shared_signals: SharedSignals, core: VLCCore):
         super().__init__()
         self.setStyleSheet("QWidget { margin: 0px; border: none; }")
         self.library_id: str = ""
@@ -432,16 +471,8 @@ class MusicLibraryWidget(QWidget):
         self.table_view = MusicLibraryTable(shared_signals, self)
         self.header_widget.play_pause_button.clicked.connect(self.play_button_clicked)
 
-        self.collection: DbBase | None
-        if collection.collection_type == "playlist":
-            assert isinstance(collection, DbCollection)
-            self.load_playlist(collection)
-        elif collection.collection_type == "album":
-            self.load_album()
-        elif collection.collection_type == "artist":
-            self.load_artist()
-        else:
-            self.load_nothing()
+        self.collection: DbCollection | None = None
+        self.load_playlist(DbStoredCollection.from_db())
 
         layout = QVBoxLayout()
         layout.addWidget(self.header_widget)
@@ -450,15 +481,20 @@ class MusicLibraryWidget(QWidget):
         self.setLayout(layout)
 
     def play_button_clicked(self):
-        self.table_view.song_clicked.emit(0)
-        self.header_widget.play_pause_button.setIcon(get_pause_button_icon())
+        if self.header_widget.play_pause_button.property("is_play_button"):
+            if self.core.current_collection == self.collection:
+                self.core.media_player.play()
+            else:
+                self.table_view.song_clicked.emit(0)
+        else:
+            self.core.media_player.pause()
 
     @Slot()
     def play_library(self) -> None:
         self.table_view.song_clicked.emit(0)
 
     @Slot()
-    def delete_collection(self, collection: DbCollection):
+    def delete_collection(self, collection: DbStoredCollection):
         if collection == self.collection:
             self.load_nothing()
         collection.delete()
@@ -489,20 +525,11 @@ class MusicLibraryWidget(QWidget):
                 self.table_view.showRow(row)
         self.table_view.adjust_height_to_content()
 
-    def update_header_play_button(self):
-        if self.collection is None:
-            print("NOT IMPLEMENTED")
-        self.header_widget.play_pause_button.setIcon(
-            get_pause_button_icon()
-            if self.collection == self.core.current_collection and self.core.media_player.is_playing()
-            else get_play_button_icon()
-        )
-
     @profile
     def _load(
         self,
         *,
-        new_collection: DbBase | None,
+        new_collection: DbCollection | None,
         img_pixmap: QPixmap,
         header_label_type: str,
         header_label_title: str,
@@ -527,17 +554,16 @@ class MusicLibraryWidget(QWidget):
                 self.table_view.hide_date_added()
 
         self.collection = new_collection
-        self.update_header_play_button()
+        if self.collection is None:
+            print("NOT IMPLEMENTED")
+        is_play_button = self.collection != self.core.current_collection or not self.core.media_player.is_playing()
+        self.header_widget.set_play_pause_button_state(is_play_button=is_play_button)
 
-        model = self.table_view.model_
-        for row in range(model.rowCount()):
-            if new_collection is not None and model.get_music_id(row) in new_collection.music_ids:
-                self.table_view.showRow(row)
-            else:
-                self.table_view.hideRow(row)
+        model = self.table_view.model()
+        model.set_music_ids(() if new_collection is None else new_collection.music_ids)
         if not no_meta:
             num_tracks = model.rowCount()
-            total_timestamp = model.get_total_timestamp()
+            total_timestamp = self.table_view.model_.get_total_timestamp()  # TODO FIX THIS TO MODEL()
             meta_text = f"{num_tracks} Track{'s'[: num_tracks ^ 1]}, {_get_total_length_string(total_timestamp)}"
         else:
             meta_text = ""
@@ -555,7 +581,7 @@ class MusicLibraryWidget(QWidget):
         )
 
     @profile
-    def load_playlist(self, playlist: DbCollection):
+    def load_playlist(self, playlist: DbStoredCollection):
         t = datetime.now(tz=UTC)
         self.library_id = str(playlist.id)
 
@@ -569,7 +595,7 @@ class MusicLibraryWidget(QWidget):
         )
         print("LOAD END", (datetime.now(tz=UTC) - t).microseconds / 1000)
 
-    @Slot()
+    @Slot(int)
     def load_artist(self, artist_id: int):
         artist = DbArtist.from_db(artist_id)
         img_size = self.header_widget.header_img_size
@@ -725,7 +751,7 @@ class MusicLibraryTable(LibraryTableView):
         proxy_model = ProxyModel()
         proxy_model.setSourceModel(self.model_)
         self.setModel(proxy_model)
-        self.model_.modelReset.connect(self.adjust_height_to_content)
+        self.model().layoutChanged.connect(self.adjust_height_to_content)
 
         self.horizontalHeader().setSectionResizeMode(ColIndex.DATE_ADDED.value, QHeaderView.ResizeMode.Fixed)
         self.horizontalHeader().setSectionResizeMode(ColIndex.DURATION.value, QHeaderView.ResizeMode.Fixed)
@@ -735,7 +761,6 @@ class MusicLibraryTable(LibraryTableView):
         self.hovered_data: int | None = None
 
         self.viewport().installEventFilter(self)
-        self.adjust_height_to_content()
 
     @override
     def startDrag(self, supportedActions: Qt.DropAction, /):
@@ -790,27 +815,27 @@ class MusicLibraryTable(LibraryTableView):
             dest_playlist = cast(MusicLibraryWidget, self.parent()).collection
             assert dest_playlist is not None
             src_collection = cast(
-                DbCollection, source.model().data(source.selectedIndexes()[0], PlaylistTreeView.collection_role)
+                DbStoredCollection, source.model().data(source.selectedIndexes()[0], PlaylistTreeView.collection_role)
             )
             self._signals.add_to_playlist_signal.emit(src_collection.music_ids, dest_playlist)
 
     @override
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.pos()
-        index = self.indexAt(pos)
-        if not index.isValid():
+        proxy_index = self.indexAt(pos)
+        if not proxy_index.isValid():
             return
-        for rect, original_text, shown_text in self.get_text_rect_tups_for_index(index):
+        for rect, original_text, shown_text in self.get_text_rect_tups_for_index(proxy_index):
             if not text_is_buffer(shown_text) and rect.contains(pos):
                 self.hovered_text_rect = rect
-                self.hovered_data = self.model_.get_foreign_key(original_text, index)
+                self.hovered_data = self.model_.get_foreign_key(original_text, self.model().mapToSource(proxy_index))
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
                 break
         else:
             self.hovered_text_rect = QRect()
             self.hovered_data = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
-        self.viewport().update(self.visualRect(index))
+        self.viewport().update(self.visualRect(proxy_index))
         super().mouseMoveEvent(event)
 
     @override
@@ -844,6 +869,10 @@ class MusicLibraryTable(LibraryTableView):
             return True  # Event handled
         return super().eventFilter(obj, event)
 
+    @override
+    def model(self, /) -> ProxyModel:
+        return cast(ProxyModel, super().model())
+
     def get_text_rect_tups_for_index(self, index: QModelIndex | QPersistentModelIndex) -> list[tuple[QRect, str, str]]:
         column = index.column()
         index_rect = self.visualRect(index)
@@ -873,13 +902,13 @@ class MusicLibraryTable(LibraryTableView):
         return [(text_rect, original_text, text)]
 
     def adjust_height_to_content(self):
-        if self.model_.rowCount() == 0:
+        if self.model().rowCount() == 0:
             self.setMinimumHeight(self.horizontalHeader().height() + 2)
             return
         total_height = (
             2
             + self.horizontalHeader().height()
-            + sum(self.verticalHeader().sectionSize(row) for row in range(self.model_.rowCount()))
+            + sum(self.verticalHeader().sectionSize(row) for row in range(self.model().rowCount()))
         )
         self.setMinimumHeight(total_height)
 
