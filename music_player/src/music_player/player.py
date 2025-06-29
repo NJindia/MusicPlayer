@@ -352,9 +352,35 @@ class MainWindow(QMainWindow):
 
         if self.library.collection:
             # Remove from current playlist
-            remove_from_curr_playlist_action = QAction("Remove from this playlist", self)
+            remove_from_curr_playlist_action = QAction("Remove from this playlist", menu)
             remove_from_curr_playlist_action.triggered.connect(partial(self.remove_items_from_playlist, rows))
+            menu.addSeparator()
             menu.addAction(remove_from_curr_playlist_action)
+
+        if len(selected_song_indices) == 1:
+            selected_music = DbMusic.from_db(selected_song_indices[0])
+            menu.addSeparator()
+
+            def get_go_to_artist_action(_artist_id: int, _name: str = "Go to artist") -> QAction:
+                go_to_artist_action = QAction(_name, menu)
+                go_to_artist_action.triggered.connect(
+                    partial(self.shared_signals.library_load_artist_signal.emit, _artist_id)
+                )
+                return go_to_artist_action
+
+            if len(selected_music.artist_ids) == 1:
+                menu.addAction(get_go_to_artist_action(selected_music.artist_ids[0]))
+            else:
+                go_to_artist_menu = QMenu("Go to artist", menu)
+                for artist_id, artist_name in zip(selected_music.artist_ids, selected_music.artists, strict=True):
+                    go_to_artist_menu.addAction(get_go_to_artist_action(artist_id, artist_name))
+                menu.addMenu(go_to_artist_menu)
+
+            go_to_album_action = QAction("Go to album", menu)
+            go_to_album_action.triggered.connect(
+                partial(self.shared_signals.library_load_album_signal.emit, selected_music.album_id)
+            )
+            menu.addAction(go_to_album_action)
 
         menu.exec(table_view.mapToGlobal(point))  # pyright: ignore[reportUnknownMemberType]
 
