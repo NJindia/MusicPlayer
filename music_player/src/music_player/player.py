@@ -10,7 +10,7 @@ import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
 import vlc  # pyright: ignore[reportMissingTypeStubs]
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QAction, QIcon, QMouseEvent, QPixmapCache, QImageReader
+from PySide6.QtGui import QAction, QIcon, QMouseEvent, QPixmapCache
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QWidget
 from tqdm import tqdm
 
@@ -238,11 +238,11 @@ class MainWindow(QMainWindow):
         if self.library.collection is not None:
             self.shared_signals.play_playlist_signal.emit(self.library.collection, lib_index)
         else:
-            self.play_music(self.library.table_view.model_.get_visible_indices(), lib_index)
+            self.play_music(self.library.table_view.model_.get_visible_music_ids(), lib_index)
 
     @Slot()
     def play_playlist(self, playlist: DbCollection, playlist_index: int):
-        if not playlist.playlist_items:
+        if not playlist.music_ids:
             return
         playlist.mark_as_played()
 
@@ -250,7 +250,7 @@ class MainWindow(QMainWindow):
             self.playlist_view.proxy_model.invalidate()
 
         self.core.current_collection = playlist
-        self.play_music(playlist.music_ids, playlist_index)
+        self.play_music(tuple(playlist.music_ids), playlist_index)
 
     @Slot()
     def play_music(self, music_indices: tuple[int, ...], list_index: int):
@@ -367,7 +367,7 @@ class MainWindow(QMainWindow):
             rows = [index.row()]
         else:
             rows = [i.row() for i in row_indices]
-        selected_song_indices = sorted(table_view.model_.get_index(row) for row in rows)
+        selected_song_indices = sorted(table_view.model_.get_music_id(row) for row in rows)
         menu = QMenu(self)
 
         # Add to queue

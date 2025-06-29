@@ -21,6 +21,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction,
+    QDragEnterEvent,
     QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
@@ -202,6 +203,13 @@ class PlaylistTree(PlaylistTreeView):
     @override
     def model(self, /) -> PlaylistProxyModel:
         return cast(PlaylistProxyModel, super().model())
+
+    @override
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasFormat("application/x-music-ids"):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
 
     @override
     def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:

@@ -44,21 +44,25 @@ CREATE TABLE music (
     FOREIGN KEY (album_id) REFERENCES albums(album_id)
 );
 
+DROP MATERIALIZED VIEW IF EXISTS library_music_view;
 CREATE MATERIALIZED VIEW library_music_view AS
 SELECT
     m.*,
-    a.album_name,
-    a.img_path,
-    (
-        COALESCE(music_name)    || CHR(31) ||
-        COALESCE(album_name)
-    ) as search_vector
-FROM music as m JOIN albums as a USING (album_id);
-CREATE UNIQUE INDEX index ON library_music_view (music_id);
-REFRESH MATERIALIZED VIEW CONCURRENTLY library_music_view;
+    al.album_name,
+    al.img_path,
+    ARRAY_AGG(ar.artist_id) AS artist_ids,
+    ARRAY_AGG(ar.artist_name) AS artist_names,
+    (COALESCE(music_name) || CHR(31) || COALESCE(album_name)) AS search_vector
+FROM music AS m
+LEFT JOIN albums AS al USING (album_id)
+LEFT JOIN music_artists AS ma USING (music_id)
+LEFT JOIN artists AS ar USING (artist_id)
+GROUP BY m.music_id, al.album_id;
 
+CREATE UNIQUE INDEX index ON library_music_view (music_id);
 CREATE INDEX idx_library_search_gin ON library_music_view
 USING GIN (search_vector gin_trgm_ops);
+REFRESH MATERIALIZED VIEW CONCURRENTLY library_music_view;
 
 CREATE TABLE music_artists (
 	music_id INT NOT NULL,

@@ -8,28 +8,23 @@ from typing import Any, cast, override
 import numpy as np
 from line_profiler_pycharm import profile
 from PySide6.QtCore import (
+    QByteArray,
+    QDataStream,
     QEvent,
+    QIODevice,
+    QMimeData,
     QModelIndex,
     QObject,
     QPersistentModelIndex,
     QPoint,
     QRect,
+    QSize,
     QSortFilterProxyModel,
     Qt,
     Signal,
     Slot,
 )
-from PySide6.QtGui import (
-    QDragMoveEvent,
-    QDropEvent,
-    QFont,
-    QFontMetrics,
-    QIcon,
-    QMouseEvent,
-    QPainter,
-    QPixmap,
-    QResizeEvent,
-)
+from PySide6.QtGui import QDrag, QDragMoveEvent, QDropEvent, QFont, QIcon, QMouseEvent, QPainter, QPixmap, QResizeEvent
 from PySide6.QtSql import QSqlQueryModel
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -85,7 +80,7 @@ class ColIndex(Enum):
 
 COLUMN_MAP_BY_IDX = {
     0: ("Title", "music_name"),
-    1: ("Artists", "artists"),  # This is a custom-handled column
+    1: ("Artists", "artist_names"),  # This is a custom-handled column
     2: ("Album", "album_name"),  # This is a relational column
     3: ("Date Added", "downloaded_on"),  # TODO
     4: ("Duration", "duration"),
@@ -102,6 +97,10 @@ def _get_total_length_string(total_timestamp: float) -> str:
         components.insert(0, f"{num} {item}{'s'[: num ^ 1]}")
         total_timestamp = total_timestamp // 60
     return " ".join(components)
+
+
+def postgres_array_agg_to_list(agg: str) -> list[str]:
+    return [r.strip('"') for r in agg[1:-1].split(",")]  # TODO
 
 
 class AlbumItemDelegate(QStyledItemDelegate):
@@ -180,6 +179,8 @@ class MusicTableModel(QSqlQueryModel):
 
         self.music_id_field_idx = self.record().indexOf("music_id")
         self.music_name_field_idx = self.record().indexOf("music_name")
+        self.artist_ids_field_idx = self.record().indexOf("artist_ids")
+        self.artist_names_field_idx = self.record().indexOf("artist_names")
         self.album_name_field_idx = self.record().indexOf("album_name")
         self.album_id_field_idx = self.record().indexOf("album_id")
         self.duration_field_idx = self.record().indexOf("duration")
@@ -208,9 +209,9 @@ class MusicTableModel(QSqlQueryModel):
             return super().data(self.index(index.row(), self.music_id_field_idx))
 
         if role in {Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole}:
-            if column_name == "Artists":
-                return ["FAKE DATA", "2"]
             res = super().data(self.index(index.row(), self.record().indexOf(db_field)), role)
+            if column_name == "Artists":
+                return postgres_array_agg_to_list(res)
             if column_name == "Date Added":
                 return datetime_to_age_string(datetime.fromtimestamp(res.toSecsSinceEpoch(), tz=UTC))
             if column_name == "Duration":
@@ -222,9 +223,9 @@ class MusicTableModel(QSqlQueryModel):
             data = super().data(self.index(index.row(), self.record().indexOf(db_field)), Qt.ItemDataRole.DisplayRole)
             if column_name == "Date Added":
                 return datetime_to_date_str(datetime.fromtimestamp(data.toSecsSinceEpoch(), tz=UTC))
-            text = ", ".join(data) if index.column() == 1 else data
+            text = ", ".join(postgres_array_agg_to_list(data)) if column_name == "Artists" else data
             column_width = self.view.columnWidth(index.column()) - (ROW_HEIGHT if index.column() == 0 else PADDING * 2)
-            if self.view.font_metrics.horizontalAdvance(text) > column_width:
+            if self.view.fontMetrics().horizontalAdvance(text) > column_width:
                 return text
         if role == Qt.ItemDataRole.DecorationRole and column_name == "Title":
             img_path = super().data(self.index(index.row(), self.album_img_path_field_idx))
@@ -234,25 +235,43 @@ class MusicTableModel(QSqlQueryModel):
         return None
 
     @override
+    def mimeData(self, indexes: Sequence[QModelIndex], /):
+        last_row = -1
+        music_id_arr = QByteArray()
+        stream = QDataStream(music_id_arr, QIODevice.OpenModeFlag.WriteOnly)
+        for index in indexes:
+            row = index.row()
+            if last_row != row:
+                stream.writeInt32(self.get_music_id(row))
+            last_row = row
+
+        data = QMimeData()
+        data.setData("application/x-music-ids", music_id_arr)
+        return data
+
+    @override
     def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
         """Returns flags for given index."""
         return super().flags(index) | Qt.ItemFlag.ItemIsDragEnabled | ~Qt.ItemFlag.ItemIsEditable
 
     @cache
-    def get_index(self, row: int) -> int:
+    def get_music_id(self, row: int) -> int:
         return super().data(self.index(row, self.music_id_field_idx))
 
-    def get_visible_indices(self):
+    def get_visible_music_ids(self):
         return [
-            self.get_index(row)
+            self.get_music_id(row)
             for row in range(self.rowCount())  # TODO IF HIDDEN?
         ]
 
-    def get_foreign_key(self, index: QModelIndex | QPersistentModelIndex) -> int | None:
+    def get_foreign_key(self, original_text: str, index: QModelIndex | QPersistentModelIndex) -> int | None:
         col = index.column()
         match col:
             case 1:  # Artists
-                raise NotImplementedError
+                artist_names = super().data(self.index(index.row(), self.artist_names_field_idx))
+                artist_idx = artist_names.index(original_text)
+                print(original_text)
+                return super().data(self.index(index.row(), self.artist_ids_field_idx))[artist_idx]
             case 2:  # Album
                 return super().data(self.index(index.row(), self.album_id_field_idx))
             case _:
@@ -520,7 +539,7 @@ class MusicLibraryWidget(QWidget):
 
         model = self.table_view.model_
         for row in range(model.rowCount()):
-            if model.get_index(row) in music_ids_to_load:
+            if model.get_music_id(row) in music_ids_to_load:
                 self.table_view.showRow(row)
             else:
                 self.table_view.hideRow(row)
@@ -704,7 +723,6 @@ class MusicLibraryTable(LibraryTableView):
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.setFont(QFont())
-        self.font_metrics = QFontMetrics(self.font())
 
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
@@ -732,8 +750,34 @@ class MusicLibraryTable(LibraryTableView):
         self.adjust_height_to_content()
 
     def startDrag(self, supportedActions, /):
-        print("STARTED")
-        super().startDrag(supportedActions)
+        indices = self.selectedIndexes()
+        row_count = len({i.row() for i in indices})
+        if row_count <= 1:
+            model = self.model_
+            title = model.data(model.index(indices[0].row(), model.music_name_field_idx))
+            artists = model.data(model.index(indices[0].row(), model.artist_names_field_idx))
+            text = f"{title} - {', '.join(artists)}"
+        else:
+            text = f"{row_count} items"
+
+        drag = QDrag(self)
+        drag.setHotSpot(QPoint(-20, 0))
+        font_metrics = self.fontMetrics()
+        size = QSize(font_metrics.horizontalAdvance(text) + 2, font_metrics.height() + 2)
+
+        pixmap = QPixmap(size)
+        painter = QPainter(pixmap)
+        painter.setPen(Qt.GlobalColor.black)
+        painter.setBrush(Qt.GlobalColor.white)
+
+        rect = QRect(0, 0, size.width(), size.height())
+        painter.drawRect(rect)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, text)
+        painter.end()
+
+        drag.setPixmap(pixmap)
+        drag.setMimeData(self.model().mimeData(indices))
+        drag.exec(supportedActions)
 
     @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
@@ -765,10 +809,10 @@ class MusicLibraryTable(LibraryTableView):
         index = self.indexAt(pos)
         if not index.isValid():
             return
-        for rect, _, shown_text in self.get_text_rect_tups_for_index(index):
+        for rect, original_text, shown_text in self.get_text_rect_tups_for_index(index):
             if not text_is_buffer(shown_text) and rect.contains(pos):
                 self.hovered_text_rect = rect
-                self.hovered_data = self.model_.get_foreign_key(index)
+                self.hovered_data = self.model_.get_foreign_key(original_text, index)
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
                 break
         else:
