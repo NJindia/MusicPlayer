@@ -43,7 +43,7 @@ class QueueSignal(QObject):
 class QueueEntryGraphicsItem(QGraphicsItem):
     @profile
     def __init__(
-        self, music: DbMusic, shared_signals: SharedSignals, *, manually_added: bool = False, start_width: int = 0
+        self, music: DbMusic, shared_signals: SharedSignals, start_width: int, *, manually_added: bool = False
     ) -> None:
         super().__init__()
         self.manually_added = manually_added
@@ -214,7 +214,9 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         self.queue_entries = []
         self.scene().clear()
         for i, db_index in enumerate(self.core.db_indices):
-            qe = QueueEntryGraphicsItem(get_db_music_cache().get(db_index), self.shared_signals)
+            qe = QueueEntryGraphicsItem(
+                get_db_music_cache().get(db_index), self.shared_signals, self.viewport().width()
+            )
             qe.signal.song_clicked.connect(self.play_queue_song)
             self.scene().addItem(qe)
 

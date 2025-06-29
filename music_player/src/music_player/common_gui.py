@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import cache, partial
 from typing import Literal
 
@@ -107,7 +107,7 @@ class _CreateDialog(QDialog):
         signals: SharedSignals,
         mode: CreateMode,
         move_from_index: QModelIndex | None = None,
-        music_ids_to_add: list[int] | None = None,
+        music_ids_to_add: Sequence[int] | None = None,
     ) -> None:
         super().__init__(parent)
         self.source_root_index = source_root_index
@@ -158,7 +158,7 @@ class _CreateDialog(QDialog):
     def update_confirm_button(self, text: str) -> None:
         self.confirm_button.setEnabled(bool(text))
 
-    def create_clicked(self, move_from_index: QModelIndex | None, music_ids_to_add: list[int] | None) -> None:
+    def create_clicked(self, move_from_index: QModelIndex | None, music_ids_to_add: Sequence[int] | None) -> None:
         base_args = self.name.text(), self.source_root_index
         match self.mode:
             case "playlist":
@@ -179,7 +179,7 @@ class NewPlaylistAction(QAction):
         main_window: QMainWindow,
         source_root_index: QModelIndex,
         signals: SharedSignals,
-        music_ids_to_add: list[int] | None = None,
+        music_ids_to_add: Sequence[int] | None = None,
     ) -> None:
         super().__init__("New playlist", parent)
         self.triggered.connect(

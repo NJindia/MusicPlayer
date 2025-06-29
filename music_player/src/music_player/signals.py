@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from PySide6.QtCore import QModelIndex, QObject, Signal
 
 from music_player.db_types import DbCollection
@@ -5,7 +7,7 @@ from music_player.db_types import DbCollection
 
 class SharedSignals(QObject):
     add_to_queue_signal = Signal(list)  # (list[int) (music_ids)
-    add_to_playlist_signal = Signal(list, DbCollection)  # (list[int], DbCollection) (music_ids, ...)
+    add_to_playlist_signal = Signal(Sequence[int], DbCollection)  # (Sequence[int], DbCollection) (music_ids, ...)
     create_playlist_signal = Signal(str, QModelIndex, list)  # (name, src_model_root_index, music_ids)
     create_folder_signal = Signal(str, QModelIndex, QModelIndex)  # (name, src_model_root_index, move_from_idx)
     library_load_artist_signal = Signal(int)  # (artist_id)

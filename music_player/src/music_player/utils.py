@@ -60,7 +60,7 @@ def get_pixmap(source: Path | None, height: int | None) -> QPixmap:
     pixmap = QPixmap()
     key = f"{source!s}_{height}"
     if not QPixmapCache.find(key, pixmap):
-        print(f"key: {key}, {QPixmapCache.cacheLimit()}")
+        # print(f"key: {key}, {QPixmapCache.cacheLimit()}")
         pixmap = QPixmap(source)
         if height is not None:
             pixmap = pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)

@@ -1,4 +1,4 @@
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from enum import Enum
 from functools import partial
@@ -439,8 +439,7 @@ class PlaylistTreeWidget(QWidget):
         assert child is not None
         dest_parent.appendRow(child)
 
-        src_item.collection._parent_id = dest_parent.collection.id if isinstance(dest_parent, TreeModelItem) else -1
-        src_item.collection.save()
+        src_item.collection.parent_id = dest_parent.collection.id if isinstance(dest_parent, TreeModelItem) else -1
 
     def update_sort_button(self):
         sort_role = SortRole(self.proxy_model.sortRole())
@@ -536,8 +535,7 @@ class PlaylistTreeWidget(QWidget):
             playlist = item.collection
             if playlist is None:
                 raise NotImplementedError
-            playlist.name = item.text()
-            playlist.save()
+            playlist.rename(item.text())
 
             if self.proxy_model.filterRegularExpression().pattern():
                 self.model_.blockSignals(True)  # noqa: FBT003
@@ -576,7 +574,7 @@ class PlaylistTreeWidget(QWidget):
             else:
                 menu.addSeparator()
 
-            menu.addMenu(AddToPlaylistMenu(list(item.collection.music_ids), self.signals, menu, main_window, self))
+            menu.addMenu(AddToPlaylistMenu(item.collection.music_ids, self.signals, menu, main_window, self))
 
         args = menu, main_window, source_root_index, self.signals
         menu.addSeparator()
@@ -731,7 +729,7 @@ class MoveToFolderMenu(QMenu):
 class AddToPlaylistMenu(QMenu):
     def __init__(
         self,
-        selected_music_ids: list[int],
+        selected_music_ids: Sequence[int],
         shared_signals: SharedSignals,
         parent_menu: QMenu,
         parent: QMainWindow,
@@ -765,7 +763,7 @@ class AddToPlaylistMenu(QMenu):
 
         self.addActions([widget_action, new_playlist_action])
 
-    def add_items_to_playlist_at_index(self, selected_music_ids: list[int], proxy_index: QModelIndex):
+    def add_items_to_playlist_at_index(self, selected_music_ids: Sequence[int], proxy_index: QModelIndex):
         playlist = self.playlist_tree_widget.item_at_index(proxy_index, is_source=False).collection
         self.signals.add_to_playlist_signal.emit(selected_music_ids, playlist)
         self.parent_menu.close()

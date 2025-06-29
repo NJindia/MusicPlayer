@@ -1,6 +1,7 @@
 # pyright: strict
 import sys
 from collections import Counter
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from functools import partial
 from typing import cast
@@ -124,8 +125,7 @@ class MainWindow(QMainWindow):
             hist_entry.signal.song_clicked.connect(partial(self.play_history_entry, hist_entry))
             self.history.insert_queue_entries(0, [hist_entry])
 
-    def media_player_playing_callback(self, event: vlc.Event):
-        print(f"Event: {event.type}")
+    def media_player_playing_callback(self, _: vlc.Event):
         self.toolbar.play_pause_button.setIcon(get_pause_button_icon())
         if self.media_changed:
             self.media_changed = False
@@ -133,13 +133,11 @@ class MainWindow(QMainWindow):
         if self.library.collection == self.core.current_collection:
             self.library.header_widget.play_pause_button.setIcon(get_pause_button_icon())
 
-    def media_player_paused_callback(self, event: vlc.Event):
-        print(f"Event: {event.type}")
+    def media_player_paused_callback(self, _: vlc.Event):
         self.toolbar.play_pause_button.setIcon(get_play_button_icon())
         self.library.header_widget.play_pause_button.setIcon(get_play_button_icon())
 
-    def media_player_media_changed_callback(self, event: vlc.Event):
-        print(f"Event: {event.type}")
+    def media_player_media_changed_callback(self, _: vlc.Event):
         self.media_changed = True
         if self.core.current_media_idx == -1:
             self.core.current_media_idx = 0
@@ -156,8 +154,7 @@ class MainWindow(QMainWindow):
 
         self.last_played_music = current_music
 
-    def media_player_ended_callback(self, event: vlc.Event):
-        print(f"Event: {event.type}")
+    def media_player_ended_callback(self, _: vlc.Event):
         self.toolbar.skip_button.clicked.emit()
 
     def shuffle_indices(self, split_index: int):
@@ -187,7 +184,7 @@ class MainWindow(QMainWindow):
             self.core.current_media_idx = self.core.db_indices.index(last_music_played.id)
 
             # Replace any music/media that was added manually with the original lists
-            self.load_media(tuple(self.core.current_collection.music_ids))
+            self.load_media(self.core.current_collection.music_ids)
         self.queue.update_first_queue_index()
 
     @Slot()
@@ -250,7 +247,7 @@ class MainWindow(QMainWindow):
             self.playlist_view.proxy_model.invalidate()
 
         self.core.current_collection = playlist
-        self.play_music(tuple(playlist.music_ids), playlist_index)
+        self.play_music(playlist.music_ids, playlist_index)
 
     @Slot()
     def play_music(self, music_indices: tuple[int, ...], list_index: int):
@@ -296,7 +293,7 @@ class MainWindow(QMainWindow):
         mode: CreateMode,
         name: str,
         source_model_root_index: QModelIndex,
-        callback_value: QModelIndex | list[int],
+        callback_value: QModelIndex | Sequence[int],
     ) -> None:
         invis_root = self.playlist_view.model_.invisibleRootItem()
         if source_model_root_index.isValid():
@@ -307,19 +304,18 @@ class MainWindow(QMainWindow):
             default_model_root_item = invis_root
             parent_id = -1
         collection = DbCollection(
-            id=-1,
-            collection_type=mode,
+            _id=-1,
+            _name=name,
+            _collection_type=mode,
+            _img_path=None,
+            _is_protected=False,
             _parent_id=parent_id,
-            name=name,
             _created=datetime.now(tz=UTC),
             _last_updated=datetime.now(tz=UTC),
             _last_played=None,
-            _thumbnail_path=None,
-            is_protected=False,
-            music_ids=[],
-            music_added_on=[],
-            album_ids=[],
-            album_img_path_counter=Counter(),
+            _music_ids=(),
+            _music_added_on=[],
+            _album_img_path_counter=Counter(),
         )
         collection.save()
         get_collections_by_parent_id.cache_clear()
@@ -333,13 +329,13 @@ class MainWindow(QMainWindow):
                     if callback_value.isValid():
                         self.shared_signals.move_collection_signal.emit(callback_value, item.index())
                 case "playlist":
-                    assert isinstance(callback_value, list)
+                    assert isinstance(callback_value, Sequence)
                     if len(callback_value):
                         self.shared_signals.add_to_playlist_signal.emit(callback_value, collection)
 
     @Slot()
     @profile
-    def add_items_to_collection(self, music_db_indices: tuple[int, ...], playlist: DbCollection):
+    def add_items_to_collection(self, music_db_indices: Sequence[int], playlist: DbCollection):
         playlist.add_music_ids(music_db_indices)
 
         print("adds")

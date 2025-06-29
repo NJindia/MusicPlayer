@@ -565,7 +565,7 @@ class MusicLibraryWidget(QWidget):
 
     @profile
     def load_playlist(self, playlist: DbCollection):
-        t = datetime.now()
+        t = datetime.now(tz=UTC)
         self.library_id = str(playlist.id)
 
         self._load(
@@ -577,7 +577,7 @@ class MusicLibraryWidget(QWidget):
             show_date_added_col=True,
             music_ids_to_load=playlist.music_ids,
         )
-        print("LOAD END", (datetime.now() - t).microseconds / 1000)
+        print("LOAD END", (datetime.now(tz=UTC) - t).microseconds / 1000)
 
     @Slot()
     def load_artist(self, artist_id: int):
@@ -749,7 +749,8 @@ class MusicLibraryTable(LibraryTableView):
         self.viewport().installEventFilter(self)
         self.adjust_height_to_content()
 
-    def startDrag(self, supportedActions, /):
+    @override
+    def startDrag(self, supportedActions: Qt.DropAction, /):
         indices = self.selectedIndexes()
         row_count = len({i.row() for i in indices})
         if row_count <= 1:

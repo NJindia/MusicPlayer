@@ -19,9 +19,7 @@ CREATE TABLE albums (
 	album_id SERIAL PRIMARY KEY ,
     album_name VARCHAR(255) NOT NULL,
 	release_date DATE NOT NULL,
-	img_path TEXT GENERATED ALWAYS AS (
-	    'albums/' || (album_id) || '.jpeg'
-	) STORED
+	img_path TEXT GENERATED ALWAYS AS ('albums/' || (album_id) || '.jpeg') STORED
 );
 
 CREATE TABLE artists (
@@ -193,10 +191,10 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def get_row_k(self, query: str, *, commit: bool = False, **kwargs: dict[str, Any]):
+    def get_row_k(self, query: str, *, commit: bool = False, **kwargs: Any):
         return self.get_rows_k(query, commit=commit, **kwargs)[0]
 
-    def get_rows_k(self, query: str, *, commit: bool = False, **kwargs: dict[str, Any]):
+    def get_rows_k(self, query: str, *, commit: bool = False, **kwargs: Any):
         conn = self._get_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
