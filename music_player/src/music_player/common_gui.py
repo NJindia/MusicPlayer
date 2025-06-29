@@ -226,3 +226,9 @@ def get_pause_button_icon(height: int | None = None) -> QIcon:
 @cache
 def get_shuffle_button_icon(height: int | None = None) -> QIcon:
     return _scaled_icon_from_svg("../icons/shuffle-button.svg", height)
+
+
+class AddToQueueAction(QAction):
+    def __init__(self, selected_song_db_indices: Sequence[int], signals: SharedSignals, parent: QMenu):
+        super().__init__("Add to queue", parent)
+        self.triggered.connect(partial(signals.add_to_queue_signal.emit, selected_song_db_indices))

@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from music_player.common_gui import NewFolderAction, NewPlaylistAction
+from music_player.common_gui import AddToQueueAction, NewFolderAction, NewPlaylistAction
 from music_player.constants import ID_ROLE, MAX_SIDE_BAR_WIDTH
 from music_player.db_types import DbCollection, get_collections_by_parent_id
 from music_player.signals import SharedSignals
@@ -546,6 +546,9 @@ class PlaylistTreeWidget(QWidget):
         source_root_index = self.source_model().invisibleRootItem().index()
         if proxy_index.isValid():
             item = self.item_at_index(proxy_index, is_source=False)
+
+            menu.addAction(AddToQueueAction(item.collection.music_ids, self.signals, menu))
+            menu.addSeparator()
 
             # Set root for adding playlist/folder
             if item.collection.is_folder:  # Folder is a valid root

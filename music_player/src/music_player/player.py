@@ -14,7 +14,7 @@ from PySide6.QtGui import QAction, QMouseEvent, QPixmapCache
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QWidget
 from tqdm import tqdm
 
-from music_player.common_gui import CreateMode, get_pause_button_icon, get_play_button_icon
+from music_player.common_gui import AddToQueueAction, CreateMode, get_pause_button_icon, get_play_button_icon
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.database import get_database_manager
 from music_player.db_types import DbCollection, DbMusic, get_collections_by_parent_id, get_db_music_cache
@@ -24,12 +24,6 @@ from music_player.queue_gui import QueueEntryGraphicsItem, QueueEntryGraphicsVie
 from music_player.signals import SharedSignals
 from music_player.toolbar import MediaToolbar
 from music_player.vlc_core import VLCCore
-
-
-class AddToQueueAction(QAction):
-    def __init__(self, selected_song_db_indices: list[int], signals: SharedSignals, parent: QWidget):
-        super().__init__("Add to queue", parent)
-        self.triggered.connect(partial(signals.add_to_queue_signal.emit, selected_song_db_indices))
 
 
 class MainWindow(QMainWindow):
@@ -171,7 +165,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     @profile
-    def add_to_queue(self, music_db_indices: list[int]):
+    def add_to_queue(self, music_db_indices: Sequence[int]):
         print("CONNECT START")
         items: list[QueueEntryGraphicsItem] = []
         list_indices: list[int] = []
@@ -349,7 +343,7 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
 
         # Add to queue
-        add_to_queue_action = AddToQueueAction(selected_song_indices, self.shared_signals, self)
+        add_to_queue_action = AddToQueueAction(selected_song_indices, self.shared_signals, menu)
         menu.addAction(add_to_queue_action)
 
         # Add to playlist

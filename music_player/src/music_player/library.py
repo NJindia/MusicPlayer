@@ -157,7 +157,7 @@ class SongItemDelegate(QStyledItemDelegate):
 
 class ProxyModel(QSortFilterProxyModel):
     @override
-    def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]
+    def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
         return 5
 
 
@@ -741,10 +741,12 @@ class MusicLibraryTable(LibraryTableView):
     def startDrag(self, supportedActions: Qt.DropAction, /):
         indices = self.selectedIndexes()
         row_count = len({i.row() for i in indices})
-        if row_count <= 1:
-            model = self.model_
-            title = model.data(model.index(indices[0].row(), model.music_name_field_idx))
-            artists = model.data(model.index(indices[0].row(), model.artist_names_field_idx))
+        if not row_count:
+            raise ValueError
+        if row_count == 1:
+            model = self.model()
+            title = model.data(model.index(indices[0].row(), ColIndex.MUSIC_NAME.value))
+            artists = model.data(model.index(indices[0].row(), ColIndex.ARTISTS.value))
             text = f"{title} - {', '.join(artists)}"
         else:
             text = f"{row_count} items"
