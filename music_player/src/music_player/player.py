@@ -47,7 +47,6 @@ class MainWindow(QMainWindow):
 
         main_ui = QHBoxLayout()
         self.shared_signals = SharedSignals()
-        self.shared_signals.play_collection_signal.connect(self.play_collection)
 
         self.playlist_view = PlaylistTreeWidget(self, self, self.shared_signals, is_main_view=True)
         self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
@@ -58,9 +57,6 @@ class MainWindow(QMainWindow):
         main_ui.addWidget(self.playlist_view, 1)
 
         self.library = MusicLibraryWidget(self.shared_signals, self.core)
-        self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_collection)
-        self.shared_signals.create_playlist_signal.connect(partial(self.create, "playlist"))
-        self.shared_signals.create_folder_signal.connect(partial(self.create, "folder"))
         self.library.table_view.song_clicked.connect(self.play_song_from_library)
         self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
         scroll_area = MusicLibraryScrollArea(self.library)
@@ -69,7 +65,6 @@ class MainWindow(QMainWindow):
 
         self.history = QueueEntryGraphicsView()
         self.queue = QueueGraphicsView(self.core, self.shared_signals)
-        self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
         self.queue.customContextMenuRequested.connect(self.queue_context_menu)
 
         queue_tab = QTabWidget()
@@ -79,7 +74,6 @@ class MainWindow(QMainWindow):
         main_ui.addWidget(queue_tab, 1)
 
         self.toolbar = MediaToolbar(self.core, self.shared_signals)
-        self.toolbar.shuffle_button.toggled.connect(self.shuffle_button_toggled)
         self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.toolbar)
 
         w = QWidget()
@@ -97,6 +91,13 @@ class MainWindow(QMainWindow):
         self.core.list_player_event_manager.event_attach(
             vlc.EventType.MediaListPlayerNextItemSet, self.media_player_media_changed_callback
         )
+
+        self.shared_signals.play_collection_signal.connect(self.play_collection)
+        self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_collection)
+        self.shared_signals.create_playlist_signal.connect(partial(self.create, "playlist"))
+        self.shared_signals.create_folder_signal.connect(partial(self.create, "folder"))
+        self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
+        self.shared_signals.toggle_shuffle_signal.connect(self.shuffle_button_clicked)
 
     @Slot()
     def media_changed_ui(self):
@@ -144,19 +145,19 @@ class MainWindow(QMainWindow):
         rng = np.random.default_rng()
         rng.shuffle(shuffled_indices)
         self.core.list_indices = [*self.core.list_indices[:split_index], *shuffled_indices]
-        self.queue.queue_entries = [
-            *self.queue.queue_entries[:split_index],
-            *[self.queue.queue_entries[i] for i in shuffled_indices],
-        ]
+        self.queue.queue_entries = [self.queue.queue_entries[i] for i in self.core.list_indices]
 
-    @Slot()
-    def shuffle_button_toggled(self):
+    @Slot(bool)
+    def shuffle_button_clicked(self, shuffle: bool):
         """Shuffle remaining songs in playlist."""
-        if self.toolbar.shuffle_button.isChecked():
+        if shuffle:
             self.toolbar.shuffle_button.button_on()
+            self.library.header_widget.shuffle_button.button_on()
             self.shuffle_indices(self.core.current_media_idx + 1)
         else:
             self.toolbar.shuffle_button.button_off()
+            self.library.header_widget.shuffle_button.button_off()
+
             if self.core.current_collection:
                 self.core.list_indices = list(range(len(self.core.list_indices)))
 
@@ -229,19 +230,15 @@ class MainWindow(QMainWindow):
         if self.playlist_view.proxy_model.sortRole() == SortRole.PLAYED.value:
             self.playlist_view.proxy_model.invalidate()
 
-        self.play_music(collection.music_ids, collection_index)
-
-    @Slot()
-    def play_music(self, music_indices: tuple[int, ...], list_index: int):
-        self.load_media(music_indices)
-        jump_index = list_index
+        self.load_media(collection.music_ids)
+        jump_index = collection_index
         if self.toolbar.shuffle_button.isChecked():
             jump_index = 0
             self.shuffle_indices(jump_index)  # Shuffle all
             # Find index of song we want to play now in the shuffled list, then swap that with the shuffled 1st song
-            _list_index = self.core.list_indices.index(list_index)
+            _list_index = self.core.list_indices.index(collection_index)
             self.core.list_indices[_list_index] = self.core.list_indices[jump_index]
-            self.core.list_indices[jump_index] = list_index
+            self.core.list_indices[jump_index] = collection_index
 
             temp = self.queue.queue_entries[_list_index]
             self.queue.queue_entries[_list_index] = self.queue.queue_entries[jump_index]
@@ -249,9 +246,8 @@ class MainWindow(QMainWindow):
         self.core.jump_play_index(jump_index)
 
     def load_media(self, music_ids: tuple[int, ...]):
-        """Set a new MediaList, and all the other fields that would also need to be set to work properly.
-
-        If queue_entries is None, it will wipe the queue and initialize a new one from self.core.indices"""
+        """Set a new MediaList, and all the other fields that would also need to be set to work properly."""
+        print(music_ids)
         self.core.load_media_from_music_ids(music_ids)
         self.queue.initialize_queue()
 
@@ -298,6 +294,7 @@ class MainWindow(QMainWindow):
             _music_ids=(),
             _music_added_on=[],
             _album_img_path_counter=Counter(),
+            _sort_order=[],
         )
         collection.save()
         get_collections_by_parent_id.cache_clear()

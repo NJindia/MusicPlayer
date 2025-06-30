@@ -44,10 +44,10 @@ from PySide6.QtWidgets import (
 )
 
 from music_player.common_gui import (
+    ShuffleButton,
     get_artist_text_rect_text_tups,
     get_pause_button_icon,
     get_play_button_icon,
-    get_shuffle_button_icon,
     paint_artists,
     text_is_buffer,
 )
@@ -161,7 +161,7 @@ class MusicTableModel(QSqlQueryModel):
     def __init__(self, parent: "MusicLibraryTable"):
         super().__init__(parent)
         get_database_manager().get_qt_connection()
-        self.setQuery("SELECT * FROM library_music_view")
+        self.setQuery("SELECT *, row_number() over () AS sort_order FROM library_music_view")
 
         self.music_id_field_idx = self.record().indexOf("music_id")
         self.music_name_field_idx = self.record().indexOf("music_name")
@@ -171,6 +171,12 @@ class MusicTableModel(QSqlQueryModel):
         self.album_id_field_idx = self.record().indexOf("album_id")
         self.duration_field_idx = self.record().indexOf("duration")
         self.album_img_path_field_idx = self.record().indexOf("img_path")
+        self.sort_order_field_idx = self.record().indexOf("sort_order")
+
+        self.sort_order_by_music_id = {
+            super().data(self.index(i, self.music_id_field_idx)): super().data(self.index(i, self.sort_order_field_idx))
+            for i in range(self.rowCount())
+        }
 
         self.view = parent
 
@@ -186,6 +192,9 @@ class MusicTableModel(QSqlQueryModel):
         """Returns data for given index."""
         if not index.isValid():
             return None
+
+        if role == ID_ROLE + 1:
+            return self.sort_order_by_music_id[super().data(self.index(index.row(), self.music_id_field_idx))]
 
         column_name, db_field = COLUMN_MAP_BY_IDX.get(index.column(), (None, None))
         if not column_name or not db_field:
@@ -271,6 +280,8 @@ class ProxyModel(QSortFilterProxyModel):
     def __init__(self):
         super().__init__()
         self._music_ids: tuple[int, ...] = ()
+        self.setSortRole(ID_ROLE + 1)
+        self.sort(0)
 
     @override
     def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
@@ -393,7 +404,7 @@ class LibraryHeaderWidget(QWidget):
     header_img_size = 140
     header_padding = 5
 
-    def __init__(self, library: "MusicLibraryWidget"):
+    def __init__(self, shared_signals: SharedSignals, library: "MusicLibraryWidget"):
         super().__init__()
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -420,8 +431,7 @@ class LibraryHeaderWidget(QWidget):
         self.play_pause_button = QToolButton()
         self.set_play_pause_button_state(is_play_button=True)
 
-        play_shuffled_button = QToolButton()
-        play_shuffled_button.setIcon(get_shuffle_button_icon())
+        self.shuffle_button = ShuffleButton(shared_signals)
 
         self.save_button = QToolButton()
         self.save_button.setIcon(QIcon("../icons/add-to.svg"))
@@ -436,7 +446,7 @@ class LibraryHeaderWidget(QWidget):
 
         header_interactive_layout = QHBoxLayout()
         header_interactive_layout.addWidget(self.play_pause_button)
-        header_interactive_layout.addWidget(play_shuffled_button)
+        header_interactive_layout.addWidget(self.shuffle_button)
         header_interactive_layout.addWidget(self.save_button)
         header_interactive_layout.addWidget(more_button)
         header_interactive_layout.addStretch()
@@ -467,7 +477,7 @@ class MusicLibraryWidget(QWidget):
         shared_signals.delete_collection_signal.connect(self.delete_collection)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Expanding)
 
-        self.header_widget = LibraryHeaderWidget(self)
+        self.header_widget = LibraryHeaderWidget(shared_signals, self)
         self.table_view = MusicLibraryTable(shared_signals, self)
         self.header_widget.play_pause_button.clicked.connect(self.play_button_clicked)
 
@@ -536,6 +546,7 @@ class MusicLibraryWidget(QWidget):
         header_label_subtitle: str | None,
         show_date_added_col: bool | None,
         no_meta: bool = False,
+        sort_orders: list[int] | None = None,
     ):
         self.header_widget.header_img.setPixmap(img_pixmap)
         self.header_widget.header_label_type.setText(header_label_type)
@@ -560,7 +571,12 @@ class MusicLibraryWidget(QWidget):
         self.header_widget.set_play_pause_button_state(is_play_button=is_play_button)
 
         model = self.table_view.model()
-        model.set_music_ids(() if new_collection is None else new_collection.music_ids)
+        music_ids = () if new_collection is None else new_collection.music_ids
+        model.set_music_ids(music_ids)
+        if sort_orders is not None:
+            self.table_view.model_.sort_order_by_music_id = dict(zip(music_ids, sort_orders, strict=True))
+            assert len(sort_orders) == self.table_view.model().rowCount()
+            model.invalidate()
         if not no_meta:
             num_tracks = model.rowCount()
             total_timestamp = self.table_view.model_.get_total_timestamp()  # TODO FIX THIS TO MODEL()
@@ -592,6 +608,7 @@ class MusicLibraryWidget(QWidget):
             header_label_title=playlist.name,
             header_label_subtitle=None,
             show_date_added_col=True,
+            sort_orders=playlist._sort_order,
         )
         print("LOAD END", (datetime.now(tz=UTC) - t).microseconds / 1000)
 

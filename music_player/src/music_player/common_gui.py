@@ -2,10 +2,11 @@ from collections.abc import Callable, Sequence
 from functools import cache, partial
 from typing import Literal, cast
 
-from PySide6.QtCore import QModelIndex, QRect, Qt
+from PySide6.QtCore import QModelIndex, QRect, Qt, SignalInstance
 from PySide6.QtGui import QAction, QFont, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QStyleOptionGraphicsItem,
     QStyleOptionViewItem,
+    QToolButton,
     QVBoxLayout,
 )
 
@@ -232,3 +234,34 @@ class AddToQueueAction(QAction):
     def __init__(self, selected_song_db_indices: Sequence[int], signals: SharedSignals, parent: QMenu):
         super().__init__("Add to queue", parent)
         self.triggered.connect(partial(signals.add_to_queue_signal.emit, selected_song_db_indices))
+
+
+class OpacityButton(QToolButton):
+    button_off_opacity = 0.5
+
+    def __init__(self):
+        super().__init__()
+        self.setStyleSheet("background: transparent;")
+        self.graphics_effect = QGraphicsOpacityEffect(self)
+        self.graphics_effect.setOpacity(self.button_off_opacity)
+        self.setGraphicsEffect(self.graphics_effect)
+        self.setCheckable(True)
+
+    def button_on(self):
+        self.graphics_effect.setOpacity(1)
+        self.setChecked(True)
+
+    def button_off(self):
+        self.graphics_effect.setOpacity(self.button_off_opacity)
+        self.setChecked(False)
+
+
+class ShuffleButton(OpacityButton):
+    def __init__(self, signals: SharedSignals, height: int | None = None):
+        super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setIcon(get_shuffle_button_icon(height))
+        self.clicked.connect(partial(self._clicked, signals.toggle_shuffle_signal))
+
+    def _clicked(self, shuffle_signal: SignalInstance):
+        shuffle_signal.emit(self.isChecked())

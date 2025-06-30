@@ -585,7 +585,7 @@ class PlaylistTreeWidget(QWidget):
     def _update_flattened_model(self):
         if not self.is_main_view:
             raise ValueError
-        print("UPDATED FM")
+        print("CUSTOM_SORT FM")
         self.flattened_model_.beginResetModel()
         self.flattened_model_.clear()
         for item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=self.is_main_view):

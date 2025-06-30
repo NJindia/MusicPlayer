@@ -133,7 +133,8 @@ SELECT
     ARRAY_REMOVE(ARRAY_AGG(cc.music_id ORDER BY cc.sort_order DESC), NULL) as music_ids,
     ARRAY_REMOVE(ARRAY_AGG(cc.added_on ORDER BY cc.sort_order DESC), NULL) as added_on,
     ARRAY_REMOVE(ARRAY_AGG(m.album_id ORDER BY cc.sort_order DESC), NULL) as album_ids,
-    ARRAY_REMOVE(ARRAY_AGG(a.img_path ORDER BY cc.sort_order DESC), NULL) as img_paths
+    ARRAY_REMOVE(ARRAY_AGG(a.img_path ORDER BY cc.sort_order DESC), NULL) as img_paths,
+    ARRAY_REMOVE(ARRAY_AGG(-cc.sort_order ORDER BY cc.sort_order DESC), NULL) as sort_order
 FROM collections c
 LEFT JOIN collection_children cc USING (collection_id)
 LEFT JOIN music m USING (music_id)
@@ -152,6 +153,7 @@ class DbStoredCollection(DbCollection):
     _music_ids: tuple[int, ...]
     _music_added_on: list[datetime]
     _album_img_path_counter: Counter[Path]
+    _sort_order: list[int]
 
     # def _music_ids(self) -> tuple[int, ...]:
     #     match self.collection_type:
@@ -186,6 +188,7 @@ class DbStoredCollection(DbCollection):
             _music_ids=tuple(db_row["music_ids"]),
             _music_added_on=db_row["added_on"],
             _album_img_path_counter=Counter(PATH_TO_IMGS / Path(p) for p in db_row["img_paths"] if p is not None),
+            _sort_order=db_row["sort_order"],
         )
 
     @property

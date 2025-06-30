@@ -4,19 +4,9 @@ from typing import Literal
 import vlc
 from PySide6.QtCore import QSize, Qt, Slot
 from PySide6.QtGui import QIcon, QPixmap, QTransform
-from PySide6.QtWidgets import (
-    QGraphicsOpacityEffect,
-    QHBoxLayout,
-    QLabel,
-    QSizePolicy,
-    QSlider,
-    QToolBar,
-    QToolButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSlider, QToolBar, QToolButton, QVBoxLayout, QWidget
 
-from music_player.common_gui import get_play_button_icon, get_shuffle_button_icon
+from music_player.common_gui import OpacityButton, ShuffleButton, get_play_button_icon
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD
 from music_player.db_types import DbMusic
 from music_player.signals import SharedSignals
@@ -51,25 +41,6 @@ class AlbumButton(QToolButton):
         if not self._album_id:
             return
         partial(self._signals.library_load_album_signal.emit, self._album_id)
-
-
-class OpacityButton(QToolButton):
-    button_off_opacity = 0.5
-
-    def __init__(self):
-        super().__init__()
-        self.graphics_effect = QGraphicsOpacityEffect(self)
-        self.graphics_effect.setOpacity(self.button_off_opacity)
-        self.setGraphicsEffect(self.graphics_effect)
-        self.setCheckable(True)
-
-    def button_on(self):
-        self.graphics_effect.setOpacity(1)
-        self.setChecked(True)
-
-    def button_off(self):
-        self.graphics_effect.setOpacity(self.button_off_opacity)
-        self.setChecked(False)
 
 
 class MediaScrubberSlider(QHBoxLayout):
@@ -179,7 +150,6 @@ class MediaToolbar(QToolBar):
     @Slot()
     def press_play_button(self):
         """Start audio playback if none is playing, otherwise pause existing."""
-        print(self.core.current_media)
         self.core.list_player.pause() if self.core.list_player.is_playing() else self.core.list_player.play()
 
     @Slot()
@@ -232,8 +202,7 @@ class MediaToolbar(QToolBar):
         media_control_button_hbox = QHBoxLayout()
         media_control_vbox.addLayout(media_control_button_hbox)
 
-        self.shuffle_button = OpacityButton()
-        self.shuffle_button.setIcon(get_shuffle_button_icon())
+        self.shuffle_button = ShuffleButton(shared_signals)
         media_control_button_hbox.addWidget(self.shuffle_button)
 
         rewind_button = QToolButton()

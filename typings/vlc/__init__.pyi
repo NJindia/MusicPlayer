@@ -8,7 +8,7 @@ import inspect as _inspect
 import logging
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from ctypes.util import find_library
 from msvcrt import getch
 from os import PathLike
@@ -339,7 +339,7 @@ class Instance(_Ctype):
         """
         ...
 
-    def media_list_new(self, mrls: list[MRL] | None = None) -> MediaList:
+    def media_list_new(self, mrls: Sequence[MRL] | None = None) -> MediaList:
         """Create a new :class:`MediaList` instance.
 
         :param mrls: optional list of MRL strings, bytes, or PathLike objects.

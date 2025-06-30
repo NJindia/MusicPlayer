@@ -3,7 +3,6 @@ from typing import Literal, cast, get_args
 
 from vlc import Event, EventManager, EventType, Instance, Media, MediaList, MediaListPlayer, MediaPlayer
 
-from music_player.database import get_database_manager
 from music_player.db_types import DbCollection, DbMusic, get_db_music_cache
 
 RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
@@ -20,12 +19,7 @@ class VLCCore:
         self.player_event_manager.event_detach(EventType.MediaPlayerPlaying)
 
     def load_media_from_music_ids(self, music_ids: tuple[int, ...]):
-        rows = (
-            get_database_manager().get_rows("SELECT file_path FROM music WHERE music_id IN %s", (music_ids,))
-            if music_ids
-            else []
-        )
-        paths = [r["file_path"] for r in rows]
+        paths = [DbMusic.from_db(i).file_path for i in music_ids]
         self.media_list = self.instance.media_list_new(paths)
         self.list_player.set_media_list(self.media_list)
         self.list_indices = list(range(len(paths)))
@@ -70,7 +64,6 @@ class VLCCore:
         return self.list_player.get_media_player()
 
     def jump_play_index(self, list_index: int):
-        print(list_index)
         self.current_media_idx = list_index
         self.list_player.play_item_at_index(self.list_indices[list_index])
 

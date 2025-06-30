@@ -207,15 +207,14 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         super().__init__()
         self.core = vlc_core
         self.shared_signals = shared_signals
-        self.initialize_queue()
 
     @profile
     def initialize_queue(self):
         self.queue_entries = []
         self.scene().clear()
-        for i, db_index in enumerate(self.core.db_indices):
+        for i, list_idx in enumerate(self.core.list_indices):
             qe = QueueEntryGraphicsItem(
-                get_db_music_cache().get(db_index), self.shared_signals, self.viewport().width()
+                get_db_music_cache().get(self.core.db_indices[list_idx]), self.shared_signals, self.viewport().width()
             )
             qe.signal.song_clicked.connect(self.play_queue_song)
             self.scene().addItem(qe)
