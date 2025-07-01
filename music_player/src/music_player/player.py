@@ -294,7 +294,6 @@ class MainWindow(QMainWindow):
             _music_ids=(),
             _music_added_on=[],
             _album_img_path_counter=Counter(),
-            _sort_order=[],
         )
         collection.save()
         get_collections_by_parent_id.cache_clear()
@@ -341,17 +340,15 @@ class MainWindow(QMainWindow):
                 return
             rows = [index.row()]
         else:
-            rows = [i.row() for i in row_indices]
-        selected_song_indices = sorted(table_view.model().get_music_id(row) for row in rows)
+            rows = sorted(i.row() for i in row_indices)
+        selected_song_indices = [table_view.model().get_music_id(row) for row in rows]
         menu = QMenu(self)
 
         # Add to queue
-        add_to_queue_action = AddToQueueAction(selected_song_indices, self.shared_signals, menu)
-        menu.addAction(add_to_queue_action)
+        menu.addAction(AddToQueueAction(selected_song_indices, self.shared_signals, menu))
 
         # Add to playlist
-        playlist_menu = AddToPlaylistMenu(selected_song_indices, self.shared_signals, menu, self, self.playlist_view)
-        menu.addMenu(playlist_menu)
+        menu.addMenu(AddToPlaylistMenu(selected_song_indices, self.shared_signals, menu, self, self.playlist_view))
 
         if self.library.collection:
             # Remove from current playlist

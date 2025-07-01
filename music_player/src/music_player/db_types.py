@@ -153,7 +153,6 @@ class DbStoredCollection(DbCollection):
     _music_ids: tuple[int, ...]
     _music_added_on: list[datetime]
     _album_img_path_counter: Counter[Path]
-    _sort_order: list[int]
 
     # def _music_ids(self) -> tuple[int, ...]:
     #     match self.collection_type:
@@ -188,8 +187,11 @@ class DbStoredCollection(DbCollection):
             _music_ids=tuple(db_row["music_ids"]),
             _music_added_on=db_row["added_on"],
             _album_img_path_counter=Counter(PATH_TO_IMGS / Path(p) for p in db_row["img_paths"] if p is not None),
-            _sort_order=db_row["sort_order"],
         )
+
+    @property
+    def sort_order(self) -> list[int]:
+        return list(range(len(self._music_ids)))
 
     @property
     def music_ids(self) -> tuple[int, ...]:

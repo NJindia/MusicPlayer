@@ -608,7 +608,7 @@ class MusicLibraryWidget(QWidget):
             header_label_title=playlist.name,
             header_label_subtitle=None,
             show_date_added_col=True,
-            sort_orders=playlist._sort_order,
+            sort_orders=playlist.sort_order,
         )
         print("LOAD END", (datetime.now(tz=UTC) - t).microseconds / 1000)
 
