@@ -3,7 +3,6 @@ from collections import Counter
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from functools import partial
-from typing import cast
 
 import numpy as np
 import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
@@ -26,7 +25,7 @@ from music_player.db_types import (
 )
 from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
 from music_player.playlist_tree import AddToPlaylistMenu, PlaylistTreeWidget, SortRole, TreeModelItem
-from music_player.queue_gui import QueueEntryGraphicsItem, QueueEntryGraphicsView, QueueGraphicsView
+from music_player.queue_gui import ID_ROLE, QueueEntryGraphicsView, QueueListView
 from music_player.signals import SharedSignals
 from music_player.toolbar import MediaToolbar
 from music_player.vlc_core import VLCCore
@@ -63,8 +62,8 @@ class MainWindow(QMainWindow):
 
         main_ui.addWidget(scroll_area, 2)
 
-        self.history = QueueEntryGraphicsView()
-        self.queue = QueueGraphicsView(self.core, self.shared_signals)
+        self.history = QueueEntryGraphicsView(self.shared_signals)
+        self.queue = QueueListView(self.core, self.shared_signals)
         self.queue.customContextMenuRequested.connect(self.queue_context_menu)
 
         queue_tab = QTabWidget()
@@ -98,16 +97,16 @@ class MainWindow(QMainWindow):
         self.shared_signals.create_folder_signal.connect(partial(self.create, "folder"))
         self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
         self.shared_signals.toggle_shuffle_signal.connect(self.shuffle_button_clicked)
+        self.shared_signals.play_history_song_signal.connect(self.play_history_song)
 
     @Slot()
     def media_changed_ui(self):
-        self.queue.update_first_queue_index()
         if self.last_played_music is not None:  # None when nothing has been played yet
-            hist_entry = QueueEntryGraphicsItem(
-                self.last_played_music, self.shared_signals, start_width=self.history.viewport().width()
-            )
-            hist_entry.signal.song_clicked.connect(partial(self.play_history_entry, hist_entry))
-            self.history.insert_queue_entries(0, [hist_entry])
+            # hist_entry = QueueEntryGraphicsItem(
+            #     self.last_played_music, self.shared_signals, start_width=self.history.viewport().width()
+            # )
+            # hist_entry.signal.song_clicked.connect(partial(self.play_history_entry, hist_entry))
+            self.history.insert_music_into_queue(0, [self.last_played_music], manually_added=False)
 
     def media_player_playing_callback(self, _: vlc.Event):
         self.toolbar.play_pause_button.setIcon(get_pause_button_icon())
@@ -175,7 +174,6 @@ class MainWindow(QMainWindow):
     @profile
     def add_to_queue(self, music_db_indices: Sequence[int]):
         print("CONNECT START")
-        items: list[QueueEntryGraphicsItem] = []
         list_indices: list[int] = []
         for music_db_index in tqdm(music_db_indices):
             music = get_db_music_cache().get(music_db_index)
@@ -188,31 +186,25 @@ class MainWindow(QMainWindow):
                 list_index = len(self.core.db_indices) - 1
             list_indices.append(list_index)
 
-            item = QueueEntryGraphicsItem(
-                music, self.shared_signals, manually_added=True, start_width=self.queue.viewport().width()
-            )
-            items.append(item)
-
         insert_idx = self.core.current_media_idx + 1
         self.core.list_indices = (
             self.core.list_indices[:insert_idx] + list_indices + self.core.list_indices[insert_idx:]
         )
-        self.queue.insert_queue_entries(insert_idx, items)
+        music_list = [DbMusic.from_db(i) for i in music_db_indices]
+        self.queue.insert_music_into_queue(insert_idx, music_list, manually_added=True)
+        print(self.queue.model().rowCount())
         print("CONNECT END")
 
     @Slot()
-    def remove_from_queue(self, item: QueueEntryGraphicsItem):
-        queue_index = self.queue.queue_entries.index(item)
-        self.queue.scene().removeItem(self.queue.queue_entries.pop(queue_index))
-        del self.core.list_indices[queue_index]
-        self.queue.update_first_queue_index()
+    def remove_from_queue(self, index: QModelIndex):
+        self.queue.model().removeRow(index.row(), index.parent())
+        del self.core.list_indices[self.core.current_media_idx + 1 + index.row()]  # TODO MAPTOSOURCE?
 
     @Slot()
-    def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
+    def play_history_song(self, music_id: int, _: QMouseEvent) -> None:
         self.core.current_media_idx = 0
-        self.load_media((queue_entry.music.id,))
+        self.load_media((music_id,))
         self.core.list_player.play_item_at_index(0)
-        self.queue.update_first_queue_index()
 
     @Slot()
     def play_song_from_library(self, lib_index: int):
@@ -388,17 +380,18 @@ class MainWindow(QMainWindow):
         menu.exec(table_view.mapToGlobal(point))  # pyright: ignore[reportUnknownMemberType]
 
     def queue_context_menu(self, point: QPoint):
-        item = self.queue.itemAt(point)
-        if item is None:  # Can be None... # pyright: ignore[reportUnnecessaryComparison]
+        index = self.queue.indexAt(point)
+        if not index.isValid():
             return
-        item = cast(QueueEntryGraphicsItem, item)
         menu = QMenu(self)
 
         remove_from_queue_action = QAction("Remove from queue", self)
-        remove_from_queue_action.triggered.connect(partial(self.remove_from_queue, item))
+        remove_from_queue_action.triggered.connect(partial(self.remove_from_queue, index))
         menu.addAction(remove_from_queue_action)
 
-        add_to_playlist_menu = AddToPlaylistMenu([item.music.id], self.shared_signals, menu, self, self.playlist_view)
+        add_to_playlist_menu = AddToPlaylistMenu(
+            index.data(ID_ROLE), self.shared_signals, menu, self, self.playlist_view
+        )
         menu.addMenu(add_to_playlist_menu)
 
         menu.exec(self.queue.mapToGlobal(point))  # pyright: ignore[reportUnknownMemberType]

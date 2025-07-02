@@ -18,3 +18,4 @@ class SharedSignals(QObject):
     delete_collection_signal = Signal(DbStoredCollection)
     play_collection_signal = Signal(DbCollection, int)  # (DbStoredCollection, collection_idx_to_play_from)
     toggle_shuffle_signal = Signal(bool)  # (shuffle)
+    play_history_song_signal = Signal(int)  # (music_id)
