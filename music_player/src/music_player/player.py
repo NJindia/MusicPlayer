@@ -3,14 +3,13 @@ from collections import Counter
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from functools import partial
-from typing import cast
 
 import numpy as np
 import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
 import vlc
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QAction, QMouseEvent, QPixmapCache
+from PySide6.QtGui import QAction, QPixmapCache
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QWidget
 from tqdm import tqdm
 
@@ -98,15 +97,18 @@ class MainWindow(QMainWindow):
         self.shared_signals.create_folder_signal.connect(partial(self.create, "folder"))
         self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
         self.shared_signals.toggle_shuffle_signal.connect(self.shuffle_button_clicked)
+        self.shared_signals.play_from_queue_signal.connect(self.play_from_queue)
 
     @Slot()
     def media_changed_ui(self):
         self.queue.update_first_queue_index()
         if self.last_played_music is not None:  # None when nothing has been played yet
             hist_entry = QueueEntryGraphicsItem(
-                self.last_played_music, self.shared_signals, start_width=self.history.viewport().width()
+                self.last_played_music,
+                self.shared_signals,
+                start_width=self.history.viewport().width(),
+                is_history=True,
             )
-            hist_entry.signal.song_clicked.connect(partial(self.play_history_entry, hist_entry))
             self.history.insert_queue_entries(0, [hist_entry])
 
     def media_player_playing_callback(self, _: vlc.Event):
@@ -208,11 +210,14 @@ class MainWindow(QMainWindow):
         self.queue.update_first_queue_index()
 
     @Slot()
-    def play_history_entry(self, queue_entry: QueueEntryGraphicsItem, _: QMouseEvent) -> None:
-        self.core.current_media_idx = 0
-        self.load_media((queue_entry.music.id,))
-        self.core.list_player.play_item_at_index(0)
-        self.queue.update_first_queue_index()
+    def play_from_queue(self, queue_entry: QueueEntryGraphicsItem) -> None:
+        if queue_entry.is_history:
+            self.core.current_media_idx = 0
+            self.load_media((queue_entry.music.id,))
+            self.core.list_player.play_item_at_index(0)
+            self.queue.update_first_queue_index()
+        else:
+            self.core.jump_play_index(self.queue.queue_entries.index(queue_entry))
 
     @Slot()
     def play_song_from_library(self, lib_index: int):
@@ -386,10 +391,9 @@ class MainWindow(QMainWindow):
         menu.exec(table_view.mapToGlobal(point))  # pyright: ignore[reportUnknownMemberType]
 
     def queue_context_menu(self, point: QPoint):
-        item = self.queue.itemAt(point)
-        if item is None:  # Can be None... # pyright: ignore[reportUnnecessaryComparison]
+        item = self.queue.item_at(point)
+        if item is None:
             return
-        item = cast(QueueEntryGraphicsItem, item)
         menu = QMenu(self)
 
         remove_from_queue_action = QAction("Remove from queue", self)

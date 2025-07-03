@@ -2,6 +2,7 @@ from collections.abc import Callable, Sequence
 from functools import cache, partial
 from typing import Literal, cast
 
+from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QModelIndex, QRect, Qt, SignalInstance
 from PySide6.QtGui import QAction, QFont, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
@@ -68,6 +69,7 @@ def get_artist_text_rect_text_tups(artists: list[str], text_rect: QRect, font_me
     return text_rect_text_tups
 
 
+@profile
 def paint_artists(
     artists: list[str],
     painter: QPainter,

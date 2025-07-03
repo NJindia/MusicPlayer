@@ -1,8 +1,19 @@
-from typing import override
+import bisect
+from typing import cast, override
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
-from PySide6.QtCore import QObject, QRect, QRectF, Qt, Signal, Slot
-from PySide6.QtGui import QFont, QFontMetrics, QPainter, QResizeEvent
+from PySide6.QtCore import QByteArray, QMimeData, QPoint, QRect, QRectF, Qt
+from PySide6.QtGui import (
+    QDrag,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QFont,
+    QFontMetrics,
+    QMouseEvent,
+    QPainter,
+    QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QGraphicsItem,
     QGraphicsScene,
@@ -34,22 +45,21 @@ class ScrollableLayout(QScrollArea):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
 
-class QueueSignal(QObject):
-    song_clicked = Signal(object)
-
-    def song_is_clicked(self, queue_entry: object) -> None:
-        self.song_clicked.emit(queue_entry)
-
-
 class QueueEntryGraphicsItem(QGraphicsItem):
     @profile
     def __init__(
-        self, music: DbMusic, shared_signals: SharedSignals, start_width: int, *, manually_added: bool = False
+        self,
+        music: DbMusic,
+        shared_signals: SharedSignals,
+        start_width: int,
+        *,
+        manually_added: bool = False,
+        is_history: bool = False,
     ) -> None:
         super().__init__()
         self.manually_added = manually_added
+        self.is_history = is_history
         self.music: DbMusic = music
-        self.signal = QueueSignal()
         self.shared_signals = shared_signals
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
@@ -131,7 +141,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
     @override
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         if self._song_text_rect.contains(event.pos()):
-            self.signal.song_is_clicked(self)
+            self.shared_signals.play_from_queue_signal.emit(self)
         elif self._album_rect.contains(event.pos()):
             self.shared_signals.library_load_album_signal.emit(self.music.album_id)
         else:
@@ -144,7 +154,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
     @override
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.signal.song_is_clicked(self)
+            self.shared_signals.play_from_queue_signal.emit(self)
         super().mouseDoubleClickEvent(event)
 
     def _update_hover_text_rect(self, event: QGraphicsSceneHoverEvent):
@@ -175,6 +185,12 @@ class QueueEntryGraphicsView(QGraphicsView):
         for entry in self.queue_entries:
             entry.resize(event)
 
+    def item_at(self, pos: QPoint, /) -> QueueEntryGraphicsItem | None:
+        item = self.itemAt(pos)
+        if item is not None:  # Can be None... # pyright: ignore[reportUnnecessaryComparison]
+            assert isinstance(item, QueueEntryGraphicsItem)
+        return item
+
     @property
     def current_entries(self):
         return self.queue_entries
@@ -203,10 +219,15 @@ class QueueEntryGraphicsView(QGraphicsView):
 
 
 class QueueGraphicsView(QueueEntryGraphicsView):
+    mime_data_type = "application/x-queue-entries-index"
+
     def __init__(self, vlc_core: VLCCore, shared_signals: SharedSignals):
         super().__init__()
+        self.setMouseTracking(True)
         self.core = vlc_core
         self.shared_signals = shared_signals
+        self._is_dragging: bool = False
+        self.setAcceptDrops(True)
 
     @profile
     def initialize_queue(self):
@@ -216,15 +237,10 @@ class QueueGraphicsView(QueueEntryGraphicsView):
             qe = QueueEntryGraphicsItem(
                 get_db_music_cache().get(self.core.db_indices[list_idx]), self.shared_signals, self.viewport().width()
             )
-            qe.signal.song_clicked.connect(self.play_queue_song)
             self.scene().addItem(qe)
 
             qe.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
             self.queue_entries.append(qe)
-
-    @Slot(QueueEntryGraphicsView)
-    def play_queue_song(self, queue_entry: QueueEntryGraphicsItem):
-        self.core.jump_play_index(self.queue_entries.index(queue_entry))
 
     @property
     def current_entries(self):
@@ -242,3 +258,46 @@ class QueueGraphicsView(QueueEntryGraphicsView):
             if not proxy.scene():
                 self.scene().addItem(proxy)
         self.update_scene()
+
+    @property
+    def midpoints(self):
+        return [self.get_y_pos(i) + QUEUE_ENTRY_HEIGHT / 2 for i in range(len(self.current_entries))]
+
+    @override
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            item = self.item_at(event.pos())
+            if item:
+                drag = QDrag(self)
+                mime_data = QMimeData()
+                mime_data.setData(self.mime_data_type, QByteArray.number(self.queue_entries.index(item)))
+                drag.setMimeData(mime_data)
+                drag.exec()
+        super().mouseMoveEvent(event)
+
+    @override
+    def dragMoveEvent(self, event: QDragMoveEvent, /):
+        assert event.proposedAction() == Qt.DropAction.MoveAction
+
+        queue_index = self.core.current_media_idx + 1 + bisect.bisect_right(self.midpoints, event.pos().y())
+        # TODO PAINT INDICATOR AT INDEX
+        print(queue_index)
+        event.accept()
+
+    @override
+    def dropEvent(self, event: QDropEvent):
+        queue_entries_from_idx, ok = cast(tuple[int, bool], event.mimeData().data(self.mime_data_type).toInt(10))
+        assert ok
+        queue_entries_to_idx = self.core.current_media_idx + 1 + bisect.bisect_right(self.midpoints, event.pos().y())
+        if queue_entries_to_idx in {queue_entries_from_idx, queue_entries_from_idx + 1}:
+            event.ignore()
+            return
+        insert_idx = queue_entries_to_idx if queue_entries_from_idx > queue_entries_to_idx else queue_entries_to_idx - 1
+        self.queue_entries.insert(insert_idx, self.queue_entries.pop(queue_entries_from_idx))
+        self.update_scene()
+        self.core.list_indices.insert(insert_idx, self.core.list_indices.pop(queue_entries_from_idx))
+
+    @override
+    def dragEnterEvent(self, event: QDragEnterEvent, /):
+        print("CUSTOM_SORT DRAG")
+        super().dragEnterEvent(event)
