@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QTableView, QTreeView
+from PySide6.QtWidgets import QGraphicsView, QTableView, QTreeView
 
 
 class PlaylistTreeView(QTreeView):
@@ -9,4 +9,8 @@ class PlaylistTreeView(QTreeView):
 
 
 class LibraryTableView(QTableView):
+    pass
+
+
+class StackGraphicsView(QGraphicsView):
     pass

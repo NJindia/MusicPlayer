@@ -2,10 +2,11 @@ import bisect
 from typing import cast, override
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
-from PySide6.QtCore import QByteArray, QMimeData, QPoint, QRect, QRectF, Qt
+from PySide6.QtCore import QByteArray, QLineF, QMimeData, QPoint, QRect, QRectF, Qt
 from PySide6.QtGui import (
-    QDrag,
+    QColor,
     QDragEnterEvent,
+    QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
     QFont,
@@ -19,18 +20,18 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
-    QGraphicsView,
     QScrollArea,
     QStyleOptionGraphicsItem,
     QVBoxLayout,
     QWidget,
 )
 
-from music_player.common_gui import paint_artists
-from music_player.constants import QUEUE_ENTRY_HEIGHT, QUEUE_ENTRY_SPACING
+from music_player.common_gui import SongDrag, paint_artists
+from music_player.constants import MUSIC_IDS_MIMETYPE, QUEUE_ENTRY_HEIGHT, QUEUE_ENTRY_SPACING
 from music_player.db_types import DbMusic, get_db_music_cache
 from music_player.signals import SharedSignals
-from music_player.utils import get_pixmap
+from music_player.utils import get_pixmap, get_single_song_drag_text, music_ids_to_qbytearray
+from music_player.view_types import StackGraphicsView
 from music_player.vlc_core import VLCCore
 
 
@@ -169,7 +170,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         self._bounding_rect.setWidth(resize_event.size().width())
 
 
-class QueueEntryGraphicsView(QGraphicsView):
+class HistoryGraphicsView(StackGraphicsView):
     def __init__(self):
         super().__init__()
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -200,7 +201,9 @@ class QueueEntryGraphicsView(QGraphicsView):
         scene_items = self.scene().items()  # pyright: ignore[reportUnknownMemberType]
         for i, proxy in enumerate(self.current_entries):
             proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
-        assert len(self.current_entries) == len(scene_items), f"{len(self.current_entries), len(scene_items)}"
+
+        # We expect the scene to have a QGraphicsLineItem
+        assert len(self.current_entries) == len(scene_items) - 1, f"{len(self.current_entries), len(scene_items) - 1}"
         # TODO REMOVE BAD ENTRIES
 
         self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(scene_items)))  # Update scene size
@@ -218,8 +221,8 @@ class QueueEntryGraphicsView(QGraphicsView):
         return QUEUE_ENTRY_SPACING + index * (QUEUE_ENTRY_SPACING + QUEUE_ENTRY_HEIGHT)
 
 
-class QueueGraphicsView(QueueEntryGraphicsView):
-    mime_data_type = "application/x-queue-entries-index"
+class QueueGraphicsView(HistoryGraphicsView):
+    queue_entries_mimetype = "application/x-queue-entries-index"
 
     def __init__(self, vlc_core: VLCCore, shared_signals: SharedSignals):
         super().__init__()
@@ -229,10 +232,14 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         self._is_dragging: bool = False
         self.setAcceptDrops(True)
 
+        self.drop_indicator_line_item = self.scene().addLine(QLineF(), QColor(0, 0, 255, 100))
+
     @profile
     def initialize_queue(self):
         self.queue_entries = []
-        self.scene().clear()
+        for item in self.scene().items():  # pyright: ignore[reportUnknownMemberType]
+            if isinstance(item, QueueEntryGraphicsItem):
+                self.scene().removeItem(item)
         for i, list_idx in enumerate(self.core.list_indices):
             qe = QueueEntryGraphicsItem(
                 get_db_music_cache().get(self.core.db_indices[list_idx]), self.shared_signals, self.viewport().width()
@@ -268,25 +275,31 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         if event.buttons() == Qt.MouseButton.LeftButton:
             item = self.item_at(event.pos())
             if item:
-                drag = QDrag(self)
+                drag = SongDrag(self, get_single_song_drag_text(item.music.name, item.music.artists))
                 mime_data = QMimeData()
-                mime_data.setData(self.mime_data_type, QByteArray.number(self.queue_entries.index(item)))
+                mime_data.setData(self.queue_entries_mimetype, QByteArray.number(self.queue_entries.index(item)))
+                mime_data.setData(MUSIC_IDS_MIMETYPE, music_ids_to_qbytearray([item.music.id]))
                 drag.setMimeData(mime_data)
-                drag.exec()
+                drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction)
         super().mouseMoveEvent(event)
 
     @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
         assert event.proposedAction() == Qt.DropAction.MoveAction
 
-        queue_index = self.core.current_media_idx + 1 + bisect.bisect_right(self.midpoints, event.pos().y())
-        # TODO PAINT INDICATOR AT INDEX
-        print(queue_index)
+        midpoints = self.midpoints
+        midpoints_index = bisect.bisect_right(midpoints, event.pos().y())
+        line_y = (self.midpoints[midpoints_index - 1] + QUEUE_ENTRY_HEIGHT / 2) if midpoints_index > 0 else 0
+        self.drop_indicator_line_item.setLine(0, line_y, self.viewport().width(), line_y)
+
         event.accept()
 
     @override
     def dropEvent(self, event: QDropEvent):
-        queue_entries_from_idx, ok = cast(tuple[int, bool], event.mimeData().data(self.mime_data_type).toInt(10))
+        self.drop_indicator_line_item.setLine(QLineF())
+        queue_entries_from_idx, ok = cast(
+            tuple[int, bool], event.mimeData().data(self.queue_entries_mimetype).toInt(10)
+        )
         assert ok
         queue_entries_to_idx = self.core.current_media_idx + 1 + bisect.bisect_right(self.midpoints, event.pos().y())
         if queue_entries_to_idx in {queue_entries_from_idx, queue_entries_from_idx + 1}:
@@ -296,6 +309,11 @@ class QueueGraphicsView(QueueEntryGraphicsView):
         self.queue_entries.insert(insert_idx, self.queue_entries.pop(queue_entries_from_idx))
         self.update_scene()
         self.core.list_indices.insert(insert_idx, self.core.list_indices.pop(queue_entries_from_idx))
+
+    @override
+    def dragLeaveEvent(self, event: QDragLeaveEvent, /):
+        self.drop_indicator_line_item.setLine(QLineF())
+        super().dragLeaveEvent(event)
 
     @override
     def dragEnterEvent(self, event: QDragEnterEvent, /):

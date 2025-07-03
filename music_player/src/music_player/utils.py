@@ -1,9 +1,11 @@
+import struct
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
-from PySide6.QtCore import QSize, QThread
+from PySide6.QtCore import QByteArray, QSize, QThread
 from PySide6.QtGui import QPixmap, QPixmapCache, Qt
 
 
@@ -80,3 +82,18 @@ def get_empty_pixmap(height: int | None) -> QPixmap:
     pm = QPixmap(QSize(height, height)) if height is not None else QPixmap()
     pm.fill(Qt.GlobalColor.transparent)  # Fill with transparent pixmap
     return pm
+
+
+def get_single_song_drag_text(title: str, artists: list[str]) -> str:
+    return f"{title} - {', '.join(artists)}"
+
+
+def music_ids_to_qbytearray(music_ids: Sequence[int]) -> QByteArray:
+    packed_data = struct.pack(f">{len(music_ids)}i", *music_ids)
+    return QByteArray(packed_data)
+
+
+def qbytearray_to_music_ids(data: QByteArray) -> list[int]:
+    byte_data = data.data()
+    num_ints = len(byte_data) // 4
+    return list(struct.unpack(f">{num_ints}i", byte_data))

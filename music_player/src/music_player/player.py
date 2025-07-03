@@ -25,7 +25,7 @@ from music_player.db_types import (
 )
 from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
 from music_player.playlist_tree import AddToPlaylistMenu, PlaylistTreeWidget, SortRole, TreeModelItem
-from music_player.queue_gui import QueueEntryGraphicsItem, QueueEntryGraphicsView, QueueGraphicsView
+from music_player.queue_gui import HistoryGraphicsView, QueueEntryGraphicsItem, QueueGraphicsView
 from music_player.signals import SharedSignals
 from music_player.toolbar import MediaToolbar
 from music_player.vlc_core import VLCCore
@@ -62,7 +62,7 @@ class MainWindow(QMainWindow):
 
         main_ui.addWidget(scroll_area, 2)
 
-        self.history = QueueEntryGraphicsView()
+        self.history = HistoryGraphicsView()
         self.queue = QueueGraphicsView(self.core, self.shared_signals)
         self.queue.customContextMenuRequested.connect(self.queue_context_menu)
 

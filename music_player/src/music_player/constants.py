@@ -13,3 +13,5 @@ SKIP_BACK_SECOND_THRESHOLD = 5
 
 MAX_SIDE_BAR_WIDTH = 450
 ID_ROLE = Qt.ItemDataRole.UserRole + 1
+
+MUSIC_IDS_MIMETYPE = "application/x-music-ids"

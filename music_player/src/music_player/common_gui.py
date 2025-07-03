@@ -3,8 +3,8 @@ from functools import cache, partial
 from typing import Literal, cast
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
-from PySide6.QtCore import QModelIndex, QRect, Qt, SignalInstance
-from PySide6.QtGui import QAction, QFont, QFontMetrics, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QModelIndex, QObject, QPoint, QRect, QSize, Qt, SignalInstance
+from PySide6.QtGui import QAction, QDrag, QFont, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QGraphicsOpacityEffect,
@@ -267,3 +267,24 @@ class ShuffleButton(OpacityButton):
 
     def _clicked(self, shuffle_signal: SignalInstance):
         shuffle_signal.emit(self.isChecked())
+
+
+class SongDrag(QDrag):
+    def __init__(self, source: QObject, drag_text: str):
+        super().__init__(source)
+        self.setHotSpot(QPoint(-20, 0))
+
+        font_metrics = QFontMetrics(QFont())
+        size = QSize(font_metrics.horizontalAdvance(drag_text) + 2, font_metrics.height() + 2)
+
+        pixmap = QPixmap(size)
+        painter = QPainter(pixmap)
+        painter.setPen(Qt.GlobalColor.black)
+        painter.setBrush(Qt.GlobalColor.white)
+
+        rect = QRect(0, 0, size.width(), size.height())
+        painter.drawRect(rect)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, drag_text)
+        painter.end()
+
+        self.setPixmap(pixmap)

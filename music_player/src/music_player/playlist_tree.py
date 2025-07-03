@@ -7,6 +7,7 @@ from typing import cast, override
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import (
     QEvent,
+    QMimeData,
     QModelIndex,
     QObject,
     QPersistentModelIndex,
@@ -49,11 +50,11 @@ from PySide6.QtWidgets import (
 )
 
 from music_player.common_gui import AddToQueueAction, NewFolderAction, NewPlaylistAction
-from music_player.constants import ID_ROLE, MAX_SIDE_BAR_WIDTH
+from music_player.constants import ID_ROLE, MAX_SIDE_BAR_WIDTH, MUSIC_IDS_MIMETYPE
 from music_player.db_types import DbStoredCollection, get_collections_by_parent_id
 from music_player.signals import SharedSignals
-from music_player.utils import get_colored_pixmap
-from music_player.view_types import LibraryTableView, PlaylistTreeView
+from music_player.utils import get_colored_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
+from music_player.view_types import PlaylistTreeView
 
 PLAYLIST_ROW_HEIGHT = 50
 
@@ -170,6 +171,15 @@ class PlaylistProxyModel(QSortFilterProxyModel):
                 return False
         return super().filterAcceptsRow(source_row, source_parent)
 
+    @override
+    def mimeData(self, indexes: Sequence[QModelIndex], /):
+        assert len(indexes) == 1
+        collection = cast(DbStoredCollection, self.data(indexes[0], PlaylistTreeView.collection_role))
+        mime_data = QMimeData()
+        if collection.music_ids:
+            mime_data.setData(MUSIC_IDS_MIMETYPE, music_ids_to_qbytearray(collection.music_ids))
+        return mime_data
+
     def data_(self, index: QModelIndex, role: int):
         data = self.data(index, role)
         assert data is not None, (index, role)
@@ -206,10 +216,9 @@ class PlaylistTree(PlaylistTreeView):
 
     @override
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasFormat("application/x-music-ids"):
+        if event.mimeData().hasFormat(MUSIC_IDS_MIMETYPE):
             event.acceptProposedAction()
             return
-        super().dragEnterEvent(event)
 
     @override
     def dragLeaveEvent(self, event: QDragLeaveEvent) -> None:
@@ -227,44 +236,27 @@ class PlaylistTree(PlaylistTreeView):
             qFatal("dropEvent triggered in non-main view PlaylistTree")
 
         self._reset_drop_index()
-        if event.proposedAction() == Qt.DropAction.IgnoreAction:
-            return
-
         drop_index = self.indexAt(event.pos())
         source = event.source()
+        music_ids = qbytearray_to_music_ids(event.mimeData().data(MUSIC_IDS_MIMETYPE))
         if source == self:
-            if event.proposedAction() != Qt.DropAction.MoveAction:
-                qCritical("If PlaylistTree.dropEvent source is itself, DropAction should always be MoveAction")
-            source_index = self.selectedIndexes()[0]
             if not drop_index.isValid() or self.model().data_(drop_index, self.is_folder_role):
                 self._signals.move_collection_signal.emit(
-                    self.model().mapToSource(source_index), self.model().mapToSource(drop_index)
+                    self.model().mapToSource(self.selectedIndexes()[0]),  # TODO MIMEDATA
+                    self.model().mapToSource(drop_index),
                 )
             else:
-                music_ids = cast(DbStoredCollection, self.model().data_(source_index, self.collection_role)).music_ids
                 dest_playlist = cast(DbStoredCollection, self.model().data_(drop_index, self.collection_role))
                 self._signals.add_to_playlist_signal.emit(music_ids, dest_playlist)
+        elif not drop_index.isValid() or self.model().data_(drop_index, self.is_folder_role):
+            source_drop_index = self.model().mapToSource(drop_index)
+            self._signals.create_playlist_signal.emit("New Playlist", source_drop_index, music_ids)
         else:
-            if event.proposedAction() != Qt.DropAction.CopyAction:
-                qFatal("If PlaylistTree.dropEvent source is not itself, DropAction should always be CopyAction")
-            if not isinstance(source, LibraryTableView):
-                qFatal("Bad source")
-                return
-            lib_indices = source.selectionModel().selectedRows()
-            music_ids = [source.model().data(lib_index, ID_ROLE) for lib_index in lib_indices]
-
-            if not drop_index.isValid() or self.model().data_(drop_index, self.is_folder_role):
-                source_drop_index = self.model().mapToSource(drop_index)
-                self._signals.create_playlist_signal.emit("New Playlist", source_drop_index, music_ids)
-            else:
-                self._signals.add_to_playlist_signal.emit(
-                    music_ids, self.model().data_(drop_index, self.collection_role)
-                )
+            self._signals.add_to_playlist_signal.emit(music_ids, self.model().data_(drop_index, self.collection_role))
 
     @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
         def ignore_event():
-            event.setDropAction(Qt.DropAction.IgnoreAction)
             event.ignore()
             self._reset_drop_index()
 

@@ -8,23 +8,29 @@ from typing import Any, cast, override
 import numpy as np
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import (
-    QByteArray,
-    QDataStream,
     QEvent,
-    QIODevice,
     QMimeData,
     QModelIndex,
     QObject,
     QPersistentModelIndex,
     QPoint,
     QRect,
-    QSize,
     QSortFilterProxyModel,
     Qt,
     Signal,
     Slot,
 )
-from PySide6.QtGui import QDrag, QDragMoveEvent, QDropEvent, QFont, QIcon, QMouseEvent, QPainter, QPixmap, QResizeEvent
+from PySide6.QtGui import (
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+    QFont,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPixmap,
+    QResizeEvent,
+)
 from PySide6.QtSql import QSqlQueryModel
 from PySide6.QtWidgets import (
     QApplication,
@@ -45,13 +51,14 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import (
     ShuffleButton,
+    SongDrag,
     get_artist_text_rect_text_tups,
     get_pause_button_icon,
     get_play_button_icon,
     paint_artists,
     text_is_buffer,
 )
-from music_player.constants import ID_ROLE
+from music_player.constants import ID_ROLE, MUSIC_IDS_MIMETYPE
 from music_player.database import PATH_TO_IMGS, get_database_manager
 from music_player.db_types import DbAlbum, DbArtist, DbCollection, DbStoredCollection
 from music_player.signals import SharedSignals
@@ -60,9 +67,12 @@ from music_player.utils import (
     datetime_to_date_str,
     get_empty_pixmap,
     get_pixmap,
+    get_single_song_drag_text,
+    music_ids_to_qbytearray,
+    qbytearray_to_music_ids,
     timestamp_to_str,
 )
-from music_player.view_types import LibraryTableView, PlaylistTreeView
+from music_player.view_types import LibraryTableView, PlaylistTreeView, StackGraphicsView
 from music_player.vlc_core import VLCCore
 
 PADDING = 5
@@ -231,17 +241,16 @@ class MusicTableModel(QSqlQueryModel):
 
     @override
     def mimeData(self, indexes: Sequence[QModelIndex], /):
+        music_ids: list[int] = []
         last_row = -1
-        music_id_arr = QByteArray()
-        stream = QDataStream(music_id_arr, QIODevice.OpenModeFlag.WriteOnly)
         for index in indexes:
             row = index.row()
             if last_row != row:
-                stream.writeInt32(self.get_music_id(row))
+                music_ids.append(self.get_music_id(row))
             last_row = row
 
         data = QMimeData()
-        data.setData("application/x-music-ids", music_id_arr)
+        data.setData(MUSIC_IDS_MIMETYPE, music_ids_to_qbytearray(music_ids))
         return data
 
     @override
@@ -789,52 +798,35 @@ class MusicLibraryTable(LibraryTableView):
             model = self.model()
             title = model.data(model.index(indices[0].row(), ColIndex.MUSIC_NAME.value))
             artists = model.data(model.index(indices[0].row(), ColIndex.ARTISTS.value))
-            text = f"{title} - {', '.join(artists)}"
+            text = get_single_song_drag_text(title, artists)
         else:
             text = f"{row_count} items"
 
-        drag = QDrag(self)
-        drag.setHotSpot(QPoint(-20, 0))
-        font_metrics = self.fontMetrics()
-        size = QSize(font_metrics.horizontalAdvance(text) + 2, font_metrics.height() + 2)
-
-        pixmap = QPixmap(size)
-        painter = QPainter(pixmap)
-        painter.setPen(Qt.GlobalColor.black)
-        painter.setBrush(Qt.GlobalColor.white)
-
-        rect = QRect(0, 0, size.width(), size.height())
-        painter.drawRect(rect)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, text)
-        painter.end()
-
-        drag.setPixmap(pixmap)
+        drag = SongDrag(self, text)
         drag.setMimeData(self.model().mimeData(indices))  # pyright: ignore[reportUnknownMemberType]
         drag.exec(supportedActions)
 
     @override
-    def dragMoveEvent(self, event: QDragMoveEvent, /):
-        print("MOVE")
-        source = event.source()
-        playlist = cast(MusicLibraryWidget, self.parent()).collection
-        if playlist is not None and not playlist.is_protected and isinstance(source, PlaylistTreeView):
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasFormat(MUSIC_IDS_MIMETYPE):
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
-            return
-        event.setDropAction(Qt.DropAction.IgnoreAction)
-        event.ignore()
 
-    @profile
+    @override
+    def dragMoveEvent(self, event: QDragMoveEvent, /):
+        source = event.source()
+        playlist = cast(MusicLibraryWidget, self.parent()).collection
+        if playlist is None or playlist.is_protected or not isinstance(source, (PlaylistTreeView, StackGraphicsView)):
+            event.ignore()
+        else:
+            event.accept()
+
     @override
     def dropEvent(self, event: QDropEvent, /):
-        source = event.source()
-        if isinstance(source, PlaylistTreeView):
-            dest_playlist = cast(MusicLibraryWidget, self.parent()).collection
-            assert dest_playlist is not None
-            src_collection = cast(
-                DbStoredCollection, source.model().data(source.selectedIndexes()[0], PlaylistTreeView.collection_role)
-            )
-            self._signals.add_to_playlist_signal.emit(src_collection.music_ids, dest_playlist)
+        music_ids = qbytearray_to_music_ids(event.mimeData().data(MUSIC_IDS_MIMETYPE))
+        dest_playlist = cast(MusicLibraryWidget, self.parent()).collection
+        assert dest_playlist is not None
+        self._signals.add_to_playlist_signal.emit(music_ids, dest_playlist)
 
     @override
     def mouseMoveEvent(self, event: QMouseEvent):
