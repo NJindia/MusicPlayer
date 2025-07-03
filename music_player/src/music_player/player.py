@@ -361,7 +361,7 @@ class MainWindow(QMainWindow):
 
         if len(selected_song_indices) == 1:
             print(selected_song_indices)
-            selected_music = DbMusic.from_db(selected_song_indices[0])
+            selected_music = get_db_music_cache().get(selected_song_indices[0])
             menu.addSeparator()
 
             def get_go_to_artist_action(_artist_id: int, _name: str = "Go to artist") -> QAction:

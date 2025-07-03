@@ -19,7 +19,7 @@ class VLCCore:
         self.player_event_manager.event_detach(EventType.MediaPlayerPlaying)
 
     def load_media_from_music_ids(self, music_ids: tuple[int, ...]):
-        paths = [DbMusic.from_db(i).file_path for i in music_ids]
+        paths = [get_db_music_cache().get(i).file_path for i in music_ids]
         self.media_list = self.instance.media_list_new(paths)
         self.list_player.set_media_list(self.media_list)
         self.list_indices = list(range(len(paths)))
