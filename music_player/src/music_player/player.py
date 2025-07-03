@@ -174,7 +174,7 @@ class MainWindow(QMainWindow):
     @Slot()
     @profile
     def add_to_queue(self, music_db_indices: Sequence[int]):
-        print("CONNECT START")
+        t = datetime.now(tz=UTC)
         items: list[QueueEntryGraphicsItem] = []
         list_indices: list[int] = []
         for music_db_index in tqdm(music_db_indices):
@@ -198,7 +198,7 @@ class MainWindow(QMainWindow):
             self.core.list_indices[:insert_idx] + list_indices + self.core.list_indices[insert_idx:]
         )
         self.queue.insert_queue_entries(insert_idx, items)
-        print("CONNECT END")
+        print("add_to_queue", (datetime.now(tz=UTC) - t).microseconds / 1000)
 
     @Slot()
     def remove_from_queue(self, item: QueueEntryGraphicsItem):
@@ -247,7 +247,6 @@ class MainWindow(QMainWindow):
 
     def load_media(self, music_ids: tuple[int, ...]):
         """Set a new MediaList, and all the other fields that would also need to be set to work properly."""
-        print(music_ids)
         self.core.load_media_from_music_ids(music_ids)
         self.queue.initialize_queue()
 
@@ -360,7 +359,6 @@ class MainWindow(QMainWindow):
             menu.addAction(remove_from_curr_playlist_action)
 
         if len(selected_song_indices) == 1:
-            print(selected_song_indices)
             selected_music = get_db_music_cache().get(selected_song_indices[0])
             menu.addSeparator()
 

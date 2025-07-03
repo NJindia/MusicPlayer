@@ -68,6 +68,8 @@ class VLCCore:
         self.list_player.play_item_at_index(self.list_indices[list_index])
 
     def previous(self):
+        if self.current_media_idx == -1:
+            return
         self.current_media_idx -= 1
         self.current_media_idx = max(self.current_media_idx, 0)
         self.list_player.play_item_at_index(self.list_indices[self.current_media_idx])
