@@ -539,8 +539,9 @@ class PlaylistTreeWidget(QWidget):
         if proxy_index.isValid():
             item = self.item_at_index(proxy_index, is_source=False)
 
-            menu.addAction(AddToQueueAction(item.collection.music_ids, self.signals, menu))
-            menu.addSeparator()
+            if item.collection.music_ids:
+                menu.addAction(AddToQueueAction(item.collection.music_ids, self.signals, menu))
+                menu.addSeparator()
 
             # Set root for adding playlist/folder
             if item.collection.is_folder:  # Folder is a valid root
