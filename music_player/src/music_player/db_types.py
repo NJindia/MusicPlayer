@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 from functools import cache, cached_property
 from itertools import groupby
@@ -153,6 +153,7 @@ class DbStoredCollection(DbCollection):
     _music_ids: tuple[int, ...]
     _music_added_on: list[datetime]
     _album_img_path_counter: Counter[Path]
+    _pixmap_heights: set[int] = field(default_factory=set[int])
 
     # def _music_ids(self) -> tuple[int, ...]:
     #     match self.collection_type:
@@ -276,6 +277,8 @@ class DbStoredCollection(DbCollection):
     @profile
     def add_music_ids(self, music_ids: Sequence[int]) -> None:
         assert self.collection_type == "playlist"
+        self._removed_cached_thumbnails()
+
         added_on = datetime.now(tz=UTC)
         self._music_ids = tuple(music_ids) + self._music_ids
         self._music_added_on = [added_on] * len(music_ids) + self._music_added_on
@@ -287,8 +290,25 @@ class DbStoredCollection(DbCollection):
         get_database_manager().execute_values(add_music_id_sql, args)
         self.mark_as_updated()
 
+    def _removed_cached_thumbnails(self):
+        for height in self._pixmap_heights:
+            QPixmapCache.remove(self._get_thumbnail_pixmap_key(height))
+
     def remove_music_ids(self, music_ids: tuple[int, ...]) -> None:
         assert self.collection_type == "playlist"
+        self._removed_cached_thumbnails()
+
+        _music_ids: list[int] = []
+        _music_added_ons: list[datetime] = []
+        for idx, music_id in enumerate(self._music_ids):
+            if music_id not in music_ids:
+                _music_added_ons.append(self._music_added_on[idx])
+                _music_ids.append(music_id)
+        self._music_ids = tuple(_music_ids)
+        self._music_added_on = _music_added_ons
+        music = [get_db_music_cache().get(i) for i in music_ids]
+        self._album_img_path_counter -= Counter(m.img_path for m in music if m.img_path is not None)
+
         delete_music_id_sql = "DELETE FROM collection_children WHERE collection_id = %s AND music_id IN %s"
         get_database_manager().execute_query(delete_music_id_sql, (self.id, music_ids))
         self.mark_as_updated()
@@ -325,11 +345,15 @@ class DbStoredCollection(DbCollection):
         QPixmapCache.insert(key, combined_pixmap)
         return combined_pixmap
 
+    def _get_thumbnail_pixmap_key(self, height: int) -> str:
+        return f"collection_{self.id}_{height}"
+
     def get_thumbnail_pixmap(self, height: int) -> QPixmap:
-        key = f"collection_{self.id}_{height}"
+        key = self._get_thumbnail_pixmap_key(height)
         pixmap = QPixmap()
         if QPixmapCache.find(key, pixmap):
             return pixmap
+        self._pixmap_heights.add(height)
         match self.collection_type:
             case "playlist":
                 if self.is_protected:

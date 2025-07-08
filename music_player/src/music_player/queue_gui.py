@@ -30,8 +30,8 @@ from music_player.common_gui import SongDrag, paint_artists
 from music_player.constants import MUSIC_IDS_MIMETYPE, QUEUE_ENTRY_HEIGHT, QUEUE_ENTRY_SPACING
 from music_player.db_types import DbMusic, get_db_music_cache
 from music_player.signals import SharedSignals
-from music_player.utils import get_pixmap, get_single_song_drag_text, music_ids_to_qbytearray
-from music_player.view_types import StackGraphicsView
+from music_player.utils import get_pixmap, get_single_song_drag_text, music_ids_to_qbytearray, qbytearray_to_music_ids
+from music_player.view_types import LibraryTableView, PlaylistTreeView, StackGraphicsView
 from music_player.vlc_core import VLCCore
 
 
@@ -285,10 +285,14 @@ class QueueGraphicsView(HistoryGraphicsView):
 
     @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
-        assert event.proposedAction() == Qt.DropAction.MoveAction
+        source = event.source()
+        if isinstance(source, QueueGraphicsView):
+            assert event.proposedAction() == Qt.DropAction.MoveAction
+        else:
+            assert event.proposedAction() == Qt.DropAction.CopyAction
 
         midpoints = self.midpoints
-        midpoints_index = bisect.bisect_right(midpoints, event.pos().y())
+        midpoints_index = bisect.bisect_right(midpoints, self.mapToScene(event.pos()).y())
         line_y = (self.midpoints[midpoints_index - 1] + QUEUE_ENTRY_HEIGHT / 2) if midpoints_index > 0 else 0
         self.drop_indicator_line_item.setLine(0, line_y, self.viewport().width(), line_y)
 
@@ -297,18 +301,27 @@ class QueueGraphicsView(HistoryGraphicsView):
     @override
     def dropEvent(self, event: QDropEvent):
         self.drop_indicator_line_item.setLine(QLineF())
-        queue_entries_from_idx, ok = cast(
-            tuple[int, bool], event.mimeData().data(self.queue_entries_mimetype).toInt(10)
-        )
-        assert ok
-        queue_entries_to_idx = self.core.current_media_idx + 1 + bisect.bisect_right(self.midpoints, event.pos().y())
-        if queue_entries_to_idx in {queue_entries_from_idx, queue_entries_from_idx + 1}:
-            event.ignore()
-            return
-        insert_idx = queue_entries_to_idx if queue_entries_from_idx > queue_entries_to_idx else queue_entries_to_idx - 1
-        self.queue_entries.insert(insert_idx, self.queue_entries.pop(queue_entries_from_idx))
+        source = event.source()
+        scene_y = self.mapToScene(event.pos()).y()
+        queue_entries_to_idx = self.core.current_media_idx + 1 + bisect.bisect_right(self.midpoints, scene_y)
+        if isinstance(source, QueueGraphicsView):
+            queue_entries_from_idx, ok = cast(
+                tuple[int, bool], event.mimeData().data(self.queue_entries_mimetype).toInt(10)
+            )
+            assert ok
+            if queue_entries_to_idx in {queue_entries_from_idx, queue_entries_from_idx + 1}:
+                event.ignore()
+                return
+            insert_idx = (
+                queue_entries_to_idx if queue_entries_from_idx > queue_entries_to_idx else queue_entries_to_idx - 1
+            )
+            self.queue_entries.insert(insert_idx, self.queue_entries.pop(queue_entries_from_idx))
+            self.core.list_indices.insert(insert_idx, self.core.list_indices.pop(queue_entries_from_idx))
+        elif isinstance(source, (LibraryTableView, PlaylistTreeView)):
+            music_ids_to_add = qbytearray_to_music_ids(event.mimeData().data(MUSIC_IDS_MIMETYPE))
+            self.shared_signals.add_to_queue_signal.emit(music_ids_to_add, queue_entries_to_idx)
+
         self.update_scene()
-        self.core.list_indices.insert(insert_idx, self.core.list_indices.pop(queue_entries_from_idx))
 
     @override
     def dragLeaveEvent(self, event: QDragLeaveEvent, /):

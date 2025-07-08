@@ -175,11 +175,11 @@ class MainWindow(QMainWindow):
 
     @Slot()
     @profile
-    def add_to_queue(self, music_db_indices: Sequence[int]):
+    def add_to_queue(self, music_ids: Sequence[int], insert_index: int):
         t = datetime.now(tz=UTC)
         items: list[QueueEntryGraphicsItem] = []
         list_indices: list[int] = []
-        for music_db_index in tqdm(music_db_indices):
+        for music_db_index in tqdm(music_ids):
             music = get_db_music_cache().get(music_db_index)
             if music_db_index in self.core.db_indices:
                 list_index = self.core.db_indices.index(music_db_index)
@@ -195,7 +195,7 @@ class MainWindow(QMainWindow):
             )
             items.append(item)
 
-        insert_idx = self.core.current_media_idx + 1
+        insert_idx = self.core.current_media_idx + 1 if insert_index == -1 else insert_index
         self.core.list_indices = (
             self.core.list_indices[:insert_idx] + list_indices + self.core.list_indices[insert_idx:]
         )

@@ -6,7 +6,7 @@ from music_player.db_types import DbCollection, DbStoredCollection
 
 
 class SharedSignals(QObject):
-    add_to_queue_signal = Signal(Sequence)  # (Sequence[int) (music_ids)
+    add_to_queue_signal = Signal(Sequence, int)  # (Sequence[int], ...) (music_ids, insert_index)
     add_to_playlist_signal = Signal(
         Sequence, DbStoredCollection
     )  # (Sequence[int], DbStoredCollection) (music_ids, ...)
