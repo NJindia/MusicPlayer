@@ -297,23 +297,19 @@ class PlaylistTree(PlaylistTreeView):
             self._reset_drop_index()
             self.drop_index_ = drop_index
             if drop_index.isValid():
-                self.setStyleSheet("")
                 self.viewport().update(self.visualRect(drop_index))
             else:
-                print("SETTING")
                 self.setStyleSheet("QTreeView { border: 1px solid white; }")
         event.accept()
 
     def _reset_drop_index(self):
         if self.drop_index_ is None:
             return
+        self.setStyleSheet("")
         if self.drop_index_.isValid():
             old_idx = self.drop_index_
-            self.drop_index_ = None
             self.viewport().update(self.visualRect(old_idx))
-        else:
-            self.drop_index_ = None
-            self.setStyleSheet("")
+        self.drop_index_ = None
 
 
 class PlaylistTreeWidget(QWidget):
@@ -329,10 +325,10 @@ class PlaylistTreeWidget(QWidget):
         flattened_model: QStandardItemModel | None = None,
     ):
         super().__init__(parent)
+        self.setObjectName("PlaylistTreeWidget")
         self.is_main_view = is_main_view
         self.signals = signals
 
-        self.setStyleSheet("QWidget { margin: 0px; border: none; }")
         self.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
 
         if self.is_main_view:
@@ -371,13 +367,10 @@ class PlaylistTreeWidget(QWidget):
             create_menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])  # pyright: ignore[reportUnknownMemberType]
 
             new_button = QToolButton(self)
+            new_button.setObjectName("NewCollectionButton")
             new_button.setText("+ New")
             new_button.setMenu(create_menu)
             new_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-            new_button.setStyleSheet("""
-                        QToolButton::menu-indicator { image: none; }
-                        QToolButton { border-radius: 5px; background: grey}
-                    """)
 
             header_top_layout = QHBoxLayout()
             header_top_layout.setContentsMargins(0, 0, 0, 0)
@@ -391,13 +384,10 @@ class PlaylistTreeWidget(QWidget):
         search_bar.setPlaceholderText(f"Search {'folders' if folders_only else 'playlists'}")
 
         self.sort_button = QToolButton(self)  # TODO CUSTOM WIDGET TO GET RID OF SPACING BETWEEN
+        self.sort_button.setObjectName("SortButton")
         self.sort_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.sort_button.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.sort_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.sort_button.setStyleSheet("""
-            QToolButton::menu-indicator { image: none; }
-            QToolButton { padding: 5px; }
-        """)
         self.update_sort_button()
 
         self.sort_menu = SortMenu(self)
@@ -608,13 +598,8 @@ class SortRoleAction(QAction):
 class SortMenu(QMenu):
     def __init__(self, parent: PlaylistTreeWidget) -> None:
         super().__init__(parent)
+        self.setObjectName("SortMenu")
         self.installEventFilter(self)
-        self.setStyleSheet("""
-            QMenu::item {
-                padding: 5px;
-                spacing: 0px;
-            }
-        """)
 
         self.sort_updated_action = SortRoleAction(SortRole.UPDATED, parent, self)
         self.sort_played_action = SortRoleAction(SortRole.PLAYED, parent, self)

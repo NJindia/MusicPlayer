@@ -114,7 +114,6 @@ class VolumeSlider(QHBoxLayout):
         self.volume_slider.setValue(current_volume)
         self.volume_slider.setMaximum(100)
         self.volume_slider.valueChanged.connect(self.update_volume)
-        self.volume_slider.setStyleSheet("QSlider { background: transparent; }")
 
         self.volume_button: QToolButton = QToolButton()
         self.volume_button.setCheckable(True)
@@ -152,11 +151,10 @@ class MediaToolbar(QToolBar):
         """Start audio playback if none is playing, otherwise pause existing."""
         if self.core.list_player.is_playing():
             self.core.list_player.pause()
+        elif self.core.current_media_idx == -1:
+            self.core.next()
         else:
-            if self.core.current_media_idx == -1:
-                self.core.next()
-            else:
-                self.core.list_player.play()
+            self.core.list_player.play()
 
     @Slot()
     def press_rewind_button(self):
@@ -185,6 +183,7 @@ class MediaToolbar(QToolBar):
 
     def __init__(self, core: VLCCore, shared_signals: SharedSignals):
         super().__init__(floatable=False, movable=False, orientation=Qt.Orientation.Horizontal)
+        self.setObjectName("MediaToolbar")
         self.core = core
 
         self.setFixedHeight(100)
@@ -201,8 +200,6 @@ class MediaToolbar(QToolBar):
         ### MEDIA PLAYBACK BUTTONS AND SCRUBBER
         media_control_widget = QWidget()
         media_control_vbox = QVBoxLayout(media_control_widget)
-
-        media_control_widget.setStyleSheet("QWidget { background: transparent; }")
 
         ### MEDIA PLAYBACK BUTTONS
         media_control_button_hbox = QHBoxLayout()

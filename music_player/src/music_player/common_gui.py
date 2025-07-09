@@ -1,6 +1,6 @@
 from collections.abc import Callable, Sequence
 from functools import cache, partial
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QModelIndex, QObject, QPoint, QRect, QSize, Qt, SignalInstance
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
     QToolButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from music_player.signals import SharedSignals
@@ -170,7 +171,7 @@ class OpacityButton(QToolButton):
 
     def __init__(self):
         super().__init__()
-        self.setStyleSheet("background: transparent;")
+        self.setObjectName("OpacityButton")
         self.graphics_effect = QGraphicsOpacityEffect(self)
         self.graphics_effect.setOpacity(self.button_off_opacity)
         self.setGraphicsEffect(self.graphics_effect)
@@ -221,7 +222,6 @@ class _TempMainDialog(QDialog):
     def __init__(self, parent: QMainWindow):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
-        self.setStyleSheet("QDialog { border-radius: 5px; border: 1px solid white; }")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, on=True)
 
 
@@ -236,6 +236,7 @@ class _CreateDialog(_TempMainDialog):
         music_ids_to_add: Sequence[int] | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setObjectName("InteractiveDialogue")
         self.source_root_index = source_root_index
         self.signals = signals
         self.mode = mode
@@ -246,16 +247,10 @@ class _CreateDialog(_TempMainDialog):
         font.setBold(True)
         header.setFont(font)  # pyright: ignore[reportUnknownMemberType]
 
-        close_button = QPushButton(self)
-        close_button.setText("X")
-        close_button.setStyleSheet("QPushButton { border: none; }")
-        close_button.clicked.connect(self.close)
-        close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-
         header_layout = QHBoxLayout()
         header_layout.addWidget(header)
         header_layout.addStretch()
-        header_layout.addWidget(close_button)
+        header_layout.addWidget(CloseButton(self, self.close))
 
         self.name = QLineEdit(self)
         self.name.setPlaceholderText(f"{self.mode.capitalize()} name")
@@ -264,7 +259,6 @@ class _CreateDialog(_TempMainDialog):
         self.confirm_button = QPushButton(self)
         self.confirm_button.setEnabled(False)
         self.confirm_button.setText("Create")
-        self.confirm_button.setStyleSheet("QPushButton { border-radius: 5px; }")
         self.confirm_button.released.connect(partial(self.create_clicked, move_from_index, music_ids_to_add))
 
         button_layout = QHBoxLayout()
@@ -294,6 +288,15 @@ class _CreateDialog(_TempMainDialog):
         self.close()
 
 
+class CloseButton(QPushButton):
+    def __init__(self, parent: QWidget, clicked_connect: Callable[[], Any]):
+        super().__init__(parent)
+        self.setObjectName("CloseButton")
+        self.setText("X")
+        self.clicked.connect(clicked_connect)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+
 class ConfirmationDialog(_TempMainDialog):
     def __init__(
         self,
@@ -304,6 +307,7 @@ class ConfirmationDialog(_TempMainDialog):
         confirm_action: Callable[[], None],
     ):
         super().__init__(parent)
+        self.setObjectName("InteractiveDialogue")
 
         header_label = QLabel(header, self)
         font = QFont()
@@ -336,3 +340,11 @@ class ConfirmationDialog(_TempMainDialog):
     def confirm_clicked(self, confirm_action: Callable[[], None]) -> None:
         confirm_action()
         self.close()
+
+
+class WarningPopup(_TempMainDialog):
+    def __init__(self, parent: QMainWindow):
+        super().__init__(parent)
+        self.setObjectName("WarningPopup")
+        # self.widget = QWidget(self)
+        self.setWindowOpacity(0.7)

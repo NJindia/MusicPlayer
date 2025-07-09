@@ -329,9 +329,10 @@ class ProxyModel(QSortFilterProxyModel):
         return self.sourceModel().get_music_id(source_model_index.row())
 
 
-class TextLabel(QLabel):
+class ElidedTextLabel(QLabel):
     def __init__(self, font_size: int):
         super().__init__()
+        self.setObjectName("ElidedTextLabel")
         self.setContentsMargins(0, 0, 0, 0)
         self.setMargin(0)
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
@@ -341,7 +342,6 @@ class TextLabel(QLabel):
         type_font.setPointSize(font_size)
         self.original_text = ""
         self.setFont(type_font)  # pyright: ignore[reportUnknownMemberType]
-        self.setStyleSheet("QLabel { padding: 0px; margin: 0px; } ")
 
     @override
     def setText(self, text: str):
@@ -366,7 +366,6 @@ class MusicLibraryScrollArea(QScrollArea):
     def __init__(self, library: "MusicLibraryWidget"):
         super().__init__()
         self.library = library
-        self.setStyleSheet("QScrollArea { padding: 0px; margin: 0px; border: none; }")
         self.setWidgetResizable(True)
         self.setWidget(self.library)
 
@@ -423,10 +422,10 @@ class LibraryHeaderWidget(QWidget):
         header_text_layout.setContentsMargins(0, 0, 0, 0)
         header_text_layout.addStretch()
 
-        self.header_label_type = TextLabel(10)
-        self.header_label_title = TextLabel(20)
-        self.header_label_subtitle = TextLabel(12)
-        self.header_label_meta = TextLabel(12)
+        self.header_label_type = ElidedTextLabel(10)
+        self.header_label_title = ElidedTextLabel(20)
+        self.header_label_subtitle = ElidedTextLabel(12)
+        self.header_label_meta = ElidedTextLabel(12)
 
         header_text_layout.addWidget(self.header_label_type)
         header_text_layout.addWidget(self.header_label_title)
@@ -477,7 +476,7 @@ class LibraryHeaderWidget(QWidget):
 class MusicLibraryWidget(QWidget):
     def __init__(self, shared_signals: SharedSignals, core: VLCCore):
         super().__init__()
-        self.setStyleSheet("QWidget { margin: 0px; border: none; }")
+        self.setObjectName("MusicLibrary")
         self.library_id: str = ""
         self.core = core
 
@@ -649,10 +648,7 @@ class TableHeader(QHeaderView):
     def __init__(self):
         super().__init__(Qt.Orientation.Horizontal)
         self.setSectionsClickable(True)
-        self.setStyleSheet("""
-            QHeaderView::section { background: grey; }
-            QHeaderView { background: transparent; }
-        """)
+        self.setObjectName("LibraryTableHeader")
         self.setSortIndicatorClearable(True)
         self.setSortIndicatorShown(True)
         self.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
@@ -729,6 +725,7 @@ class MusicLibraryTable(LibraryTableView):
 
     def __init__(self, shared_signals: SharedSignals, parent: MusicLibraryWidget):
         super().__init__(parent)
+        self.setObjectName("LibraryTableView")
         self._signals = shared_signals
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
@@ -743,10 +740,6 @@ class MusicLibraryTable(LibraryTableView):
         self.setDragDropOverwriteMode(False)
         self.setAcceptDrops(True)
 
-        self.setStyleSheet("""
-            QTableView { background: black; border: none; }
-            QTableView::item { background: transparent; }
-        """)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalHeader(TableHeader())

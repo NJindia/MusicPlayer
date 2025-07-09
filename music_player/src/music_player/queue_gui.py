@@ -175,9 +175,9 @@ class HistoryGraphicsView(StackGraphicsView):
 
     def __init__(self):
         super().__init__()
+        self.setObjectName("StackGraphicsView")
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.setScene(QGraphicsScene())
-        self.setStyleSheet("QueueEntryGraphicsView {border: none; margin: 0px;}")
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.queue_entries: list[QueueEntryGraphicsItem] = []
