@@ -345,7 +345,8 @@ class MainWindow(QMainWindow):
         ConfirmationDialog(
             self,
             f"Delete {collection.collection_type.capitalize()}",
-            f"Are you sure you want to delete <b>{collection.name}</b>?",
+            f"Are you sure you want to delete <b>{collection.name}</b>"
+            f"{' and all its children' if collection.is_folder else ''}?",
             "Delete",
             partial(self._delete_collection, collection),
         ).exec()

@@ -5,7 +5,6 @@ from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeSt
 from PySide6.QtCore import QByteArray, QLineF, QMimeData, QPoint, QRect, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
-    QDragEnterEvent,
     QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
@@ -171,6 +170,9 @@ class QueueEntryGraphicsItem(QGraphicsItem):
 
 
 class HistoryGraphicsView(StackGraphicsView):
+    queue_entries_mimetype = "application/x-queue-entries-index"
+    possible_drop_actions = Qt.DropAction.CopyAction
+
     def __init__(self):
         super().__init__()
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -198,16 +200,10 @@ class HistoryGraphicsView(StackGraphicsView):
 
     @profile
     def update_scene(self):
-        scene_items = self.scene().items()  # pyright: ignore[reportUnknownMemberType]
         for i, proxy in enumerate(self.current_entries):
             proxy.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
-
-        # We expect the scene to have a QGraphicsLineItem
-        assert len(self.current_entries) == len(scene_items) - 1, f"{len(self.current_entries), len(scene_items) - 1}"
         # TODO REMOVE BAD ENTRIES
-
-        self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(scene_items)))  # Update scene size
-        self.viewport().update()
+        self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(self.current_entries)))  # Update scene size
 
     @profile
     def insert_queue_entries(self, queue_insert_index: int, entries: list[QueueEntryGraphicsItem]) -> None:
@@ -220,9 +216,22 @@ class HistoryGraphicsView(StackGraphicsView):
     def get_y_pos(index: int) -> float:
         return QUEUE_ENTRY_SPACING + index * (QUEUE_ENTRY_SPACING + QUEUE_ENTRY_HEIGHT)
 
+    @override
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if event.buttons() == Qt.MouseButton.LeftButton:
+            item = self.item_at(event.pos())
+            if item:
+                drag = SongDrag(self, get_single_song_drag_text(item.music.name, item.music.artists))
+                mime_data = QMimeData()
+                mime_data.setData(self.queue_entries_mimetype, QByteArray.number(self.queue_entries.index(item)))
+                mime_data.setData(MUSIC_IDS_MIMETYPE, music_ids_to_qbytearray([item.music.id]))
+                drag.setMimeData(mime_data)
+                drag.exec(self.possible_drop_actions)
+        super().mouseMoveEvent(event)
+
 
 class QueueGraphicsView(HistoryGraphicsView):
-    queue_entries_mimetype = "application/x-queue-entries-index"
+    possible_drop_actions = Qt.DropAction.MoveAction | Qt.DropAction.CopyAction
 
     def __init__(self, vlc_core: VLCCore, shared_signals: SharedSignals):
         super().__init__()
@@ -271,19 +280,6 @@ class QueueGraphicsView(HistoryGraphicsView):
         return [self.get_y_pos(i) + QUEUE_ENTRY_HEIGHT / 2 for i in range(len(self.current_entries))]
 
     @override
-    def mouseMoveEvent(self, event: QMouseEvent):
-        if event.buttons() == Qt.MouseButton.LeftButton:
-            item = self.item_at(event.pos())
-            if item:
-                drag = SongDrag(self, get_single_song_drag_text(item.music.name, item.music.artists))
-                mime_data = QMimeData()
-                mime_data.setData(self.queue_entries_mimetype, QByteArray.number(self.queue_entries.index(item)))
-                mime_data.setData(MUSIC_IDS_MIMETYPE, music_ids_to_qbytearray([item.music.id]))
-                drag.setMimeData(mime_data)
-                drag.exec(Qt.DropAction.CopyAction | Qt.DropAction.MoveAction)
-        super().mouseMoveEvent(event)
-
-    @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
         source = event.source()
         assert (
@@ -328,8 +324,3 @@ class QueueGraphicsView(HistoryGraphicsView):
     def dragLeaveEvent(self, event: QDragLeaveEvent, /):
         self.drop_indicator_line_item.setLine(QLineF())
         super().dragLeaveEvent(event)
-
-    @override
-    def dragEnterEvent(self, event: QDragEnterEvent, /):
-        print("CUSTOM_SORT DRAG")
-        super().dragEnterEvent(event)
