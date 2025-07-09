@@ -496,24 +496,7 @@ class PlaylistTreeWidget(QWidget):
     @Slot()
     def delete_collection(self, proxy_index: QModelIndex) -> None:
         item = self.flattened_proxy_index_to_default_model_item(proxy_index)
-        parent = cast(QStandardItem | None, item.parent())
-        parent_index = (parent or self.model_.invisibleRootItem()).index()
-        self.model_.beginRemoveRows(parent_index, item.row(), item.row())
-        (self.model_ if parent is None else parent).removeRow(item.row())
-
-        if item.collection.is_folder:
-
-            def get_recursive_children(parent_id: int) -> Iterator[DbStoredCollection]:
-                for collection in get_collections_by_parent_id().get(parent_id, []):
-                    if collection.is_folder:
-                        yield from get_recursive_children(collection.id)
-                    yield collection
-
-            for child in list(get_recursive_children(item.collection.id)):
-                self.signals.delete_collection_signal.emit(child)
-            get_collections_by_parent_id.cache_clear()
         self.signals.delete_collection_signal.emit(item.collection)
-        print("TODO: PUSH CONFIRMATION")
 
     @Slot()
     def update_playlist(self, tl_source_index: QModelIndex, _: QModelIndex, roles: list[int]) -> None:

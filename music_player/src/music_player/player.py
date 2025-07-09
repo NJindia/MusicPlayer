@@ -3,23 +3,31 @@ from collections import Counter
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from functools import partial
+from typing import cast
 
 import numpy as np
 import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
 import vlc
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QAction, QPixmapCache
+from PySide6.QtGui import QAction, QPixmapCache, QStandardItem
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QWidget
 from tqdm import tqdm
 
-from music_player.common_gui import AddToQueueAction, CreateMode, get_pause_button_icon, get_play_button_icon
+from music_player.common_gui import (
+    AddToQueueAction,
+    ConfirmationDialog,
+    CreateMode,
+    get_pause_button_icon,
+    get_play_button_icon,
+)
 from music_player.constants import MAX_SIDE_BAR_WIDTH
 from music_player.database import get_database_manager
 from music_player.db_types import (
     DbCollection,
     DbMusic,
     DbStoredCollection,
+    get_collection_children,
     get_collections_by_parent_id,
     get_db_music_cache,
 )
@@ -93,11 +101,12 @@ class MainWindow(QMainWindow):
 
         self.shared_signals.play_collection_signal.connect(self.play_collection)
         self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_collection)
-        self.shared_signals.create_playlist_signal.connect(partial(self.create, "playlist"))
-        self.shared_signals.create_folder_signal.connect(partial(self.create, "folder"))
+        self.shared_signals.create_playlist_signal.connect(partial(self.create_collection, "playlist"))
+        self.shared_signals.create_folder_signal.connect(partial(self.create_collection, "folder"))
         self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
         self.shared_signals.toggle_shuffle_signal.connect(self.shuffle_button_clicked)
         self.shared_signals.play_from_queue_signal.connect(self.play_from_queue)
+        self.shared_signals.delete_collection_signal.connect(self.delete_collection)
 
     @Slot()
     def media_changed_ui(self):
@@ -270,7 +279,7 @@ class MainWindow(QMainWindow):
         self.shared_signals.play_collection_signal.emit(playlist, 0)
 
     @Slot()
-    def create(
+    def create_collection(
         self,
         mode: CreateMode,
         name: str,
@@ -314,6 +323,32 @@ class MainWindow(QMainWindow):
                     assert isinstance(callback_value, Sequence)
                     if len(callback_value):
                         self.shared_signals.add_to_playlist_signal.emit(callback_value, collection)
+
+    def __delete_single_collection(self, collection: DbStoredCollection):
+        if collection == self.library.collection:
+            self.library.load_nothing()
+        collection.delete()
+
+    def _delete_collection(self, collection: DbStoredCollection):
+        playlist_tree_item = self.playlist_view.get_model_item(collection)
+        item_parent = cast(QStandardItem | None, playlist_tree_item.parent())
+        (self.playlist_view.model_ if item_parent is None else item_parent).removeRow(playlist_tree_item.row())
+
+        if collection.is_folder:
+            for child in list(get_collection_children(collection.id)):
+                self.__delete_single_collection(child)
+        self.__delete_single_collection(collection)
+        get_collections_by_parent_id.cache_clear()
+
+    @Slot()
+    def delete_collection(self, collection: DbStoredCollection):
+        ConfirmationDialog(
+            self,
+            f"Delete {collection.collection_type.capitalize()}",
+            f"Are you sure you want to delete <b>{collection.name}</b>?",
+            "Delete",
+            partial(self._delete_collection, collection),
+        ).exec()
 
     @Slot()
     @profile

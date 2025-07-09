@@ -103,79 +103,6 @@ def text_is_buffer(text: str) -> bool:
     return not bool(len(set(text) - set(BUFFER_CHARS)))
 
 
-class _CreateDialog(QDialog):
-    def __init__(
-        self,
-        parent: QMainWindow,
-        source_root_index: QModelIndex,
-        signals: SharedSignals,
-        mode: CreateMode,
-        move_from_index: QModelIndex | None = None,
-        music_ids_to_add: Sequence[int] | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self.source_root_index = source_root_index
-        self.signals = signals
-        self.mode = mode
-
-        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
-        self.setStyleSheet("QDialog { border-radius: 5px; border: 1px solid white; }")
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, on=True)
-
-        header = QLabel(f"New {self.mode.capitalize()}", self)
-        font = QFont()
-        font.setPointSize(12)
-        font.setBold(True)
-        header.setFont(font)  # pyright: ignore[reportUnknownMemberType]
-
-        close_button = QPushButton(self)
-        close_button.setText("X")
-        close_button.setStyleSheet("QPushButton { border: none; }")
-        close_button.clicked.connect(self.close)
-        close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-
-        header_layout = QHBoxLayout()
-        header_layout.addWidget(header)
-        header_layout.addStretch()
-        header_layout.addWidget(close_button)
-
-        self.name = QLineEdit(self)
-        self.name.setPlaceholderText(f"{self.mode.capitalize()} name")
-        self.name.textChanged.connect(self.update_confirm_button)
-
-        self.confirm_button = QPushButton(self)
-        self.confirm_button.setEnabled(False)
-        self.confirm_button.setText("Create")
-        self.confirm_button.setStyleSheet("QPushButton { border-radius: 5px; }")
-        self.confirm_button.released.connect(partial(self.create_clicked, move_from_index, music_ids_to_add))
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.confirm_button)
-
-        main_layout = QVBoxLayout()
-        main_layout.addLayout(header_layout)
-        main_layout.addWidget(self.name)
-        main_layout.addLayout(button_layout)
-        self.setLayout(main_layout)
-
-    def update_confirm_button(self, text: str) -> None:
-        self.confirm_button.setEnabled(bool(text))
-
-    def create_clicked(self, move_from_index: QModelIndex | None, music_ids_to_add: Sequence[int] | None) -> None:
-        base_args = self.name.text(), self.source_root_index
-        match self.mode:
-            case "playlist":
-                assert move_from_index is None
-                self.signals.create_playlist_signal.emit(*base_args, music_ids_to_add or [])
-            case "folder":
-                assert music_ids_to_add is None
-                self.signals.create_folder_signal.emit(*base_args, move_from_index or QModelIndex())
-            case _:
-                raise ValueError(f"Unknown mode: {self.mode}")
-        self.close()
-
-
 class NewPlaylistAction(QAction):
     def __init__(
         self,
@@ -288,3 +215,124 @@ class SongDrag(QDrag):
         painter.end()
 
         self.setPixmap(pixmap)
+
+
+class _TempMainDialog(QDialog):
+    def __init__(self, parent: QMainWindow):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+        self.setStyleSheet("QDialog { border-radius: 5px; border: 1px solid white; }")
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, on=True)
+
+
+class _CreateDialog(_TempMainDialog):
+    def __init__(
+        self,
+        parent: QMainWindow,
+        source_root_index: QModelIndex,
+        signals: SharedSignals,
+        mode: CreateMode,
+        move_from_index: QModelIndex | None = None,
+        music_ids_to_add: Sequence[int] | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.source_root_index = source_root_index
+        self.signals = signals
+        self.mode = mode
+
+        header = QLabel(f"New {self.mode.capitalize()}", self)
+        font = QFont()
+        font.setPointSize(12)
+        font.setBold(True)
+        header.setFont(font)  # pyright: ignore[reportUnknownMemberType]
+
+        close_button = QPushButton(self)
+        close_button.setText("X")
+        close_button.setStyleSheet("QPushButton { border: none; }")
+        close_button.clicked.connect(self.close)
+        close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(header)
+        header_layout.addStretch()
+        header_layout.addWidget(close_button)
+
+        self.name = QLineEdit(self)
+        self.name.setPlaceholderText(f"{self.mode.capitalize()} name")
+        self.name.textChanged.connect(self.update_confirm_button)
+
+        self.confirm_button = QPushButton(self)
+        self.confirm_button.setEnabled(False)
+        self.confirm_button.setText("Create")
+        self.confirm_button.setStyleSheet("QPushButton { border-radius: 5px; }")
+        self.confirm_button.released.connect(partial(self.create_clicked, move_from_index, music_ids_to_add))
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(self.confirm_button)
+
+        main_layout = QVBoxLayout()
+        main_layout.addLayout(header_layout)
+        main_layout.addWidget(self.name)
+        main_layout.addLayout(button_layout)
+        self.setLayout(main_layout)
+
+    def update_confirm_button(self, text: str) -> None:
+        self.confirm_button.setEnabled(bool(text))
+
+    def create_clicked(self, move_from_index: QModelIndex | None, music_ids_to_add: Sequence[int] | None) -> None:
+        base_args = self.name.text(), self.source_root_index
+        match self.mode:
+            case "playlist":
+                assert move_from_index is None
+                self.signals.create_playlist_signal.emit(*base_args, music_ids_to_add or [])
+            case "folder":
+                assert music_ids_to_add is None
+                self.signals.create_folder_signal.emit(*base_args, move_from_index or QModelIndex())
+            case _:
+                raise ValueError(f"Unknown mode: {self.mode}")
+        self.close()
+
+
+class ConfirmationDialog(_TempMainDialog):
+    def __init__(
+        self,
+        parent: QMainWindow,
+        header: str,
+        confirmation_text: str,
+        confirm_button_text: str,
+        confirm_action: Callable[[], None],
+    ):
+        super().__init__(parent)
+
+        header_label = QLabel(header, self)
+        font = QFont()
+        font.setPointSize(12)
+        font.setBold(True)
+        header_label.setFont(font)  # pyright: ignore[reportUnknownMemberType]
+
+        confirm_label = QLabel(confirmation_text, self, textFormat=Qt.TextFormat.RichText)
+
+        cancel_button = QPushButton(self)
+        cancel_button.setText("Cancel")
+        cancel_button.clicked.connect(self.close)
+
+        confirm_button = QPushButton(self)
+        confirm_button.setText(confirm_button_text)
+        confirm_button.clicked.connect(partial(self.confirm_clicked, confirm_action))
+        confirm_button.setFocus()
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(confirm_button)
+
+        main_layout = QVBoxLayout()
+        main_layout.addWidget(header_label)
+        main_layout.addWidget(confirm_label)
+        main_layout.addLayout(button_layout)
+        self.setLayout(main_layout)
+
+    def confirm_clicked(self, confirm_action: Callable[[], None]) -> None:
+        confirm_action()
+        self.close()

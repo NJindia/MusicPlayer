@@ -483,7 +483,6 @@ class MusicLibraryWidget(QWidget):
 
         shared_signals.library_load_artist_signal.connect(self.load_artist)
         shared_signals.library_load_album_signal.connect(self.load_album)
-        shared_signals.delete_collection_signal.connect(self.delete_collection)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Expanding)
 
         self.header_widget = LibraryHeaderWidget(shared_signals, self)
@@ -511,12 +510,6 @@ class MusicLibraryWidget(QWidget):
     @Slot()
     def play_library(self) -> None:
         self.table_view.song_clicked.emit(0)
-
-    @Slot()
-    def delete_collection(self, collection: DbStoredCollection):
-        if collection == self.collection:
-            self.load_nothing()
-        collection.delete()
 
     @Slot()
     def filter(self, text: str):

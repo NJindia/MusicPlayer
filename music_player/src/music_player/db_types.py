@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
 from functools import cache, cached_property
@@ -404,6 +404,13 @@ def get_collections_by_parent_id() -> dict[int, list[DbStoredCollection]]:
         return collection.parent_id
 
     return {k: list(v) for k, v in groupby(sorted(collections, key=parent_key), key=parent_key)}
+
+
+def get_collection_children(parent_id: int) -> Iterator[DbStoredCollection]:
+    for child_collection in get_collections_by_parent_id().get(parent_id, []):
+        if child_collection.is_folder:
+            yield from get_collection_children(child_collection.id)
+        yield child_collection
 
 
 @dataclass(frozen=True)

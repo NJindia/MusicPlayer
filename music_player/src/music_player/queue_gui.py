@@ -286,13 +286,14 @@ class QueueGraphicsView(HistoryGraphicsView):
     @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
         source = event.source()
-        if isinstance(source, QueueGraphicsView):
-            assert event.proposedAction() == Qt.DropAction.MoveAction
-        else:
-            assert event.proposedAction() == Qt.DropAction.CopyAction
+        assert (
+            event.proposedAction() == Qt.DropAction.MoveAction
+            if isinstance(source, QueueGraphicsView)
+            else Qt.DropAction.CopyAction
+        )
 
         midpoints = self.midpoints
-        midpoints_index = bisect.bisect_right(midpoints, self.mapToScene(event.pos()).y())
+        midpoints_index = bisect.bisect_right(midpoints, self.mapToScene(event.pos()).y())  # pyright: ignore[reportUnknownMemberType]
         line_y = (self.midpoints[midpoints_index - 1] + QUEUE_ENTRY_HEIGHT / 2) if midpoints_index > 0 else 0
         self.drop_indicator_line_item.setLine(0, line_y, self.viewport().width(), line_y)
 
@@ -302,7 +303,7 @@ class QueueGraphicsView(HistoryGraphicsView):
     def dropEvent(self, event: QDropEvent):
         self.drop_indicator_line_item.setLine(QLineF())
         source = event.source()
-        scene_y = self.mapToScene(event.pos()).y()
+        scene_y = self.mapToScene(event.pos()).y()  # pyright: ignore[reportUnknownMemberType]
         queue_entries_to_idx = self.core.current_media_idx + 1 + bisect.bisect_right(self.midpoints, scene_y)
         if isinstance(source, QueueGraphicsView):
             queue_entries_from_idx, ok = cast(
