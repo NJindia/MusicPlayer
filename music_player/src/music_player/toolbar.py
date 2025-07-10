@@ -7,7 +7,7 @@ from PySide6.QtGui import QIcon, QPixmap, QTransform
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSlider, QToolBar, QToolButton, QVBoxLayout, QWidget
 
 from music_player.common_gui import OpacityButton, ShuffleButton, get_play_button_icon
-from music_player.constants import SKIP_BACK_SECOND_THRESHOLD
+from music_player.constants import SKIP_BACK_SECOND_THRESHOLD, TOOLBAR_HEIGHT
 from music_player.db_types import DbMusic
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap, timestamp_to_str
@@ -186,14 +186,14 @@ class MediaToolbar(QToolBar):
         self.setObjectName("MediaToolbar")
         self.core = core
 
-        self.setFixedHeight(100)
-        self.setIconSize(QSize(100, 100))
+        self.setFixedHeight(TOOLBAR_HEIGHT)
+        self.setIconSize(QSize(TOOLBAR_HEIGHT, TOOLBAR_HEIGHT))
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 
-        self.album_button = AlbumButton(0, shared_signals, (100, 0))
+        self.album_button = AlbumButton(0, shared_signals, (TOOLBAR_HEIGHT, 0))
         self.addWidget(self.album_button)
 
-        self.song_label = QLabel()  # current_music.title)
+        self.song_label = QLabel(core.current_music.name if core.current_media_idx != -1 else "")
         self.song_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.addWidget(self.song_label)
 

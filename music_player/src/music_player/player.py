@@ -36,6 +36,7 @@ from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
 from music_player.playlist_tree import AddToPlaylistMenu, PlaylistTreeWidget, SortRole, TreeModelItem
 from music_player.queue_gui import HistoryGraphicsView, QueueEntryGraphicsItem, QueueGraphicsView
 from music_player.signals import SharedSignals
+from music_player.stylesheet import stylesheet
 from music_player.toolbar import MediaToolbar
 from music_player.vlc_core import VLCCore
 
@@ -45,29 +46,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, core: VLCCore):
         super().__init__()
-        self.setStyleSheet("""
-            #OpacityButton:checked { background: transparent; }
-            #OpacityButton:hover { background: transparent; }
-            #InteractiveDialogue { border-radius: 5px; border: 1px solid white; }
-            QScrollArea { padding: 0px; margin: 0px; border: none; }
-            #StackGraphicsView {border: none; margin: 0px;}
-            #MusicLibrary { margin: 0px; border: none; }
-            #ElidedTextLabel { padding: 0px; margin: 0px; }
-            #LibraryTableHeader { background: transparent; }
-            #LibraryTableHeader::section { background: grey; }
-            #LibraryTableView { background: black; border: none; }
-            #LibraryTableView::item { background: transparent; }
-            #SortMenu::item { padding: 5px; spacing: 0px; }
-            #SortButton { padding: 5px; }
-            #SortButton::menu-indicator { image: none; }
-            #WarningPopup { background: red; border-radius: 10px; }
-            #MediaToolbar QWidget { background: transparent; }
-            #CloseButton { border: none; }
-            QDialog QPushButton { border-radius: 5px; }
-            #NewCollectionButton { border-radius: 5px; background: grey}
-            #NewCollectionButton::menu-indicator { image: none; }
-            #PlaylistTreeWidget QWidget { margin: 0px; border: none; }
-        """)
+        self.setStyleSheet(stylesheet)
         get_database_manager().create_qt_connection()
 
         self.core = core
@@ -379,8 +358,15 @@ class MainWindow(QMainWindow):
     @profile
     def add_items_to_collection(self, music_db_indices: Sequence[int], playlist: DbStoredCollection):
         valid_music_ids = [m_id for m_id in music_db_indices if m_id not in playlist.music_ids]
-        if invalid_music_id_count := len(music_db_indices) - len(valid_music_ids):
-            WarningPopup(self).show()
+        if bad_num := len(music_db_indices) - len(valid_music_ids):
+            warning = f"Could not add {bad_num} song{'s'[: bad_num ^ 1]} to '{playlist.name}': Already added."
+            warning_popup = WarningPopup(self, warning)
+            window_bottom_mid = cast(QPoint, (self.rect().bottomLeft() + self.rect().bottomRight()) / 2)  # pyright: ignore[reportOperatorIssue]
+            warning_size = warning_popup.sizeHint()
+            popup_y = round(window_bottom_mid.y() - self.toolbar.height() - warning_size.height())
+            popup_top_left = QPoint(round(window_bottom_mid.x() - warning_size.width() / 2), popup_y)
+            warning_popup.move(self.mapToGlobal(popup_top_left))
+            warning_popup.show()
         playlist.add_music_ids(music_db_indices)
 
         print("adds")

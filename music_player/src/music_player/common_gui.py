@@ -1,10 +1,23 @@
 from collections.abc import Callable, Sequence
 from functools import cache, partial
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, override
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
-from PySide6.QtCore import QModelIndex, QObject, QPoint, QRect, QSize, Qt, SignalInstance
-from PySide6.QtGui import QAction, QDrag, QFont, QFontMetrics, QIcon, QPainter, QPixmap
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QByteArray,
+    QEasingCurve,
+    QEvent,
+    QModelIndex,
+    QObject,
+    QPoint,
+    QPropertyAnimation,
+    QRect,
+    QSize,
+    Qt,
+    SignalInstance,
+)
+from PySide6.QtGui import QAction, QDrag, QEnterEvent, QFont, QFontMetrics, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QGraphicsOpacityEffect,
@@ -21,6 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from music_player.constants import TOOLBAR_HEIGHT
 from music_player.signals import SharedSignals
 
 BUFFER_CHARS = {",", " ", "…"}
@@ -342,9 +356,51 @@ class ConfirmationDialog(_TempMainDialog):
         self.close()
 
 
-class WarningPopup(_TempMainDialog):
-    def __init__(self, parent: QMainWindow):
+class WarningPopup(QWidget):
+    def __init__(self, parent: QMainWindow, warning_text: str):
         super().__init__(parent)
-        self.setObjectName("WarningPopup")
-        # self.widget = QWidget(self)
-        self.setWindowOpacity(0.7)
+        self.setMouseTracking(True)
+
+        self.label = QLabel(warning_text, self)
+        self.label.setObjectName("WarningLabel")
+
+        self.graphics_effect = QGraphicsOpacityEffect(self.label)
+        self.label.setGraphicsEffect(self.graphics_effect)
+        self.label.setAutoFillBackground(True)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.label, alignment=Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter)
+        self.setLayout(layout)
+
+        self.animation = QPropertyAnimation(self.graphics_effect, QByteArray.fromStdString("opacity"), self)
+        self.animation.setDuration(3000)
+        self.animation.setStartValue(1)
+        self.animation.setEndValue(0)
+        self.animation.setEasingCurve(QEasingCurve.Type.InCirc)
+        self.animation.finished.connect(self.close)
+
+    @override
+    def parent(self) -> QMainWindow:
+        return cast(QMainWindow, super().parent())
+
+    @override
+    def show(self, /):
+        rect = self.parent().rect()
+        label_size = self.label.sizeHint()
+        w_adj = (rect.width() - label_size.width()) // 2
+        h_adj = rect.height() - label_size.height() - TOOLBAR_HEIGHT
+        self.setGeometry(rect.adjusted(w_adj, h_adj, -w_adj, -TOOLBAR_HEIGHT))
+        self.animation.start(QAbstractAnimation.DeletionPolicy.KeepWhenStopped)
+        super().show()
+
+    @override
+    def enterEvent(self, event: QEnterEvent) -> None:
+        self.animation.stop()
+        self.graphics_effect.setOpacity(1)
+        super().enterEvent(event)
+
+    @override
+    def leaveEvent(self, event: QEvent, /):
+        self.animation.start()
+        super().leaveEvent(event)
