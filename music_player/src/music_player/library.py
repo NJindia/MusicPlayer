@@ -565,7 +565,9 @@ class MusicLibraryWidget(QWidget):
             else:
                 self.table_view.hide_date_added()
 
-        self.collection = new_collection
+        if  self.collection != new_collection:
+            self.table_view.selectionModel().clearSelection()
+            self.collection = new_collection
         if self.collection is None:
             print("NOT IMPLEMENTED")
         is_play_button = self.collection != self.core.current_collection or not self.core.media_player.is_playing()

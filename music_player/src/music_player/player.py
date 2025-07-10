@@ -367,9 +367,8 @@ class MainWindow(QMainWindow):
             popup_top_left = QPoint(round(window_bottom_mid.x() - warning_size.width() / 2), popup_y)
             warning_popup.move(self.mapToGlobal(popup_top_left))
             warning_popup.show()
-        playlist.add_music_ids(music_db_indices)
+        playlist.add_music_ids(valid_music_ids)
 
-        print("adds")
         if self.library.collection and playlist.id == self.library.collection.id:
             self.library.load_playlist(playlist)
         self.playlist_view.refresh_collection(playlist, SortRole.UPDATED)
