@@ -1,13 +1,12 @@
 from functools import cache, partial
-from typing import Literal, override
+from typing import Literal
 
 import vlc
-from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QSize, Qt, Slot
-from PySide6.QtGui import QIcon, QPixmap, QResizeEvent, QTransform
+from PySide6.QtGui import QIcon, QPixmap, QTransform
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSlider, QToolBar, QToolButton, QVBoxLayout, QWidget
 
-from music_player.common_gui import OpacityButton, ShuffleButton, get_play_button_icon
+from music_player.common_gui import OpacityButton, ShuffleButton, TextScrollArea, get_play_button_icon
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD, TOOLBAR_HEIGHT, TOOLBAR_MEDIA_CONTROL_WIDTH
 from music_player.db_types import DbMusic
 from music_player.signals import SharedSignals
@@ -109,7 +108,7 @@ class VolumeSlider(QHBoxLayout):
         self.core = core
         current_volume = self.core.media_player.audio_get_volume()
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self.volume_slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.volume_slider.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.volume_slider.setMaximumWidth(200)
         self.volume_slider.setTracking(True)
         self.volume_slider.setValue(current_volume)
@@ -193,8 +192,12 @@ class MediaToolbar(QToolBar):
 
         self.album_button = AlbumButton(0, shared_signals, (TOOLBAR_HEIGHT, 0))
 
-        self.song_label = QLabel(core.current_music.name if core.current_media_idx != -1 else "")
-        self.song_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.song_label = TextScrollArea()
+        self.artists_label = TextScrollArea()
+
+        song_meta_layout = QVBoxLayout()
+        song_meta_layout.addWidget(self.song_label)
+        song_meta_layout.addWidget(self.artists_label)
 
         ### MEDIA PLAYBACK BUTTONS
         self.shuffle_button = ShuffleButton(shared_signals)
@@ -216,11 +219,13 @@ class MediaToolbar(QToolBar):
         self.repeat_button.clicked.connect(self.press_repeat_button)
 
         media_control_button_hbox = QHBoxLayout()
+        media_control_button_hbox.addStretch()
         media_control_button_hbox.addWidget(self.shuffle_button)
         media_control_button_hbox.addWidget(rewind_button)
         media_control_button_hbox.addWidget(self.play_pause_button)
         media_control_button_hbox.addWidget(self.skip_button)
         media_control_button_hbox.addWidget(self.repeat_button)
+        media_control_button_hbox.addStretch()
 
         self.media_slider = MediaScrubberSlider(self.core)
 
@@ -229,8 +234,8 @@ class MediaToolbar(QToolBar):
         media_control_vbox.addLayout(media_control_button_hbox)
         media_control_vbox.addLayout(self.media_slider)
         self.media_control_widget = QWidget()
-        self.media_control_widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.media_control_widget.setFixedWidth(TOOLBAR_MEDIA_CONTROL_WIDTH)
+        self.media_control_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.media_control_widget.setMaximumWidth(TOOLBAR_MEDIA_CONTROL_WIDTH)
         self.media_control_widget.setLayout(media_control_vbox)
 
         ### VOLUME BAR
@@ -239,14 +244,23 @@ class MediaToolbar(QToolBar):
 
         left_layout = QHBoxLayout()
         left_layout.addWidget(self.album_button)
-        left_layout.addWidget(self.song_label)
+        left_layout.addLayout(song_meta_layout)
         self.left_widget = QWidget()
+        self.left_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.left_widget.setLayout(left_layout)
 
         right_layout = QHBoxLayout()
+        right_layout.addStretch()
         right_layout.addWidget(volume_widget)
         self.right_widget = QWidget()
+        self.right_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.right_widget.setLayout(right_layout)
+
+        self.setStyleSheet(
+            "#toolbar {border: 1px solid red;}"
+            "QToolBar {border: 1px solid red; padding: 0px; }"
+            "QWidget {border: 1px solid red; }"
+        )
 
         main_layout = QHBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -256,13 +270,7 @@ class MediaToolbar(QToolBar):
         main_layout.addWidget(self.right_widget)
 
         toolbar_widget = QWidget()
+        toolbar_widget.setObjectName("toolbar")
         toolbar_widget.setLayout(main_layout)
 
         self.addWidget(toolbar_widget)
-
-    @profile
-    @override
-    def resizeEvent(self, event: QResizeEvent, /):
-        side_width = (event.size().width() - self.media_control_widget.sizeHint().width()) // 2
-        self.left_widget.setMaximumWidth(side_width)
-        self.right_widget.setMaximumWidth(side_width)

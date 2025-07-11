@@ -140,7 +140,8 @@ class MainWindow(QMainWindow):
         if self.core.current_media_idx == -1:
             self.core.current_media_idx = 0
         current_music = self.core.current_music
-        self.toolbar.song_label.setText(f"{current_music.name}\n{', '.join(current_music.artists)}")
+        self.toolbar.song_label.set_text(current_music.name)
+        self.toolbar.artists_label.set_text(", ".join(current_music.artists))
         self.toolbar.album_button.change_music(current_music)
 
         # when VLC emits the MediaPlayerEnded event, it does in a separate thread

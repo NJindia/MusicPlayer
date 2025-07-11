@@ -27,6 +27,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QStyleOptionGraphicsItem,
     QStyleOptionViewItem,
     QToolButton,
@@ -404,3 +406,58 @@ class WarningPopup(QWidget):
     def leaveEvent(self, event: QEvent, /):
         self.animation.start()
         super().leaveEvent(event)
+
+
+class TextScrollArea(QScrollArea):
+    scroll_rate = 100
+
+    def __init__(self):
+        super().__init__()
+        self.setMouseTracking(True)
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.label = QLabel(self)
+        self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setWidgetResizable(True)
+        self.setWidget(self.label)
+        self.animation = QPropertyAnimation(self.horizontalScrollBar(), QByteArray.fromStdString("value"), self)
+        self.animation.finished.connect(self.reverse_animation)
+
+        self.horizontalScrollBar().rangeChanged.connect(self.update_animation)
+
+    @override
+    def enterEvent(self, event: QEnterEvent) -> None:
+        if self.animation.state() == QAbstractAnimation.State.Running:
+            self.animation.pause()
+        super().enterEvent(event)
+
+    @override
+    def leaveEvent(self, event: QEvent, /):
+        if self.animation.state() == QAbstractAnimation.State.Paused:
+            self.animation.resume()
+        super().leaveEvent(event)
+
+    def update_animation(self, new_start: int, new_end: int) -> None:
+        if new_start == new_end == 0:
+            self.animation.stop()
+        else:
+            self.animation.setStartValue(new_start)
+            self.animation.setEndValue(new_end)
+            self.animation.setDuration((new_end - new_start) * self.scroll_rate)
+            self.animation.start()
+
+    def reverse_animation(self) -> None:
+        direction = (
+            QAbstractAnimation.Direction.Backward
+            if self.animation.direction() == QAbstractAnimation.Direction.Forward
+            else QAbstractAnimation.Direction.Forward
+        )
+        self.animation.setDirection(direction)
+        self.animation.start()
+
+    def set_text(self, text: str):
+        self.animation.stop()
+        self.label.setText(text)
+        print("AH")
