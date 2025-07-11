@@ -69,6 +69,8 @@ class MainWindow(QMainWindow):
         main_ui.addWidget(self.playlist_view, 1)
 
         self.library = MusicLibraryWidget(self.shared_signals, self.core)
+        self.library.header_widget.customContextMenuRequested.connect(self.library_header_context_menu)
+        self.library.header_widget.menu_button.clicked.connect(partial(self.library_header_context_menu, None))
         self.library.table_view.song_clicked.connect(self.play_song_from_library)
         self.library.table_view.customContextMenuRequested.connect(self.library_context_menu)
         scroll_area = MusicLibraryScrollArea(self.library)
@@ -475,8 +477,8 @@ class MainWindow(QMainWindow):
                 assert pview.source_model() != pview.flattened_model_, "Should only have top-level for flattened!"
                 source_root_index = p.index()
 
-            add_playlist_base_context_menu_actions(
-                menu, item.collection, partial(pview.rename_playlist, proxy_index), self, item.index()
+            self._add_playlist_base_context_menu_actions(
+                menu, item.collection, partial(pview.rename_playlist, proxy_index), item.index()
             )
 
         args = menu, self, source_root_index, self.shared_signals
@@ -485,40 +487,52 @@ class MainWindow(QMainWindow):
 
         menu.popup(pview.tree_view.mapToGlobal(point))
 
+    @Slot()
+    def library_header_context_menu(self, header_point: QPoint | None):
+        menu = QMenu(self)
+        collection = self.library.collection
+        if collection is None:
+            return
+        self._add_playlist_base_context_menu_actions(menu, collection, lambda: print("TODO"))
+        if header_point is None:
+            menu_button = self.library.header_widget.menu_button
+            point = menu_button.mapToGlobal(menu_button.rect().bottomLeft())
+        else:
+            point = self.library.header_widget.mapToGlobal(header_point)
+        menu.popup(point)
 
-def add_playlist_base_context_menu_actions(
-    menu: QMenu,
-    collection: DbStoredCollection,
-    rename_callable: Callable[[], None],
-    main_window: MainWindow,
-    playlist_tree_source_index: QModelIndex | None = None,
-):
-    """Add the base context menu actions for a playlist."""
-    signals = main_window.shared_signals
-    if collection.music_ids:
-        menu.addAction(AddToQueueAction(collection.music_ids, signals, menu))
-        menu.addSeparator()
-    if collection.is_protected:
-        rename_action = QAction("Rename", menu)
-        rename_action.triggered.connect(rename_callable)
+    def _add_playlist_base_context_menu_actions(
+        self,
+        menu: QMenu,
+        collection: DbStoredCollection,
+        rename_callable: Callable[[], None],
+        playlist_tree_source_index: QModelIndex | None = None,
+    ):
+        """Add the base context menu actions for a playlist."""
+        if collection.music_ids:
+            menu.addAction(AddToQueueAction(collection.music_ids, self.shared_signals, menu))
+            menu.addSeparator()
+        if not collection.is_protected:
+            rename_action = QAction("Rename", menu)
+            rename_action.triggered.connect(rename_callable)
 
-        delete_action = QAction("Delete", menu)
-        delete_action.triggered.connect(partial(signals.delete_collection_signal.emit, collection))
+            delete_action = QAction("Delete", menu)
+            delete_action.triggered.connect(partial(self.shared_signals.delete_collection_signal.emit, collection))
 
-        source_index = (
-            main_window.playlist_view.get_model_item(collection).index()
-            if playlist_tree_source_index is None
-            else playlist_tree_source_index
-        )
-        move_to_folder_menu = MoveToFolderMenu(source_index, signals, menu, main_window, main_window.playlist_view)
+            source_index = (
+                self.playlist_view.get_model_item(collection).index()
+                if playlist_tree_source_index is None
+                else playlist_tree_source_index
+            )
+            move_to_folder_menu = MoveToFolderMenu(source_index, self.shared_signals, menu, self, self.playlist_view)
 
-        menu.addActions([rename_action, delete_action])  # pyright: ignore[reportUnknownMemberType]
-        menu.addSeparator()
-        menu.addMenu(move_to_folder_menu)
-    else:
-        menu.addSeparator()
+            menu.addActions([rename_action, delete_action])  # pyright: ignore[reportUnknownMemberType]
+            menu.addSeparator()
+            menu.addMenu(move_to_folder_menu)
+        else:
+            menu.addSeparator()
 
-    menu.addMenu(AddToPlaylistMenu(collection.music_ids, signals, menu, main_window, main_window.playlist_view))
+        menu.addMenu(AddToPlaylistMenu(collection.music_ids, self.shared_signals, menu, self, self.playlist_view))
 
 
 if __name__ == "__main__":

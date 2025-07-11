@@ -415,6 +415,7 @@ class LibraryHeaderWidget(QWidget):
     def __init__(self, shared_signals: SharedSignals, library: "MusicLibraryWidget"):
         super().__init__()
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         self.header_img = QLabel()
 
@@ -444,8 +445,8 @@ class LibraryHeaderWidget(QWidget):
         self.save_button = QToolButton()
         self.save_button.setIcon(QIcon("../icons/add-to.svg"))
 
-        more_button = QToolButton()
-        more_button.setIcon(QIcon("../icons/more-button.svg"))
+        self.menu_button = QToolButton()
+        self.menu_button.setIcon(QIcon("../icons/more-button.svg"))
 
         search_bar = QLineEdit()
         search_bar.textChanged.connect(library.filter)
@@ -456,7 +457,7 @@ class LibraryHeaderWidget(QWidget):
         header_interactive_layout.addWidget(self.play_pause_button)
         header_interactive_layout.addWidget(self.shuffle_button)
         header_interactive_layout.addWidget(self.save_button)
-        header_interactive_layout.addWidget(more_button)
+        header_interactive_layout.addWidget(self.menu_button)
         header_interactive_layout.addStretch()
         header_interactive_layout.addWidget(search_bar)
 
