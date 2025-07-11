@@ -565,7 +565,7 @@ class MusicLibraryWidget(QWidget):
             else:
                 self.table_view.hide_date_added()
 
-        if  self.collection != new_collection:
+        if self.collection != new_collection:
             self.table_view.selectionModel().clearSelection()
             self.collection = new_collection
         if self.collection is None:

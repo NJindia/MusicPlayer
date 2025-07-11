@@ -251,7 +251,7 @@ class QueueGraphicsView(HistoryGraphicsView):
                 self.scene().removeItem(item)
         for i, list_idx in enumerate(self.core.list_indices):
             qe = QueueEntryGraphicsItem(
-                get_db_music_cache().get(self.core.db_indices[list_idx]), self.shared_signals, self.viewport().width()
+                get_db_music_cache().get(self.core.music_ids[list_idx]), self.shared_signals, self.viewport().width()
             )
             self.scene().addItem(qe)
 

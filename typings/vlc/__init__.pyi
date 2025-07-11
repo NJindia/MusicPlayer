@@ -297,7 +297,7 @@ class Instance(_Ctype):
     """
     def __new__(cls, *args):  # -> Any | None:
         ...
-    def media_player_new(self, uri=...):  # -> Any:
+    def media_player_new(self, uri=...) -> MediaPlayer:
         """Create a new :class:`MediaPlayer` instance.
 
         :param uri: an optional URI to play in the player as a str, bytes or PathLike object.
@@ -1552,7 +1552,7 @@ class MediaList(_Ctype):
         """
         ...
 
-    def item_at_index(self, i_pos):  # -> Any:
+    def item_at_index(self, i_pos: int) -> Media | None:
         """List media instance in media list at a position
         The :func:`lock` should be held upon entering this function.
 
@@ -2448,7 +2448,7 @@ class MediaPlayer(_Ctype):
         """
         ...
 
-    def set_media(self, p_md):  # -> Any:
+    def set_media(self, p_md: Media) -> None:
         """Set the media that will be used by the media_player. If any,
         previous md will be released.
 
@@ -2610,7 +2610,7 @@ class MediaPlayer(_Ctype):
         """
         ...
 
-    def stop(self):  # -> Any:
+    def stop(self) -> None:
         """Stop (no effect if there is no media)"""
         ...
 
@@ -3296,6 +3296,7 @@ class EventType(_Enum):
     MediaPlayerStopped: "EventType"
     MediaPlayerTimeChanged: "EventType"
     MediaPlayerEndReached: "EventType"
+    MediaPlayerMediaChanged: "EventType"
     MediaListPlayerNextItemSet: "EventType"
 
 class LogLevel(_Enum):

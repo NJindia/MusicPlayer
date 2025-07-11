@@ -102,9 +102,7 @@ class MainWindow(QMainWindow):
         player_emanager.event_attach(vlc.EventType.MediaPlayerStopped, self.media_player_paused_callback)
         player_emanager.event_attach(vlc.EventType.MediaPlayerTimeChanged, self.toolbar.media_slider.update_ui_live)
         player_emanager.event_attach(vlc.EventType.MediaPlayerEndReached, self.media_player_ended_callback)
-        self.core.list_player_event_manager.event_attach(
-            vlc.EventType.MediaListPlayerNextItemSet, self.media_player_media_changed_callback
-        )
+        player_emanager.event_attach(vlc.EventType.MediaPlayerMediaChanged, self.media_player_media_changed_callback)
 
         self.shared_signals.play_collection_signal.connect(self.play_collection)
         self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_collection)
@@ -114,11 +112,7 @@ class MainWindow(QMainWindow):
         self.shared_signals.toggle_shuffle_signal.connect(self.shuffle_button_clicked)
         self.shared_signals.play_from_queue_signal.connect(self.play_from_queue)
         self.shared_signals.delete_collection_signal.connect(self.delete_collection)
-        self.shared_signals.next_song_signal.connect(self.next_song)
-
-    def next_song(self):
-        print("HITHIT")
-        self.core.next()
+        self.shared_signals.next_song_signal.connect(self.core.next)
 
     @Slot()
     def media_changed_ui(self, current_music: DbMusic):
@@ -164,7 +158,6 @@ class MainWindow(QMainWindow):
         self.last_played_music = current_music
 
     def media_player_ended_callback(self, _: vlc.Event):
-        self.core.list_player.pause()
         self.shared_signals.next_song_signal.emit()
 
     def shuffle_indices(self, split_index: int):
@@ -192,7 +185,7 @@ class MainWindow(QMainWindow):
                 last_music_played = next(
                     qe for qe in self.queue.queue_entries[self.core.current_media_idx :: -1] if not qe.manually_added
                 ).music
-                self.core.current_media_idx = self.core.db_indices.index(last_music_played.id)
+                self.core.current_media_idx = self.core.music_ids.index(last_music_played.id)
 
                 # Replace any music/media that was added manually with the original lists
                 self.load_media(self.core.current_collection.music_ids)
@@ -206,13 +199,12 @@ class MainWindow(QMainWindow):
         list_indices: list[int] = []
         for music_db_index in tqdm(music_ids):
             music = get_db_music_cache().get(music_db_index)
-            if music_db_index in self.core.db_indices:
-                list_index = self.core.db_indices.index(music_db_index)
+            if music_db_index in self.core.music_ids:
+                list_index = self.core.music_ids.index(music_db_index)
             else:  # Music not in media list, needs to be added
                 self.core.media_list.add_media(music.file_path)
-                self.core.list_player.set_media_list(self.core.media_list)
-                self.core.db_indices.append(music_db_index)
-                list_index = len(self.core.db_indices) - 1
+                self.core.music_ids.append(music_db_index)
+                list_index = len(self.core.music_ids) - 1
             list_indices.append(list_index)
 
             item = QueueEntryGraphicsItem(
@@ -239,7 +231,7 @@ class MainWindow(QMainWindow):
         if queue_entry.is_history:
             self.core.current_media_idx = 0
             self.load_media((queue_entry.music.id,))
-            self.core.list_player.play_item_at_index(0)
+            self.core.play_item_at_index(0)
             self.queue.update_first_queue_index()
         else:
             self.core.jump_play_index(self.queue.queue_entries.index(queue_entry))

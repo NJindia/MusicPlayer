@@ -92,7 +92,10 @@ class MediaScrubberSlider(QHBoxLayout):
 
     @Slot()
     def set_media_position(self):
-        self.core.media_player.set_position(self.slider.value() / self.get_current_media_duration())
+        if self.slider.value() == self.slider.maximum():
+            self.core.next()
+        else:
+            self.core.media_player.set_position(self.slider.value() / self.get_current_media_duration())
 
 
 VOLUME_ICONS = Literal["VOLUME_MUTED", "VOLUME_OFF", "VOLUME_MAX", "VOLUME_MIN"]
@@ -155,12 +158,12 @@ class MediaToolbar(QWidget):
     @Slot()
     def press_play_button(self):
         """Start audio playback if none is playing, otherwise pause existing."""
-        if self.core.list_player.is_playing():
-            self.core.list_player.pause()
+        if self.core.media_player.is_playing():
+            self.core.media_player.pause()
         elif self.core.current_media_idx == -1:
             self.core.next()
         else:
-            self.core.list_player.play()
+            self.core.media_player.play()
 
     @Slot()
     def press_rewind_button(self):
@@ -178,14 +181,14 @@ class MediaToolbar(QWidget):
             case "NO_REPEAT":
                 self.repeat_button.setIcon(QIcon("../icons/repeat-button.svg"))
                 self.repeat_button.button_off()
-                self.core.list_player.set_playback_mode(vlc.PlaybackMode.default)
+                # self.core.media_player.set_playback_mode(vlc.PlaybackMode.default)
             case "REPEAT_QUEUE":
                 self.repeat_button.button_on()
-                self.core.list_player.set_playback_mode(vlc.PlaybackMode.loop)
+                # self.core.media_player.set_playback_mode(vlc.PlaybackMode.loop)
             case "REPEAT_ONE":
                 self.repeat_button.setIcon(QIcon("../icons/repeat-1-button.svg"))
                 self.repeat_button.button_on()
-                self.core.list_player.set_playback_mode(vlc.PlaybackMode.repeat)
+                # self.core.media_player.set_playback_mode(vlc.PlaybackMode.repeat)
 
     def __init__(self, core: VLCCore, shared_signals: SharedSignals):
         super().__init__()
