@@ -1,6 +1,6 @@
 import sys
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from functools import partial
 from typing import cast
@@ -18,6 +18,8 @@ from music_player.common_gui import (
     AddToQueueAction,
     ConfirmationDialog,
     CreateMode,
+    NewFolderAction,
+    NewPlaylistAction,
     WarningPopup,
     get_pause_button_icon,
     get_play_button_icon,
@@ -33,7 +35,7 @@ from music_player.db_types import (
     get_db_music_cache,
 )
 from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
-from music_player.playlist_tree import AddToPlaylistMenu, PlaylistTreeWidget, SortRole, TreeModelItem
+from music_player.playlist_tree import AddToPlaylistMenu, MoveToFolderMenu, PlaylistTreeWidget, SortRole, TreeModelItem
 from music_player.queue_gui import HistoryGraphicsView, QueueEntryGraphicsItem, QueueGraphicsView
 from music_player.signals import SharedSignals
 from music_player.stylesheet import stylesheet
@@ -63,9 +65,7 @@ class MainWindow(QMainWindow):
         self.playlist_view = PlaylistTreeWidget(self, self, self.shared_signals, is_main_view=True)
         self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
         self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
-        self.playlist_view.tree_view.customContextMenuRequested.connect(
-            partial(self.playlist_view.playlist_context_menu, self)
-        )
+        self.playlist_view.tree_view.customContextMenuRequested.connect(self.playlist_context_menu)
         main_ui.addWidget(self.playlist_view, 1)
 
         self.library = MusicLibraryWidget(self.shared_signals, self.core)
@@ -129,7 +129,6 @@ class MainWindow(QMainWindow):
         self.toolbar.song_label.set_text(current_music.name)
         self.toolbar.artists_label.set_text(", ".join(current_music.artists))
         self.toolbar.album_button.change_music(current_music)
-        print(current_music.name)
 
     def media_player_playing_callback(self, _: vlc.Event):
         self.toolbar.play_pause_button.setIcon(get_pause_button_icon())
@@ -449,7 +448,7 @@ class MainWindow(QMainWindow):
             return
         menu = QMenu(self)
 
-        remove_from_queue_action = QAction("Remove from queue", self)
+        remove_from_queue_action = QAction("Remove from queue", menu)
         remove_from_queue_action.triggered.connect(partial(self.remove_from_queue, item))
         menu.addAction(remove_from_queue_action)
 
@@ -457,6 +456,69 @@ class MainWindow(QMainWindow):
         menu.addMenu(add_to_playlist_menu)
 
         menu.exec(self.queue.mapToGlobal(point))  # pyright: ignore[reportUnknownMemberType]
+
+    @Slot()
+    def playlist_context_menu(self, point: QPoint):
+        pview = self.playlist_view
+        proxy_index = pview.tree_view.indexAt(point)
+        menu = QMenu(self)
+        source_root_index = pview.source_model().invisibleRootItem().index()
+        if proxy_index.isValid():
+            item = pview.item_at_index(proxy_index, is_source=False)
+
+            # Set root for adding playlist/folder
+            if item.collection.is_folder:  # Folder is a valid root
+                source_root_index = pview.proxy_model.mapToSource(proxy_index)
+            elif (
+                (p := item.parent()) is not None  # pyright: ignore[reportUnnecessaryComparison]
+            ):  # If not top-level parent *is* None
+                assert pview.source_model() != pview.flattened_model_, "Should only have top-level for flattened!"
+                source_root_index = p.index()
+
+            add_playlist_base_context_menu_actions(
+                menu, item.collection, partial(pview.rename_playlist, proxy_index), self, item.index()
+            )
+
+        args = menu, self, source_root_index, self.shared_signals
+        menu.addSeparator()
+        menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])  # pyright: ignore[reportUnknownMemberType]
+
+        menu.popup(pview.tree_view.mapToGlobal(point))
+
+
+def add_playlist_base_context_menu_actions(
+    menu: QMenu,
+    collection: DbStoredCollection,
+    rename_callable: Callable[[], None],
+    main_window: MainWindow,
+    playlist_tree_source_index: QModelIndex | None = None,
+):
+    """Add the base context menu actions for a playlist."""
+    signals = main_window.shared_signals
+    if collection.music_ids:
+        menu.addAction(AddToQueueAction(collection.music_ids, signals, menu))
+        menu.addSeparator()
+    if collection.is_protected:
+        rename_action = QAction("Rename", menu)
+        rename_action.triggered.connect(rename_callable)
+
+        delete_action = QAction("Delete", menu)
+        delete_action.triggered.connect(partial(signals.delete_collection_signal.emit, collection))
+
+        source_index = (
+            main_window.playlist_view.get_model_item(collection).index()
+            if playlist_tree_source_index is None
+            else playlist_tree_source_index
+        )
+        move_to_folder_menu = MoveToFolderMenu(source_index, signals, menu, main_window, main_window.playlist_view)
+
+        menu.addActions([rename_action, delete_action])  # pyright: ignore[reportUnknownMemberType]
+        menu.addSeparator()
+        menu.addMenu(move_to_folder_menu)
+    else:
+        menu.addSeparator()
+
+    menu.addMenu(AddToPlaylistMenu(collection.music_ids, signals, menu, main_window, main_window.playlist_view))
 
 
 if __name__ == "__main__":

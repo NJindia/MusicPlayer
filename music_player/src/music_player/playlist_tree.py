@@ -11,7 +11,6 @@ from PySide6.QtCore import (
     QModelIndex,
     QObject,
     QPersistentModelIndex,
-    QPoint,
     QRect,
     QSize,
     QSortFilterProxyModel,
@@ -49,7 +48,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from music_player.common_gui import AddToQueueAction, NewFolderAction, NewPlaylistAction
+from music_player.common_gui import NewFolderAction, NewPlaylistAction
 from music_player.constants import ID_ROLE, MAX_SIDE_BAR_WIDTH, MUSIC_IDS_MIMETYPE
 from music_player.db_types import DbStoredCollection, get_collections_by_parent_id
 from music_player.signals import SharedSignals
@@ -484,11 +483,6 @@ class PlaylistTreeWidget(QWidget):
         self.model_.blockSignals(False)  # noqa: FBT003
 
     @Slot()
-    def delete_collection(self, proxy_index: QModelIndex) -> None:
-        item = self.flattened_proxy_index_to_default_model_item(proxy_index)
-        self.signals.delete_collection_signal.emit(item.collection)
-
-    @Slot()
     def update_playlist(self, tl_source_index: QModelIndex, _: QModelIndex, roles: list[int]) -> None:
         print("UPDATE")
         if not self.is_main_view:
@@ -503,50 +497,6 @@ class PlaylistTreeWidget(QWidget):
                 self.model_.blockSignals(False)  # noqa: FBT003
             else:
                 self._update_flattened_model()
-
-    @Slot()
-    def playlist_context_menu(self, main_window: QMainWindow, point: QPoint):
-        proxy_index = self.tree_view.indexAt(point)
-        menu = QMenu(self.tree_view)
-        source_root_index = self.source_model().invisibleRootItem().index()
-        if proxy_index.isValid():
-            item = self.item_at_index(proxy_index, is_source=False)
-
-            if item.collection.music_ids:
-                menu.addAction(AddToQueueAction(item.collection.music_ids, self.signals, menu))
-                menu.addSeparator()
-
-            # Set root for adding playlist/folder
-            if item.collection.is_folder:  # Folder is a valid root
-                source_root_index = self.proxy_model.mapToSource(proxy_index)
-            elif (
-                (p := item.parent()) is not None  # pyright: ignore[reportUnnecessaryComparison]
-            ):  # If not top-level parent *is* None
-                assert self.source_model() != self.flattened_model_, "Should only have top-level for flattened!"
-                source_root_index = p.index()
-
-            if not item.collection.is_protected:
-                rename_action = QAction("Rename", self.tree_view)
-                rename_action.triggered.connect(partial(self.rename_playlist, proxy_index))
-
-                delete_action = QAction("Delete", self.tree_view)
-                delete_action.triggered.connect(partial(self.delete_collection, proxy_index))
-
-                move_to_folder_menu = MoveToFolderMenu(item.index(), self.signals, menu, main_window, self)
-
-                menu.addActions([rename_action, delete_action])  # pyright: ignore[reportUnknownMemberType]
-                menu.addSeparator()
-                menu.addMenu(move_to_folder_menu)
-            else:
-                menu.addSeparator()
-
-            menu.addMenu(AddToPlaylistMenu(item.collection.music_ids, self.signals, menu, main_window, self))
-
-        args = menu, main_window, source_root_index, self.signals
-        menu.addSeparator()
-        menu.addActions([NewPlaylistAction(*args), NewFolderAction(*args)])  # pyright: ignore[reportUnknownMemberType]
-
-        menu.popup(self.tree_view.mapToGlobal(point))
 
     def _update_flattened_model(self):
         if not self.is_main_view:
