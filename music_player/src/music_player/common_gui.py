@@ -460,4 +460,3 @@ class TextScrollArea(QScrollArea):
     def set_text(self, text: str):
         self.animation.stop()
         self.label.setText(text)
-        print("AH")

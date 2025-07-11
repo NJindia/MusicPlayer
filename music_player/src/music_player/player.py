@@ -9,9 +9,9 @@ import numpy as np
 import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
 import vlc
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
-from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QModelIndex, QPoint, QThread, Signal, Slot
 from PySide6.QtGui import QAction, QPixmapCache, QStandardItem
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QVBoxLayout, QWidget
 from tqdm import tqdm
 
 from music_player.common_gui import (
@@ -56,6 +56,8 @@ class MainWindow(QMainWindow):
         self.last_played_music: DbMusic | None = None  # TODO -> VLCCore?
 
         main_ui = QHBoxLayout()
+        main_ui.setSpacing(0)
+        main_ui.setContentsMargins(0, 0, 0, 0)
         self.shared_signals = SharedSignals()
 
         self.playlist_view = PlaylistTreeWidget(self, self, self.shared_signals, is_main_view=True)
@@ -84,12 +86,14 @@ class MainWindow(QMainWindow):
         main_ui.addWidget(queue_tab, 1)
 
         self.toolbar = MediaToolbar(self.core, self.shared_signals)
-        self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.toolbar)
+        main_win = QVBoxLayout()
+        main_win.setSpacing(0)
+        main_win.setContentsMargins(0, 0, 0, 0)
+        main_win.addLayout(main_ui)
+        main_win.addWidget(self.toolbar)
 
         w = QWidget()
-        main_ui.setSpacing(0)
-        main_ui.setContentsMargins(0, 0, 0, 0)
-        w.setLayout(main_ui)
+        w.setLayout(main_win)
         self.setCentralWidget(w)
 
         player_emanager = self.core.player_event_manager
@@ -153,7 +157,7 @@ class MainWindow(QMainWindow):
         self.last_played_music = current_music
 
     def media_player_ended_callback(self, _: vlc.Event):
-        self.toolbar.skip_button.clicked.emit()
+        self.core.next()
 
     def shuffle_indices(self, split_index: int):
         shuffled_indices = self.core.list_indices[split_index:]

@@ -4,10 +4,15 @@ from typing import Literal
 import vlc
 from PySide6.QtCore import QSize, Qt, Slot
 from PySide6.QtGui import QIcon, QPixmap, QTransform
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSlider, QToolBar, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget
 
 from music_player.common_gui import OpacityButton, ShuffleButton, TextScrollArea, get_play_button_icon
-from music_player.constants import SKIP_BACK_SECOND_THRESHOLD, TOOLBAR_HEIGHT, TOOLBAR_MEDIA_CONTROL_WIDTH
+from music_player.constants import (
+    SKIP_BACK_SECOND_THRESHOLD,
+    TOOLBAR_HEIGHT,
+    TOOLBAR_MEDIA_CONTROL_WIDTH,
+    TOOLBAR_PADDING,
+)
 from music_player.db_types import DbMusic
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap, timestamp_to_str
@@ -103,8 +108,8 @@ def get_volume_icons() -> dict[VOLUME_ICONS, QIcon]:
 
 
 class VolumeSlider(QHBoxLayout):
-    def __init__(self, core: VLCCore, parent: QWidget):
-        super().__init__(parent)
+    def __init__(self, core: VLCCore):
+        super().__init__()
         self.core = core
         current_volume = self.core.media_player.audio_get_volume()
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
@@ -145,7 +150,7 @@ class VolumeSlider(QHBoxLayout):
             self.volume_slider.setEnabled(True)
 
 
-class MediaToolbar(QToolBar):
+class MediaToolbar(QWidget):
     @Slot()
     def press_play_button(self):
         """Start audio playback if none is playing, otherwise pause existing."""
@@ -182,24 +187,20 @@ class MediaToolbar(QToolBar):
                 self.core.list_player.set_playback_mode(vlc.PlaybackMode.repeat)
 
     def __init__(self, core: VLCCore, shared_signals: SharedSignals):
-        super().__init__(floatable=False, movable=False, orientation=Qt.Orientation.Horizontal)
+        super().__init__()
         self.setObjectName("MediaToolbar")
         self.core = core
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, on=True)
 
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(TOOLBAR_HEIGHT)
-        self.setIconSize(QSize(TOOLBAR_HEIGHT, TOOLBAR_HEIGHT))
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 
-        self.album_button = AlbumButton(0, shared_signals, (TOOLBAR_HEIGHT, 0))
+        self.album_button = AlbumButton(0, shared_signals, (TOOLBAR_HEIGHT, TOOLBAR_PADDING))
+        self.album_button.setStyleSheet("QToolButton { padding: 0px; margin: 0px; }")
 
         self.song_label = TextScrollArea()
         self.artists_label = TextScrollArea()
 
-        song_meta_layout = QVBoxLayout()
-        song_meta_layout.addWidget(self.song_label)
-        song_meta_layout.addWidget(self.artists_label)
-
-        ### MEDIA PLAYBACK BUTTONS
         self.shuffle_button = ShuffleButton(shared_signals)
 
         rewind_button = QToolButton()
@@ -210,67 +211,50 @@ class MediaToolbar(QToolBar):
         self.play_pause_button.setIcon(get_play_button_icon())
         self.play_pause_button.clicked.connect(self.press_play_button)
 
-        self.skip_button = QToolButton()
-        self.skip_button.setIcon(QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1))))
-        self.skip_button.clicked.connect(self.core.next)
+        skip_button = QToolButton()
+        skip_button.setIcon(QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1))))
+        skip_button.clicked.connect(self.core.next)
 
         self.repeat_button = OpacityButton()
         self.repeat_button.setIcon(QIcon("../icons/repeat-button.svg"))
         self.repeat_button.clicked.connect(self.press_repeat_button)
+
+        self.media_slider = MediaScrubberSlider(self.core)
 
         media_control_button_hbox = QHBoxLayout()
         media_control_button_hbox.addStretch()
         media_control_button_hbox.addWidget(self.shuffle_button)
         media_control_button_hbox.addWidget(rewind_button)
         media_control_button_hbox.addWidget(self.play_pause_button)
-        media_control_button_hbox.addWidget(self.skip_button)
+        media_control_button_hbox.addWidget(skip_button)
         media_control_button_hbox.addWidget(self.repeat_button)
         media_control_button_hbox.addStretch()
 
-        self.media_slider = MediaScrubberSlider(self.core)
+        media_control_widget = QWidget()
+        media_control_widget.setMaximumWidth(TOOLBAR_MEDIA_CONTROL_WIDTH)
 
-        ### MEDIA PLAYBACK BUTTONS AND SCRUBBER
-        media_control_vbox = QVBoxLayout()
+        media_control_vbox = QVBoxLayout(media_control_widget)
         media_control_vbox.addLayout(media_control_button_hbox)
         media_control_vbox.addLayout(self.media_slider)
-        self.media_control_widget = QWidget()
-        self.media_control_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.media_control_widget.setMaximumWidth(TOOLBAR_MEDIA_CONTROL_WIDTH)
-        self.media_control_widget.setLayout(media_control_vbox)
 
-        ### VOLUME BAR
-        volume_widget = QWidget()
-        VolumeSlider(self.core, volume_widget)
+        song_meta_layout = QVBoxLayout()
+        song_meta_layout.addWidget(self.song_label)
+        song_meta_layout.addWidget(self.artists_label)
 
         left_layout = QHBoxLayout()
+        left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(self.album_button)
         left_layout.addLayout(song_meta_layout)
-        self.left_widget = QWidget()
-        self.left_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.left_widget.setLayout(left_layout)
 
         right_layout = QHBoxLayout()
+        right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.addStretch()
-        right_layout.addWidget(volume_widget)
-        self.right_widget = QWidget()
-        self.right_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.right_widget.setLayout(right_layout)
-
-        self.setStyleSheet(
-            "#toolbar {border: 1px solid red;}"
-            "QToolBar {border: 1px solid red; padding: 0px; }"
-            "QWidget {border: 1px solid red; }"
-        )
+        right_layout.addLayout(VolumeSlider(self.core))
 
         main_layout = QHBoxLayout()
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setContentsMargins(TOOLBAR_PADDING, TOOLBAR_PADDING, TOOLBAR_PADDING, TOOLBAR_PADDING)
         main_layout.setSpacing(0)
-        main_layout.addWidget(self.left_widget)
-        main_layout.addWidget(self.media_control_widget)
-        main_layout.addWidget(self.right_widget)
-
-        toolbar_widget = QWidget()
-        toolbar_widget.setObjectName("toolbar")
-        toolbar_widget.setLayout(main_layout)
-
-        self.addWidget(toolbar_widget)
+        main_layout.addLayout(left_layout)
+        main_layout.addWidget(media_control_widget)
+        main_layout.addLayout(right_layout)
+        self.setLayout(main_layout)

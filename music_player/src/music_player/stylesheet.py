@@ -13,7 +13,8 @@ QScrollArea { padding: 0px; margin: 0px; border: none; }
 #SortMenu::item { padding: 5px; spacing: 0px; }
 #SortButton { padding: 5px; }
 #SortButton::menu-indicator { image: none; }
-#MediaToolbar QWidget { background: transparent; }
+#MediaToolbar { background: grey; }
+#MediaToolbar QWidget { background: transparent;  border: 1px solid red; }
 #CloseButton { border: none; }
 QDialog QPushButton { border-radius: 5px; }
 #NewCollectionButton { border-radius: 5px; background: grey}
