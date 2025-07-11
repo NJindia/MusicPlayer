@@ -28,6 +28,7 @@ def expanding_widget() -> QWidget:
 class AlbumButton(QToolButton):
     def __init__(self, album_id: int, shared_signals: SharedSignals, height_linewidth: tuple[int, int]):
         super().__init__()
+        self.setObjectName("AlbumButton")
         self._album_id = album_id
         self._signals = shared_signals
 
@@ -196,7 +197,6 @@ class MediaToolbar(QWidget):
         self.setFixedHeight(TOOLBAR_HEIGHT)
 
         self.album_button = AlbumButton(0, shared_signals, (TOOLBAR_HEIGHT, TOOLBAR_PADDING))
-        self.album_button.setStyleSheet("QToolButton { padding: 0px; margin: 0px; }")
 
         self.song_label = TextScrollArea()
         self.artists_label = TextScrollArea()

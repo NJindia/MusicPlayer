@@ -1,4 +1,5 @@
 stylesheet = """
+#AlbumButton { padding: 0px; }
 #OpacityButton:checked { background: transparent; }
 #OpacityButton:hover { background: transparent; }
 #InteractiveDialogue { border-radius: 5px; border: 1px solid white; }
