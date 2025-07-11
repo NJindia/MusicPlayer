@@ -211,9 +211,9 @@ class MediaToolbar(QWidget):
         self.play_pause_button.setIcon(get_play_button_icon())
         self.play_pause_button.clicked.connect(self.press_play_button)
 
-        skip_button = QToolButton()
-        skip_button.setIcon(QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1))))
-        skip_button.clicked.connect(self.core.next)
+        self.skip_button = QToolButton()
+        self.skip_button.setIcon(QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1))))
+        self.skip_button.clicked.connect(self.core.next)
 
         self.repeat_button = OpacityButton()
         self.repeat_button.setIcon(QIcon("../icons/repeat-button.svg"))
@@ -226,7 +226,7 @@ class MediaToolbar(QWidget):
         media_control_button_hbox.addWidget(self.shuffle_button)
         media_control_button_hbox.addWidget(rewind_button)
         media_control_button_hbox.addWidget(self.play_pause_button)
-        media_control_button_hbox.addWidget(skip_button)
+        media_control_button_hbox.addWidget(self.skip_button)
         media_control_button_hbox.addWidget(self.repeat_button)
         media_control_button_hbox.addStretch()
 
