@@ -20,3 +20,11 @@ class SharedSignals(QObject):
     toggle_shuffle_signal = Signal(bool)  # (shuffle)
     play_from_queue_signal = Signal(object)  # (QueueEntryGraphicsItem)
     next_song_signal = Signal()
+
+
+class VLCSignals(QObject):
+    media_changed_signal = Signal()
+    media_playing_signal = Signal()
+    media_paused_signal = Signal()
+    time_changed_signal = Signal(int)
+    media_end_reached_signal = Signal()

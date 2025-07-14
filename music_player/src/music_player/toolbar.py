@@ -2,7 +2,6 @@ from functools import cache, partial
 from pathlib import Path
 from typing import Literal
 
-import vlc
 from PySide6.QtCore import QSize, Qt, Slot
 from PySide6.QtGui import QIcon, QTransform
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget
@@ -84,12 +83,10 @@ class MediaScrubberSlider(QHBoxLayout):
         self.slider.setMaximum(round(self.get_current_media_duration()))
         self.after_label.setText(timestamp_to_str(self.get_current_media_duration()))
 
-    def update_ui_live(self, event: vlc.Event):
-        if event.type != vlc.EventType.MediaPlayerTimeChanged:
-            pass
+    def update_ui_live(self, new_time: int):
         if self.slider.isSliderDown():
             return  # Don't update if scrubbing
-        new_time = round(event.u.new_time / 1000)
+        new_time = round(new_time / 1000)
         self.slider.setSliderPosition(new_time)
         self.before_label.setText(timestamp_to_str(new_time))
         # TODO CONSIDER round(self.core.music_player.get_time() / 1000) for time choppiness
