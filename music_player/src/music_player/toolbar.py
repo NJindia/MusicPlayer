@@ -85,6 +85,8 @@ class MediaScrubberSlider(QHBoxLayout):
         self.after_label.setText(timestamp_to_str(self.get_current_media_duration()))
 
     def update_ui_live(self, event: vlc.Event):
+        if event.type != vlc.EventType.MediaPlayerTimeChanged:
+            pass
         if self.slider.isSliderDown():
             return  # Don't update if scrubbing
         new_time = round(event.u.new_time / 1000)

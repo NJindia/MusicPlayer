@@ -3,13 +3,13 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from functools import partial
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
 import vlc
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
-from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, SignalInstance, Slot
 from PySide6.QtGui import QAction, QPixmapCache, QStandardItem
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QVBoxLayout, QWidget
 from tqdm import tqdm
@@ -43,8 +43,15 @@ from music_player.toolbar import MediaToolbar
 from music_player.vlc_core import VLCCore
 
 
+def emit_signal(signal: SignalInstance, *args: Any):
+    signal.emit(*args)
+
+
 class MainWindow(QMainWindow):
     media_changed_signal = Signal(object)
+    media_playing_signal = Signal(object)
+    media_paused_signal = Signal(object)
+    time_changed_signal = Signal(object)
 
     def __init__(self, core: VLCCore):
         super().__init__()
@@ -54,7 +61,6 @@ class MainWindow(QMainWindow):
         self.core = core
         self.media_changed: bool = False
         self.setWindowTitle("Media Player")
-        self.media_changed_signal.connect(self.media_changed_ui)
         self.last_played_music: DbMusic | None = None  # TODO -> VLCCore?
 
         main_ui = QHBoxLayout()
@@ -100,13 +106,26 @@ class MainWindow(QMainWindow):
         w.setLayout(main_win)
         self.setCentralWidget(w)
 
+        self.media_playing_signal.connect(self._media_player_playing_ui)
+        self.media_paused_signal.connect(self._media_player_paused_ui)
+        self.time_changed_signal.connect(self.toolbar.media_slider.update_ui_live)
+        self.media_changed_signal.connect(self._media_changed_ui)
+
         player_emanager = self.core.player_event_manager
-        player_emanager.event_attach(vlc.EventType.MediaPlayerPlaying, self.media_player_playing_callback)
-        player_emanager.event_attach(vlc.EventType.MediaPlayerPaused, self.media_player_paused_callback)
-        player_emanager.event_attach(vlc.EventType.MediaPlayerStopped, self.media_player_paused_callback)
-        player_emanager.event_attach(vlc.EventType.MediaPlayerTimeChanged, self.toolbar.media_slider.update_ui_live)
-        player_emanager.event_attach(vlc.EventType.MediaPlayerEndReached, self.media_player_ended_callback)
-        player_emanager.event_attach(vlc.EventType.MediaPlayerMediaChanged, self.media_player_media_changed_callback)
+        player_emanager.event_attach(vlc.EventType.MediaPlayerPlaying, partial(emit_signal, self.media_playing_signal))
+        player_emanager.event_attach(vlc.EventType.MediaPlayerPaused, partial(emit_signal, self.media_paused_signal))
+        player_emanager.event_attach(vlc.EventType.MediaPlayerStopped, partial(emit_signal, self.media_paused_signal))
+        player_emanager.event_attach(
+            vlc.EventType.MediaPlayerTimeChanged, partial(emit_signal, self.time_changed_signal)
+        )
+        (
+            player_emanager.event_attach(
+                vlc.EventType.MediaPlayerEndReached, partial(emit_signal, self.shared_signals.next_song_signal)
+            ),
+        )
+        player_emanager.event_attach(
+            vlc.EventType.MediaPlayerMediaChanged, partial(emit_signal, self.media_changed_signal)
+        )
 
         self.shared_signals.play_collection_signal.connect(self.play_collection)
         self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_collection)
@@ -118,8 +137,26 @@ class MainWindow(QMainWindow):
         self.shared_signals.delete_collection_signal.connect(self.delete_collection)
         self.shared_signals.next_song_signal.connect(self.core.next)
 
-    @Slot()
-    def media_changed_ui(self, current_music: DbMusic):
+    def _media_player_playing_ui(self, _: vlc.Event):
+        self.toolbar.play_pause_button.setIcon(get_pause_button_icon())
+        if self.media_changed:
+            self.media_changed = False
+            self.toolbar.media_slider.update_after_label()
+        if self.library.collection == self.core.current_collection:
+            self.library.header_widget.set_play_pause_button_state(is_play_button=False)
+
+    def _media_player_paused_ui(self, _: vlc.Event):
+        print("PAUSED")
+        self.toolbar.play_pause_button.setIcon(get_play_button_icon())
+        self.library.header_widget.set_play_pause_button_state(is_play_button=True)
+
+    def _media_changed_ui(self, _: vlc.Event):
+        self.media_changed = True
+        if self.core.current_media_idx == -1:
+            self.core.current_media_idx = 0
+        current_music = self.core.current_music
+
+        # when VLC emits the MediaPlayerEnded event, it does in a separate thread
         assert QThread.currentThread().isMainThread()
         self.queue.update_first_queue_index()
         if self.last_played_music is not None:  # None when nothing has been played yet
@@ -134,34 +171,7 @@ class MainWindow(QMainWindow):
         self.toolbar.artists_label.set_text(", ".join(current_music.artists))
         self.toolbar.album_button.change_music(current_music)
 
-    def media_player_playing_callback(self, _: vlc.Event):
-        self.toolbar.play_pause_button.setIcon(get_pause_button_icon())
-        if self.media_changed:
-            self.media_changed = False
-            self.toolbar.media_slider.update_after_label()
-        if self.library.collection == self.core.current_collection:
-            self.library.header_widget.set_play_pause_button_state(is_play_button=False)
-
-    def media_player_paused_callback(self, _: vlc.Event):
-        self.toolbar.play_pause_button.setIcon(get_play_button_icon())
-        self.library.header_widget.set_play_pause_button_state(is_play_button=True)
-
-    def media_player_media_changed_callback(self, _: vlc.Event):
-        self.media_changed = True
-        if self.core.current_media_idx == -1:
-            self.core.current_media_idx = 0
-        current_music = self.core.current_music
-
-        # when VLC emits the MediaPlayerEnded event, it does in a separate thread
-        if QThread.currentThread().isMainThread():
-            self.media_changed_ui(current_music)
-        else:
-            self.media_changed_signal.emit(current_music)
-
         self.last_played_music = current_music
-
-    def media_player_ended_callback(self, _: vlc.Event):
-        self.shared_signals.next_song_signal.emit()
 
     def shuffle_indices(self, split_index: int):
         shuffled_indices = self.core.list_indices[split_index:]
