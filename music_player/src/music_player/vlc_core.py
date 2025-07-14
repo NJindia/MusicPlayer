@@ -1,7 +1,6 @@
 import itertools
 from typing import Literal, cast, get_args
 
-from PySide6.QtCore import SignalInstance
 from vlc import Event, EventManager, EventType, Instance, Media, MediaList
 
 from music_player.db_types import DbCollection, DbMusic, get_db_music_cache
@@ -18,7 +17,7 @@ def index_media_list(media_list: MediaList, media: Media) -> int:
 class VLCCore:
     def on_playing(self, _: Event):
         self.media_player.pause()
-        self.emanager.event_detach(EventType.MediaPlayerPlaying)
+        self.event_manager.event_detach(EventType.MediaPlayerPlaying)
 
     def load_media_from_music_ids(self, music_ids: tuple[int, ...]):
         paths = [get_db_music_cache().get(i).file_path for i in music_ids]
@@ -37,10 +36,11 @@ class VLCCore:
         self.list_indices: list[int] = []
         """The ordered list of indices in BOTH the `db_indices` and `media_list` to play"""
         self.current_media_idx: int = -1
-        self.emanager = cast(EventManager, self.media_player.event_manager())  # pyright: ignore[reportUnknownMemberType]
+        self.event_manager = cast(EventManager, self.media_player.event_manager())  # pyright: ignore[reportUnknownMemberType]
+        connect = self.event_manager.event_attach
 
         if self.media_list.count():
-            self.emanager.event_attach(EventType.MediaPlayerPlaying, self.on_playing)
+            connect(EventType.MediaPlayerPlaying, self.on_playing)
             self.media_player.play()
         assert not self.media_player.is_playing()
 
@@ -48,18 +48,12 @@ class VLCCore:
         self.repeat_state: RepeatState = next(self.repeat_states)
         assert self.repeat_state == "NO_REPEAT"  # Should always start here TODO (for now)
 
-        self.emanager.event_attach(EventType.MediaPlayerPlaying, lambda _: self.vlc_signals.media_playing_signal.emit())
-        self.emanager.event_attach(EventType.MediaPlayerPaused, lambda _: self.vlc_signals.media_paused_signal.emit())
-        self.emanager.event_attach(EventType.MediaPlayerStopped, lambda _: self.vlc_signals.media_paused_signal.emit())
-        self.emanager.event_attach(
-            EventType.MediaPlayerTimeChanged, lambda e: self.vlc_signals.time_changed_signal.emit(e.u.new_time)
-        )
-        self.emanager.event_attach(
-            EventType.MediaPlayerEndReached, lambda _: self.vlc_signals.media_end_reached_signal.emit()
-        )
-        self.emanager.event_attach(
-            EventType.MediaPlayerMediaChanged, lambda _: self.vlc_signals.media_changed_signal.emit()
-        )
+        connect(EventType.MediaPlayerPlaying, lambda _: self.vlc_signals.media_playing_signal.emit())
+        connect(EventType.MediaPlayerPaused, lambda _: self.vlc_signals.media_paused_signal.emit())
+        connect(EventType.MediaPlayerStopped, lambda _: self.vlc_signals.media_paused_signal.emit())
+        connect(EventType.MediaPlayerTimeChanged, lambda e: self.vlc_signals.time_changed_signal.emit(e.u.new_time))
+        connect(EventType.MediaPlayerEndReached, lambda _: self.vlc_signals.media_end_reached_signal.emit())
+        connect(EventType.MediaPlayerMediaChanged, lambda _: self.vlc_signals.media_changed_signal.emit())
 
     @property
     def current_music(self) -> DbMusic:
