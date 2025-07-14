@@ -81,6 +81,7 @@ class VLCCore:
             self.media_player.stop()
         else:
             self.play_item_at_index(self.list_indices[self.current_media_idx])
+            self.vlc_signals.time_changed_signal.emit(0)
 
     def play_item_at_index(self, list_index: int):
         media = self.media_list.item_at_index(list_index)
