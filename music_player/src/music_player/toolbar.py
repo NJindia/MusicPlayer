@@ -1,9 +1,10 @@
 from functools import cache, partial
+from pathlib import Path
 from typing import Literal
 
 import vlc
 from PySide6.QtCore import QSize, Qt, Slot
-from PySide6.QtGui import QIcon, QPixmap, QTransform
+from PySide6.QtGui import QIcon, QTransform
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget
 
 from music_player.common_gui import OpacityButton, ShuffleButton, TextScrollArea, get_play_button_icon
@@ -12,6 +13,7 @@ from music_player.constants import (
     TOOLBAR_HEIGHT,
     TOOLBAR_MEDIA_CONTROL_WIDTH,
     TOOLBAR_PADDING,
+    VOLUME_SLIDER_MAX_WIDTH,
 )
 from music_player.db_types import DbMusic
 from music_player.signals import SharedSignals
@@ -104,10 +106,18 @@ VOLUME_ICONS = Literal["VOLUME_MUTED", "VOLUME_OFF", "VOLUME_MAX", "VOLUME_MIN"]
 @cache
 def get_volume_icons() -> dict[VOLUME_ICONS, QIcon]:
     return {
-        "VOLUME_MUTED": QIcon("../icons/volume/volume-mute.svg"),
-        "VOLUME_OFF": QIcon("../icons/volume/volume-off.svg"),
-        "VOLUME_MAX": QIcon("../icons/volume/volume-max.svg"),
-        "VOLUME_MIN": QIcon("../icons/volume/volume-min.svg"),
+        "VOLUME_MUTED": QIcon(
+            get_pixmap(Path("../icons/volume/volume-mute.svg"), None, color=Qt.GlobalColor.white, cache=False)
+        ),
+        "VOLUME_OFF": QIcon(
+            get_pixmap(Path("../icons/volume/volume-off.svg"), None, color=Qt.GlobalColor.white, cache=False)
+        ),
+        "VOLUME_MAX": QIcon(
+            get_pixmap(Path("../icons/volume/volume-max.svg"), None, color=Qt.GlobalColor.white, cache=False)
+        ),
+        "VOLUME_MIN": QIcon(
+            get_pixmap(Path("../icons/volume/volume-min.svg"), None, color=Qt.GlobalColor.white, cache=False)
+        ),
     }
 
 
@@ -115,19 +125,21 @@ class VolumeSlider(QHBoxLayout):
     def __init__(self, core: VLCCore):
         super().__init__()
         self.core = core
+
         current_volume = self.core.media_player.audio_get_volume()
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self.volume_slider.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self.volume_slider.setMaximumWidth(200)
-        self.volume_slider.setTracking(True)
-        self.volume_slider.setValue(current_volume)
-        self.volume_slider.setMaximum(100)
-        self.volume_slider.valueChanged.connect(self.update_volume)
 
         self.volume_button: QToolButton = QToolButton()
         self.volume_button.setCheckable(True)
         self.volume_button.toggled.connect(self.toggle_volume_button)
         self.update_volume(current_volume)
+
+        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.volume_slider.setMaximumWidth(VOLUME_SLIDER_MAX_WIDTH - self.volume_button.sizeHint().width())
+        self.volume_slider.setTracking(True)
+        self.volume_slider.setValue(current_volume)
+        self.volume_slider.setMaximum(100)
+        self.volume_slider.valueChanged.connect(self.update_volume)
 
         self.addWidget(self.volume_button)
         self.addWidget(self.volume_slider)
@@ -206,20 +218,23 @@ class MediaToolbar(QWidget):
 
         self.shuffle_button = ShuffleButton(shared_signals)
 
+        rewind_pixmap = get_pixmap(Path("../icons/rewind-button.svg"), None, color=Qt.GlobalColor.white)
         rewind_button = QToolButton()
-        rewind_button.setIcon(QIcon("../icons/rewind-button.svg"))
+        rewind_button.setIcon(QIcon(rewind_pixmap))
         rewind_button.clicked.connect(self.press_rewind_button)
 
         self.play_pause_button = QToolButton()
         self.play_pause_button.setIcon(get_play_button_icon())
         self.play_pause_button.clicked.connect(self.press_play_button)
 
-        self.skip_button = QToolButton()
-        self.skip_button.setIcon(QIcon(QPixmap("../icons/rewind-button.svg").transformed(QTransform().scale(-1, 1))))
-        self.skip_button.clicked.connect(self.core.next)
+        skip_button = QToolButton()
+        skip_button.setIcon(QIcon(rewind_pixmap.transformed(QTransform().scale(-1, 1))))
+        skip_button.clicked.connect(self.core.next)
 
         self.repeat_button = OpacityButton()
-        self.repeat_button.setIcon(QIcon("../icons/repeat-button.svg"))
+        self.repeat_button.setIcon(
+            QIcon(get_pixmap(Path("../icons/repeat-button.svg"), None, color=Qt.GlobalColor.white))
+        )
         self.repeat_button.clicked.connect(self.press_repeat_button)
 
         self.media_slider = MediaScrubberSlider(self.core)
@@ -229,7 +244,7 @@ class MediaToolbar(QWidget):
         media_control_button_hbox.addWidget(self.shuffle_button)
         media_control_button_hbox.addWidget(rewind_button)
         media_control_button_hbox.addWidget(self.play_pause_button)
-        media_control_button_hbox.addWidget(self.skip_button)
+        media_control_button_hbox.addWidget(skip_button)
         media_control_button_hbox.addWidget(self.repeat_button)
         media_control_button_hbox.addStretch()
 

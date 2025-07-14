@@ -2,6 +2,7 @@ from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from enum import Enum
 from functools import partial
+from pathlib import Path
 from typing import cast, override
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
@@ -29,7 +30,6 @@ from PySide6.QtGui import (
     QIcon,
     QMouseEvent,
     QPainter,
-    QPixmap,
     QStandardItem,
     QStandardItemModel,
 )
@@ -49,10 +49,16 @@ from PySide6.QtWidgets import (
 )
 
 from music_player.common_gui import NewFolderAction, NewPlaylistAction
-from music_player.constants import ID_ROLE, MAX_SIDE_BAR_WIDTH, MUSIC_IDS_MIMETYPE
+from music_player.constants import (
+    ID_ROLE,
+    MAX_SIDE_BAR_WIDTH,
+    MUSIC_IDS_MIMETYPE,
+    PLAYLIST_HEADER_FONT_SIZE,
+    PLAYLIST_HEADER_PADDING,
+)
 from music_player.db_types import DbStoredCollection, get_collections_by_parent_id
 from music_player.signals import SharedSignals
-from music_player.utils import get_colored_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
+from music_player.utils import get_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
 from music_player.view_types import PlaylistTreeView
 
 PLAYLIST_ROW_HEIGHT = 50
@@ -328,6 +334,7 @@ class PlaylistTreeWidget(QWidget):
         self.is_main_view = is_main_view
         self.signals = signals
 
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, on=True)
         self.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
 
         if self.is_main_view:
@@ -348,15 +355,18 @@ class PlaylistTreeWidget(QWidget):
         self.tree_view = PlaylistTree(self.proxy_model, self.signals, is_main_view=is_main_view)
 
         header_widget = QWidget()
+        header_widget.setObjectName("PlaylistTreeHeader")
         header_layout = QVBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setContentsMargins(
+            PLAYLIST_HEADER_PADDING, PLAYLIST_HEADER_PADDING, PLAYLIST_HEADER_PADDING, PLAYLIST_HEADER_PADDING
+        )
         header_widget.setLayout(header_layout)
         if self.is_main_view:
             self.signals.move_collection_signal.connect(self.move_collection)
 
             label = QLabel("Playlists", self)
             label_font = QFont()
-            label_font.setPointSize(20)
+            label_font.setPointSize(PLAYLIST_HEADER_FONT_SIZE)
             label_font.setBold(True)
             label.setFont(label_font)  # pyright: ignore[reportUnknownMemberType]
             label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom)
@@ -399,6 +409,8 @@ class PlaylistTreeWidget(QWidget):
         header_layout.addLayout(search_sort_layout)
 
         layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addWidget(header_widget)
         layout.addWidget(self.tree_view)
         self.setLayout(layout)
@@ -425,9 +437,10 @@ class PlaylistTreeWidget(QWidget):
     def update_sort_button(self):
         sort_role = SortRole(self.proxy_model.sortRole())
         order_str = "asc" if self.proxy_model.sortOrder() == Qt.SortOrder.AscendingOrder else "desc"
-        pm = get_colored_pixmap(
-            QPixmap(f"../icons/sort/sort-{'alpha-' if sort_role == SortRole.ALPHABETICAL else ''}{order_str}.svg"),
-            Qt.GlobalColor.white,
+        pm = get_pixmap(
+            Path(f"../icons/sort/sort-{'alpha-' if sort_role == SortRole.ALPHABETICAL else ''}{order_str}.svg"),
+            None,
+            color=Qt.GlobalColor.white,
         )
         self.sort_button.setIcon(QIcon(pm))
         self.sort_button.setText(sort_role.name.capitalize())
@@ -584,7 +597,7 @@ class SortMenu(QMenu):
         ):
             if action.sort_role.value == curr_sort_role:
                 order_str = "up" if self.parent().proxy_model.sortOrder() == Qt.SortOrder.AscendingOrder else "down"
-                pm = get_colored_pixmap(QPixmap(f"../icons/arrows/arrow-narrow-{order_str}.svg"), Qt.GlobalColor.white)
+                pm = get_pixmap(Path(f"../icons/arrows/arrow-narrow-{order_str}.svg"), None, color=Qt.GlobalColor.white)
                 action.setIcon(QIcon(pm))
             else:
                 action.setIcon(QIcon())

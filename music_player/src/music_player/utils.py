@@ -55,22 +55,27 @@ def datetime_to_age_string(dt: datetime) -> str:
 
 
 @profile
-def get_pixmap(source: Path | None, height: int | None) -> QPixmap:
+def get_pixmap(
+    source: Path | None, height: int | None, *, color: Qt.GlobalColor | None = None, cache: bool = True
+) -> QPixmap:
     assert QThread.currentThread().isMainThread()
     if source is None:
-        return get_empty_pixmap(height)
+        return _get_empty_pixmap(height)
     pixmap = QPixmap()
-    key = f"{source!s}_{height}"
-    if not QPixmapCache.find(key, pixmap):
+    key = f"{source!s}_{height}_{color}"
+    if not (cache and QPixmapCache.find(key, pixmap)):
         # print(f"key: {key}, {QPixmapCache.cacheLimit()}")
         pixmap = QPixmap(source)
         if height is not None:
             pixmap = pixmap.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
-        QPixmapCache.insert(key, pixmap)
+        if color is not None:
+            pixmap = _get_colored_pixmap(pixmap, color)
+        if cache:
+            QPixmapCache.insert(key, pixmap)
     return pixmap
 
 
-def get_colored_pixmap(pixmap: QPixmap, color: Qt.GlobalColor) -> QPixmap:
+def _get_colored_pixmap(pixmap: QPixmap, color: Qt.GlobalColor) -> QPixmap:
     colored_pm = QPixmap(pixmap)
     colored_pm.fill(color)
     colored_pm.setMask(pixmap.createMaskFromColor(Qt.GlobalColor.transparent))
@@ -78,7 +83,7 @@ def get_colored_pixmap(pixmap: QPixmap, color: Qt.GlobalColor) -> QPixmap:
 
 
 @cache
-def get_empty_pixmap(height: int | None) -> QPixmap:
+def _get_empty_pixmap(height: int | None) -> QPixmap:
     pm = QPixmap(QSize(height, height)) if height is not None else QPixmap()
     pm.fill(Qt.GlobalColor.transparent)  # Fill with transparent pixmap
     return pm

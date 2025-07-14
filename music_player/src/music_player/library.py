@@ -3,6 +3,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import Enum
 from functools import cache
+from pathlib import Path
 from typing import Any, cast, override
 
 import numpy as np
@@ -65,7 +66,6 @@ from music_player.signals import SharedSignals
 from music_player.utils import (
     datetime_to_age_string,
     datetime_to_date_str,
-    get_empty_pixmap,
     get_pixmap,
     get_single_song_drag_text,
     music_ids_to_qbytearray,
@@ -443,10 +443,10 @@ class LibraryHeaderWidget(QWidget):
         self.shuffle_button = ShuffleButton(shared_signals)
 
         self.save_button = QToolButton()
-        self.save_button.setIcon(QIcon("../icons/add-to.svg"))
+        self.save_button.setIcon(QIcon(get_pixmap(Path("../icons/add-to.svg"), None, color=Qt.GlobalColor.white)))
 
         self.menu_button = QToolButton()
-        self.menu_button.setIcon(QIcon("../icons/more-button.svg"))
+        self.menu_button.setIcon(QIcon(get_pixmap(Path("../icons/more-button.svg"), None, color=Qt.GlobalColor.white)))
 
         search_bar = QLineEdit()
         search_bar.textChanged.connect(library.filter)
@@ -592,7 +592,7 @@ class MusicLibraryWidget(QWidget):
     def load_nothing(self):
         self._load(
             new_collection=None,
-            img_pixmap=get_empty_pixmap(self.header_widget.header_img_size),
+            img_pixmap=get_pixmap(None, self.header_widget.header_img_size),
             header_label_type="",
             header_label_title="",
             header_label_subtitle=None,

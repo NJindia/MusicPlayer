@@ -9,7 +9,7 @@ import numpy as np
 import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
 import vlc
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
-from PySide6.QtCore import QModelIndex, QPoint, QThread, Signal, Slot
+from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QAction, QPixmapCache, QStandardItem
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QMainWindow, QMenu, QTabWidget, QVBoxLayout, QWidget
 from tqdm import tqdm
@@ -24,7 +24,7 @@ from music_player.common_gui import (
     get_pause_button_icon,
     get_play_button_icon,
 )
-from music_player.constants import MAX_SIDE_BAR_WIDTH
+from music_player.constants import MAIN_PADDING, MAIN_SPACING, MAX_SIDE_BAR_WIDTH
 from music_player.database import get_database_manager
 from music_player.db_types import (
     DbCollection,
@@ -48,8 +48,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self, core: VLCCore):
         super().__init__()
-        self.setStyleSheet(stylesheet)
         get_database_manager().create_qt_connection()
+        self.setStyleSheet(stylesheet)
 
         self.core = core
         self.media_changed: bool = False
@@ -58,8 +58,8 @@ class MainWindow(QMainWindow):
         self.last_played_music: DbMusic | None = None  # TODO -> VLCCore?
 
         main_ui = QHBoxLayout()
-        main_ui.setSpacing(0)
-        main_ui.setContentsMargins(0, 0, 0, 0)
+        main_ui.setSpacing(MAIN_SPACING)
+        main_ui.setContentsMargins(MAIN_PADDING, MAIN_PADDING, MAIN_PADDING, MAIN_PADDING)
         self.shared_signals = SharedSignals()
 
         self.playlist_view = PlaylistTreeWidget(self, self, self.shared_signals, is_main_view=True)
@@ -95,6 +95,8 @@ class MainWindow(QMainWindow):
         main_win.addWidget(self.toolbar)
 
         w = QWidget()
+        w.setObjectName("MainWindow")
+        w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, on=True)
         w.setLayout(main_win)
         self.setCentralWidget(w)
 
@@ -538,6 +540,7 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     core = VLCCore()
     app = QApplication(sys.argv)
+    app.setStyleSheet(stylesheet)
     QPixmapCache.setCacheLimit(102400)  # 100MB
     get_db_music_cache()  # TODO THIS COULD BE BETTER THAN FRONTLOADING
     qdarktheme.setup_theme()

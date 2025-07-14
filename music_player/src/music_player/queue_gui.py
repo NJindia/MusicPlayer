@@ -19,9 +19,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
-    QScrollArea,
     QStyleOptionGraphicsItem,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -32,17 +30,6 @@ from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap, get_single_song_drag_text, music_ids_to_qbytearray, qbytearray_to_music_ids
 from music_player.view_types import LibraryTableView, PlaylistTreeView, StackGraphicsView
 from music_player.vlc_core import VLCCore
-
-
-class ScrollableLayout(QScrollArea):
-    def __init__(self, layout: QVBoxLayout) -> None:
-        super().__init__()
-        self.setWidgetResizable(True)
-        scroll_widget = QWidget()
-        scroll_widget.setLayout(layout)
-        self.setWidget(scroll_widget)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
 
 class QueueEntryGraphicsItem(QGraphicsItem):

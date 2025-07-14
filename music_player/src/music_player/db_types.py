@@ -14,7 +14,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QPixmap, QPixmapCache
 
 from music_player.database import PATH_TO_IMGS, get_database_manager
-from music_player.utils import get_colored_pixmap, get_pixmap
+from music_player.utils import get_pixmap
 
 CollectionType = Literal["folder", "playlist", "artist", "album"]
 INSERT_COLLECTION_SQL = """
@@ -357,9 +357,9 @@ class DbStoredCollection(DbCollection):
         match self.collection_type:
             case "playlist":
                 if self.is_protected:
-                    pixmap = get_colored_pixmap(
-                        QPixmap("../icons/playlist/downloaded_songs.svg"), Qt.GlobalColor.black
-                    ).scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
+                    pixmap = get_pixmap(
+                        Path("../icons/playlist/downloaded_songs.svg"), height, color=Qt.GlobalColor.black
+                    )
                 else:
                     pixmap = (
                         self._get_default_playlist_thumbnail(height)

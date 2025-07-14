@@ -1,5 +1,6 @@
 from collections.abc import Callable, Sequence
-from functools import cache, partial
+from functools import partial
+from pathlib import Path
 from typing import Any, Literal, cast, override
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
@@ -38,6 +39,7 @@ from PySide6.QtWidgets import (
 
 from music_player.constants import TOOLBAR_HEIGHT
 from music_player.signals import SharedSignals
+from music_player.utils import get_pixmap
 
 BUFFER_CHARS = {",", " ", "…"}
 CreateMode = Literal["playlist", "folder"]
@@ -154,26 +156,12 @@ class NewFolderAction(QAction):
         )
 
 
-def _scaled_icon_from_svg(svg_path: str, height: int | None) -> QIcon:
-    pm = QPixmap(svg_path)
-    if height is not None:
-        pm = pm.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
-    return QIcon(pm)
-
-
-@cache
 def get_play_button_icon(height: int | None = None) -> QIcon:
-    return _scaled_icon_from_svg("../icons/play-button.svg", height)
+    return QIcon(get_pixmap(Path("../icons/play-button.svg"), height, color=Qt.GlobalColor.white))
 
 
-@cache
 def get_pause_button_icon(height: int | None = None) -> QIcon:
-    return _scaled_icon_from_svg("../icons/pause-button.svg", height)
-
-
-@cache
-def get_shuffle_button_icon(height: int | None = None) -> QIcon:
-    return _scaled_icon_from_svg("../icons/shuffle-button.svg", height)
+    return QIcon(get_pixmap(Path("../icons/pause-button.svg"), height, color=Qt.GlobalColor.white))
 
 
 class AddToQueueAction(QAction):
@@ -206,7 +194,7 @@ class ShuffleButton(OpacityButton):
     def __init__(self, signals: SharedSignals, height: int | None = None):
         super().__init__()
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setIcon(get_shuffle_button_icon(height))
+        self.setIcon(QIcon(get_pixmap(Path("../icons/shuffle-button.svg"), height, color=Qt.GlobalColor.white)))
         self.clicked.connect(partial(self._clicked, signals.toggle_shuffle_signal))
 
     def _clicked(self, shuffle_signal: SignalInstance):
