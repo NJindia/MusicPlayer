@@ -23,7 +23,7 @@ from music_player.common_gui import (
     get_pause_button_icon,
     get_play_button_icon,
 )
-from music_player.constants import MAIN_PADDING, MAIN_SPACING, MAX_SIDE_BAR_WIDTH
+from music_player.constants import MAIN_PADDING, MAIN_SPACING, MAX_SIDE_BAR_WIDTH, QUEUE_ENTRY_SPACING
 from music_player.database import get_database_manager
 from music_player.db_types import (
     DbCollection,
@@ -254,10 +254,26 @@ class MainWindow(QMainWindow):
             self.queue.queue_entries[jump_index] = temp
         self.core.jump_play_index(jump_index)
 
+    @profile
     def load_media(self, music_ids: tuple[int, ...]):
         """Set a new MediaList, and all the other fields that would also need to be set to work properly."""
-        self.core.load_media_from_music_ids(music_ids)
-        self.queue.initialize_queue()
+        queue = self.queue
+        queue.queue_entries = [e for e in queue.queue_entries if e.manually_added]
+        manually_added_music_ids = [e.music.id for e in queue.queue_entries]
+
+        self.core.load_media_from_music_ids((*manually_added_music_ids, *music_ids))
+
+        for item in queue.scene().items():  # pyright: ignore[reportUnknownMemberType]
+            if isinstance(item, QueueEntryGraphicsItem):
+                queue.scene().removeItem(item)
+        for i, list_idx in enumerate(self.core.list_indices):
+            qe = QueueEntryGraphicsItem(
+                get_db_music_cache().get(self.core.music_ids[list_idx]), self.shared_signals, queue.viewport().width()
+            )
+            queue.scene().addItem(qe)
+
+            qe.setPos(QUEUE_ENTRY_SPACING, queue.get_y_pos(i))
+            queue.queue_entries.append(qe)
 
     @Slot()
     def select_tree_view_item(self, proxy_index: QModelIndex):

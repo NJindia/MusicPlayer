@@ -230,21 +230,6 @@ class QueueGraphicsView(HistoryGraphicsView):
 
         self.drop_indicator_line_item = self.scene().addLine(QLineF(), QColor(0, 0, 255, 100))
 
-    @profile
-    def initialize_queue(self):
-        self.queue_entries = []
-        for item in self.scene().items():  # pyright: ignore[reportUnknownMemberType]
-            if isinstance(item, QueueEntryGraphicsItem):
-                self.scene().removeItem(item)
-        for i, list_idx in enumerate(self.core.list_indices):
-            qe = QueueEntryGraphicsItem(
-                get_db_music_cache().get(self.core.music_ids[list_idx]), self.shared_signals, self.viewport().width()
-            )
-            self.scene().addItem(qe)
-
-            qe.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
-            self.queue_entries.append(qe)
-
     @property
     def current_entries(self):
         return self.queue_entries[self.core.current_media_idx + 1 :]
