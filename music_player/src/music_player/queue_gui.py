@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import SongDrag, paint_artists
 from music_player.constants import MUSIC_IDS_MIMETYPE, QUEUE_ENTRY_HEIGHT, QUEUE_ENTRY_SPACING
-from music_player.db_types import DbMusic, get_db_music_cache
+from music_player.db_types import DbMusic
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap, get_single_song_drag_text, music_ids_to_qbytearray, qbytearray_to_music_ids
 from music_player.view_types import LibraryTableView, PlaylistTreeView, StackGraphicsView
@@ -40,11 +40,9 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         shared_signals: SharedSignals,
         start_width: int,
         *,
-        manually_added: bool = False,
         is_history: bool = False,
     ) -> None:
         super().__init__()
-        self.manually_added = manually_added
         self.is_history = is_history
         self.music: DbMusic = music
         self.shared_signals = shared_signals
@@ -193,11 +191,15 @@ class HistoryGraphicsView(StackGraphicsView):
         self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(self.current_entries)))  # Update scene size
 
     @profile
-    def insert_queue_entries(self, queue_insert_index: int, entries: list[QueueEntryGraphicsItem]) -> None:
-        self.queue_entries = self.queue_entries[:queue_insert_index] + entries + self.queue_entries[queue_insert_index:]
+    def _insert_queue_entries_into_scene(self, entries: list[QueueEntryGraphicsItem]) -> None:
         for entry in entries:
             self.scene().addItem(entry)
         self.update_scene()
+
+    @profile
+    def insert_queue_entries(self, queue_insert_index: int, entries: list[QueueEntryGraphicsItem]) -> None:
+        self.queue_entries = self.queue_entries[:queue_insert_index] + entries + self.queue_entries[queue_insert_index:]
+        self._insert_queue_entries_into_scene(entries)
 
     @staticmethod
     def get_y_pos(index: int) -> float:
@@ -228,15 +230,23 @@ class QueueGraphicsView(HistoryGraphicsView):
         self._is_dragging: bool = False
         self.setAcceptDrops(True)
 
+        self.manual_entries: list[QueueEntryGraphicsItem] = []
         self.drop_indicator_line_item = self.scene().addLine(QLineF(), QColor(0, 0, 255, 100))
 
     @property
     def current_entries(self):
-        return self.queue_entries[self.core.current_media_idx + 1 :]
+        return self.manual_entries + self.queue_entries[self.core.current_media_idx + 1 :]
 
     @property
     def past_entries(self):
         return self.queue_entries[: self.core.current_media_idx + 1]
+
+    @profile
+    def insert_manual_entries(self, manual_insert_index: int, entries: list[QueueEntryGraphicsItem]) -> None:
+        self.manual_entries = (
+            self.manual_entries[:manual_insert_index] + entries + self.manual_entries[manual_insert_index:]
+        )
+        self._insert_queue_entries_into_scene(entries)
 
     def update_first_queue_index(self) -> None:
         for proxy in self.past_entries:
@@ -285,7 +295,7 @@ class QueueGraphicsView(HistoryGraphicsView):
                 queue_entries_to_idx if queue_entries_from_idx > queue_entries_to_idx else queue_entries_to_idx - 1
             )
             self.queue_entries.insert(insert_idx, self.queue_entries.pop(queue_entries_from_idx))
-            self.core.list_indices.insert(insert_idx, self.core.list_indices.pop(queue_entries_from_idx))
+            self.core.queue_list_indices.insert(insert_idx, self.core.queue_list_indices.pop(queue_entries_from_idx))
         elif isinstance(source, (LibraryTableView, PlaylistTreeView)):
             music_ids_to_add = qbytearray_to_music_ids(event.mimeData().data(MUSIC_IDS_MIMETYPE))
             self.shared_signals.add_to_queue_signal.emit(music_ids_to_add, queue_entries_to_idx)

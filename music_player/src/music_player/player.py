@@ -148,11 +148,11 @@ class MainWindow(QMainWindow):
         self.last_played_music = current_music
 
     def shuffle_indices(self, split_index: int):
-        shuffled_indices = self.core.list_indices[split_index:]
+        shuffled_indices = self.core.queue_list_indices[split_index:]
         rng = np.random.default_rng()
         rng.shuffle(shuffled_indices)
-        self.core.list_indices = [*self.core.list_indices[:split_index], *shuffled_indices]
-        self.queue.queue_entries = [self.queue.queue_entries[i] for i in self.core.list_indices]
+        self.core.queue_list_indices = [*self.core.queue_list_indices[:split_index], *shuffled_indices]
+        self.queue.queue_entries = [self.queue.queue_entries[i] for i in self.core.queue_list_indices]
 
     @Slot(bool)
     def shuffle_button_clicked(self, shuffle: bool):
@@ -166,12 +166,10 @@ class MainWindow(QMainWindow):
             self.library.header_widget.shuffle_button.button_off()
 
             if self.core.current_collection:
-                self.core.list_indices = list(range(len(self.core.list_indices)))
+                self.core.queue_list_indices = list(range(len(self.core.queue_list_indices)))
 
                 # Get index of original playlist music that was most recently played, and start queue from there
-                last_music_played = next(
-                    qe for qe in self.queue.queue_entries[self.core.current_media_idx :: -1] if not qe.manually_added
-                ).music
+                last_music_played = next(qe for qe in self.queue.queue_entries[self.core.current_media_idx :: -1]).music
                 self.core.current_media_idx = self.core.music_ids.index(last_music_played.id)
 
                 # Replace any music/media that was added manually with the original lists
@@ -181,6 +179,7 @@ class MainWindow(QMainWindow):
     @Slot()
     @profile
     def add_to_queue(self, music_ids: Sequence[int], insert_index: int):
+        assert insert_index >= 0
         t = datetime.now(tz=UTC)
         items: list[QueueEntryGraphicsItem] = []
         list_indices: list[int] = []
@@ -194,23 +193,31 @@ class MainWindow(QMainWindow):
                 list_index = len(self.core.music_ids) - 1
             list_indices.append(list_index)
 
-            item = QueueEntryGraphicsItem(
-                music, self.shared_signals, manually_added=True, start_width=self.queue.viewport().width()
-            )
+            item = QueueEntryGraphicsItem(music, self.shared_signals, start_width=self.queue.viewport().width())
             items.append(item)
 
-        insert_idx = self.core.current_media_idx + 1 if insert_index == -1 else insert_index
-        self.core.list_indices = (
-            self.core.list_indices[:insert_idx] + list_indices + self.core.list_indices[insert_idx:]
-        )
-        self.queue.insert_queue_entries(insert_idx, items)
+        if insert_index <= len(self.queue.manual_entries):
+            print("MANUAL")
+            self.core.manual_list_indices = (
+                self.core.manual_list_indices[:insert_index]
+                + list_indices
+                + self.core.manual_list_indices[insert_index:]
+            )
+            self.queue.insert_manual_entries(insert_index, items)
+        else:
+            print("QUEUE")
+            insert_index -= len(self.queue.manual_entries)
+            self.core.queue_list_indices = (
+                self.core.queue_list_indices[:insert_index] + list_indices + self.core.queue_list_indices[insert_index:]
+            )
+            self.queue.insert_queue_entries(insert_index, items)
         print("add_to_queue", (datetime.now(tz=UTC) - t).microseconds / 1000)
 
     @Slot()
     def remove_from_queue(self, item: QueueEntryGraphicsItem):
         queue_index = self.queue.queue_entries.index(item)
         self.queue.scene().removeItem(self.queue.queue_entries.pop(queue_index))
-        del self.core.list_indices[queue_index]
+        del self.core.queue_list_indices[queue_index]
         self.queue.update_first_queue_index()
 
     @Slot()
@@ -245,28 +252,27 @@ class MainWindow(QMainWindow):
             jump_index = 0
             self.shuffle_indices(jump_index)  # Shuffle all
             # Find index of song we want to play now in the shuffled list, then swap that with the shuffled 1st song
-            _list_index = self.core.list_indices.index(collection_index)
-            self.core.list_indices[_list_index] = self.core.list_indices[jump_index]
-            self.core.list_indices[jump_index] = collection_index
+            _list_index = self.core.queue_list_indices.index(collection_index)
+            self.core.queue_list_indices[_list_index] = self.core.queue_list_indices[jump_index]
+            self.core.queue_list_indices[jump_index] = collection_index
 
             temp = self.queue.queue_entries[_list_index]
             self.queue.queue_entries[_list_index] = self.queue.queue_entries[jump_index]
             self.queue.queue_entries[jump_index] = temp
-        self.core.jump_play_index(jump_index)
+        self.core.jump_play_index(jump_index, manual=False)
 
     @profile
     def load_media(self, music_ids: tuple[int, ...]):
         """Set a new MediaList, and all the other fields that would also need to be set to work properly."""
         queue = self.queue
-        queue.queue_entries = [e for e in queue.queue_entries if e.manually_added]
-        manually_added_music_ids = [e.music.id for e in queue.queue_entries]
+        manually_added_music_ids = [e.music.id for e in queue.manual_entries]
 
         self.core.load_media_from_music_ids((*manually_added_music_ids, *music_ids))
 
         for item in queue.scene().items():  # pyright: ignore[reportUnknownMemberType]
             if isinstance(item, QueueEntryGraphicsItem):
                 queue.scene().removeItem(item)
-        for i, list_idx in enumerate(self.core.list_indices):
+        for i, list_idx in enumerate(self.core.queue_list_indices):
             qe = QueueEntryGraphicsItem(
                 get_db_music_cache().get(self.core.music_ids[list_idx]), self.shared_signals, queue.viewport().width()
             )
