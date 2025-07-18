@@ -40,8 +40,8 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         music: DbMusic,
         shared_signals: SharedSignals,
         start_width: int,
-        manually_added: bool = False,
         *,
+        manually_added: bool = False,
         is_history: bool = False,
     ) -> None:
         super().__init__()
@@ -351,10 +351,11 @@ class QueueGraphicsView(HistoryGraphicsView):
     @profile
     def load_music_ids(self, music_ids: tuple[int, ...]) -> None:
         """Load a list of music IDs into the queue."""
+        self.queue_entries = []
         for item in self.scene().items():  # pyright: ignore[reportUnknownMemberType]
             if isinstance(item, QueueEntryGraphicsItem):
                 self.scene().removeItem(item)
-        for i, music_id in enumerate([i + 1 for i in range(len((*self.manual_music_ids, *music_ids)))]):
+        for i, music_id in enumerate((*self.manual_music_ids, *music_ids)):
             qe = QueueEntryGraphicsItem(
                 get_db_music_cache().get(music_id), self.shared_signals, self.viewport().width()
             )

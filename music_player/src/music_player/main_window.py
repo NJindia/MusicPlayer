@@ -40,7 +40,7 @@ from music_player.vlc_core import VLCCore
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, core: VLCCore, shared_signals: SharedSignals):
+    def __init__(self, core: VLCCore, shared_signals: SharedSignals):  # noqa: PLR0915
         super().__init__()
         get_database_manager().create_qt_connection()
         self.setStyleSheet(stylesheet)
@@ -175,7 +175,7 @@ class MainWindow(QMainWindow):
         self.shared_signals.play_song_signal.emit(self.queue.manual_music_ids[manual_list_index])
         self.queue.remove_from_queue(self.queue.manual_entries[: manual_list_index + 1])
 
-    def jump_play_index(self, list_index: int, manual: bool):
+    def jump_play_index(self, list_index: int, *, manual: bool):
         self.queue.current_queue_idx = list_index
         if manual:
             self.play_manual_list_item(list_index)

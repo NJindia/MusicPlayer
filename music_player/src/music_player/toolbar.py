@@ -188,7 +188,7 @@ class MediaToolbar(QWidget):
                 self.repeat_button.button_on()
                 # self.core.media_player.set_playback_mode(vlc.PlaybackMode.repeat)
 
-    def __init__(self, core: VLCCore, shared_signals: SharedSignals):
+    def __init__(self, core: VLCCore, shared_signals: SharedSignals):  # noqa: PLR0915
         super().__init__()
         self.setObjectName("MediaToolbar")
         self.core = core
