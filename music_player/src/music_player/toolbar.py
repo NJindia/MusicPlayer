@@ -1,13 +1,20 @@
+import itertools
 from functools import cache, partial
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from PySide6.QtCore import QSize, Qt, Slot
 from PySide6.QtGui import QIcon, QTransform
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget
 
 from music_player.common_gui import OpacityButton, ShuffleButton, TextScrollArea, get_play_button_icon
-from music_player.constants import TOOLBAR_HEIGHT, TOOLBAR_MEDIA_CONTROL_WIDTH, TOOLBAR_PADDING, VOLUME_SLIDER_MAX_WIDTH
+from music_player.constants import (
+    TOOLBAR_HEIGHT,
+    TOOLBAR_MEDIA_CONTROL_WIDTH,
+    TOOLBAR_PADDING,
+    VOLUME_SLIDER_MAX_WIDTH,
+    RepeatState,
+)
 from music_player.db_types import DbMusic
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap, timestamp_to_str
@@ -115,6 +122,32 @@ def get_volume_icons() -> dict[VOLUME_ICONS, QIcon]:
     }
 
 
+class RepeatButton(OpacityButton):
+    def __init__(self):
+        super().__init__()
+
+        self.repeat_states = itertools.cycle(get_args(RepeatState))
+        self.repeat_state: RepeatState = next(self.repeat_states)
+        assert self.repeat_state == "NO_REPEAT"  # Should always start here TODO (for now)
+
+        self.setIcon(QIcon(get_pixmap(Path("../icons/repeat-button.svg"), None, color=Qt.GlobalColor.white)))
+        self.clicked.connect(partial(self.change_repeat_state, None))
+
+    @Slot()
+    def change_repeat_state(self, new_state: RepeatState | None):
+        """Change repeat state."""
+        self.repeat_state = next(self.repeat_states) if new_state is None else new_state
+        match self.repeat_state:
+            case "NO_REPEAT":
+                self.setIcon(QIcon("../icons/repeat-button.svg"))
+                self.button_off()
+            case "REPEAT_QUEUE":
+                self.button_on()
+            case "REPEAT_ONE":
+                self.setIcon(QIcon("../icons/repeat-1-button.svg"))
+                self.button_on()
+
+
 class VolumeSlider(QHBoxLayout):
     def __init__(self, core: VLCCore):
         super().__init__()
@@ -171,23 +204,6 @@ class MediaToolbar(QWidget):
         else:
             self.core.media_player.play()
 
-    @Slot()
-    def press_repeat_button(self):
-        """Change repeat state."""
-        self.core.repeat_state = next(self.core.repeat_states)
-        match self.core.repeat_state:
-            case "NO_REPEAT":
-                self.repeat_button.setIcon(QIcon("../icons/repeat-button.svg"))
-                self.repeat_button.button_off()
-                # self.core.media_player.set_playback_mode(vlc.PlaybackMode.default)
-            case "REPEAT_QUEUE":
-                self.repeat_button.button_on()
-                # self.core.media_player.set_playback_mode(vlc.PlaybackMode.loop)
-            case "REPEAT_ONE":
-                self.repeat_button.setIcon(QIcon("../icons/repeat-1-button.svg"))
-                self.repeat_button.button_on()
-                # self.core.media_player.set_playback_mode(vlc.PlaybackMode.repeat)
-
     def __init__(self, core: VLCCore, shared_signals: SharedSignals):  # noqa: PLR0915
         super().__init__()
         self.setObjectName("MediaToolbar")
@@ -219,12 +235,7 @@ class MediaToolbar(QWidget):
         skip_button.setIcon(QIcon(rewind_pixmap.transformed(QTransform().scale(-1, 1))))
         skip_button.clicked.connect(self._signals.next_song_signal.emit)
 
-        self.repeat_button = OpacityButton()
-        self.repeat_button.setIcon(
-            QIcon(get_pixmap(Path("../icons/repeat-button.svg"), None, color=Qt.GlobalColor.white))
-        )
-        self.repeat_button.clicked.connect(self.press_repeat_button)
-
+        self.repeat_button = RepeatButton()
         self.media_slider = MediaScrubberSlider(self.core, self._signals)
 
         media_control_button_hbox = QHBoxLayout()

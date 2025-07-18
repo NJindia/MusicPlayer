@@ -55,13 +55,23 @@ class Player:
         else:
             self.vlc_core.media_player.play()
 
-    def next(self):
+    def next(self, *, manually_triggered: bool = False):
+        repeat_state = self.main_window.toolbar.repeat_button.repeat_state
+        if repeat_state == "REPEAT_ONE" and not manually_triggered:
+            self.vlc_core.play_item(self.queue_music_ids[self.current_queue_idx])
+            return
+
         if len(self.manual_music_ids):
             self.main_window.play_manual_list_item(0)
             return
+
         self.current_queue_idx += 1
         if self.current_queue_idx >= len(self.queue_music_ids):
-            self.vlc_core.stop()
+            if repeat_state == "NO_REPEAT":
+                self.vlc_core.stop()
+            else:
+                self.current_queue_idx = 0
+                self.vlc_core.play_item(self.queue_music_ids[self.current_queue_idx])
         else:
             self.vlc_core.play_item(self.queue_music_ids[self.current_queue_idx])
 

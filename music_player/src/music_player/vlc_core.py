@@ -1,12 +1,9 @@
-import itertools
-from typing import Literal, cast, get_args
+from typing import cast
 
 from vlc import EventManager, EventType, Instance, Media, MediaList
 
 from music_player.db_types import DbCollection, get_db_music_cache
 from music_player.signals import VLCSignals
-
-RepeatState = Literal["NO_REPEAT", "REPEAT_QUEUE", "REPEAT_ONE"]
 
 
 def index_media_list(media_list: MediaList, media: Media) -> int:
@@ -26,10 +23,6 @@ class VLCCore:
         connect = self.event_manager.event_attach
 
         assert not self.media_player.is_playing()
-
-        self.repeat_states = itertools.cycle(get_args(RepeatState))
-        self.repeat_state: RepeatState = next(self.repeat_states)
-        assert self.repeat_state == "NO_REPEAT"  # Should always start here TODO (for now)
 
         connect(EventType.MediaPlayerPlaying, lambda _: self.vlc_signals.media_playing_signal.emit())
         connect(EventType.MediaPlayerPaused, lambda _: self.vlc_signals.media_paused_signal.emit())
