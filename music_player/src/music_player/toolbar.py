@@ -7,13 +7,7 @@ from PySide6.QtGui import QIcon, QTransform
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget
 
 from music_player.common_gui import OpacityButton, ShuffleButton, TextScrollArea, get_play_button_icon
-from music_player.constants import (
-    SKIP_BACK_SECOND_THRESHOLD,
-    TOOLBAR_HEIGHT,
-    TOOLBAR_MEDIA_CONTROL_WIDTH,
-    TOOLBAR_PADDING,
-    VOLUME_SLIDER_MAX_WIDTH,
-)
+from music_player.constants import TOOLBAR_HEIGHT, TOOLBAR_MEDIA_CONTROL_WIDTH, TOOLBAR_PADDING, VOLUME_SLIDER_MAX_WIDTH
 from music_player.db_types import DbMusic
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap, timestamp_to_str
@@ -51,9 +45,10 @@ class AlbumButton(QToolButton):
 
 
 class MediaScrubberSlider(QHBoxLayout):
-    def __init__(self, core: VLCCore):
+    def __init__(self, core: VLCCore, signals: SharedSignals):
         super().__init__()
         self.core = core
+        self._signals = signals
 
         self.before_label = QLabel(timestamp_to_str(0))
         self.after_label = QLabel()
@@ -94,7 +89,7 @@ class MediaScrubberSlider(QHBoxLayout):
     @Slot()
     def set_media_position(self):
         if self.slider.value() == self.slider.maximum():
-            self.core.next()
+            self._signals.next_song_signal.emit()
         else:
             self.core.media_player.set_position(self.slider.value() / self.get_current_media_duration())
 
@@ -171,18 +166,10 @@ class MediaToolbar(QWidget):
         """Start audio playback if none is playing, otherwise pause existing."""
         if self.core.media_player.is_playing():
             self.core.media_player.pause()
-        elif self.core.current_media_idx == -1:
-            self.core.next()
+        elif self.core.current_media is None:
+            self._signals.next_song_signal.emit()
         else:
             self.core.media_player.play()
-
-    @Slot()
-    def press_rewind_button(self):
-        if self.core.current_media_idx == 0 or self.core.media_player.get_time() / 1000 > SKIP_BACK_SECOND_THRESHOLD:
-            self.core.media_player.set_position(0)
-            self.media_slider.slider.setValue(0)
-        else:
-            self.core.previous()
 
     @Slot()
     def press_repeat_button(self):
@@ -205,22 +192,24 @@ class MediaToolbar(QWidget):
         super().__init__()
         self.setObjectName("MediaToolbar")
         self.core = core
+        self._signals = shared_signals
+
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, on=True)
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(TOOLBAR_HEIGHT)
 
-        self.album_button = AlbumButton(0, shared_signals, (TOOLBAR_HEIGHT, TOOLBAR_PADDING))
+        self.album_button = AlbumButton(0, self._signals, (TOOLBAR_HEIGHT, TOOLBAR_PADDING))
 
         self.song_label = TextScrollArea()
         self.artists_label = TextScrollArea()
 
-        self.shuffle_button = ShuffleButton(shared_signals)
+        self.shuffle_button = ShuffleButton(self._signals)
 
         rewind_pixmap = get_pixmap(Path("../icons/rewind-button.svg"), None, color=Qt.GlobalColor.white)
         rewind_button = QToolButton()
         rewind_button.setIcon(QIcon(rewind_pixmap))
-        rewind_button.clicked.connect(self.press_rewind_button)
+        rewind_button.clicked.connect(self._signals.rewind_signal.emit)
 
         self.play_pause_button = QToolButton()
         self.play_pause_button.setIcon(get_play_button_icon())
@@ -228,7 +217,7 @@ class MediaToolbar(QWidget):
 
         skip_button = QToolButton()
         skip_button.setIcon(QIcon(rewind_pixmap.transformed(QTransform().scale(-1, 1))))
-        skip_button.clicked.connect(self.core.next)
+        skip_button.clicked.connect(self._signals.next_song_signal.emit)
 
         self.repeat_button = OpacityButton()
         self.repeat_button.setIcon(
@@ -236,7 +225,7 @@ class MediaToolbar(QWidget):
         )
         self.repeat_button.clicked.connect(self.press_repeat_button)
 
-        self.media_slider = MediaScrubberSlider(self.core)
+        self.media_slider = MediaScrubberSlider(self.core, self._signals)
 
         media_control_button_hbox = QHBoxLayout()
         media_control_button_hbox.addStretch()

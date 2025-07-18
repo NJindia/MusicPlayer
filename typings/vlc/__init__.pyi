@@ -308,7 +308,7 @@ class Instance(_Ctype):
         """Create a new :class:`MediaListPlayer` instance."""
         ...
 
-    def media_new(self, mrl, *options):  # -> Any:
+    def media_new(self, mrl: MRL, *options: Any) -> Media | None:
         """Create a new :class:`Media` instance.
 
         If mrl contains a colon (:) preceded by more than 1 letter, it
@@ -330,7 +330,7 @@ class Instance(_Ctype):
         """
         ...
 
-    def media_new_path(self, path):  # -> Any:
+    def media_new_path(self, path: str | bytes | Path) -> Media | None:
         """Create a media for a certain file path. See :meth:`media_release`.
 
         :param path: A str, byte, or PathLike object representing a local filesystem path.

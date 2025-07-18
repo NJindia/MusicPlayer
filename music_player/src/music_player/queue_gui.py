@@ -1,8 +1,9 @@
 import bisect
+from datetime import UTC, datetime
 from typing import cast, override
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
-from PySide6.QtCore import QByteArray, QLineF, QMimeData, QPoint, QRect, QRectF, Qt
+from PySide6.QtCore import QByteArray, QLineF, QMimeData, QPoint, QRect, QRectF, Qt, Slot
 from PySide6.QtGui import (
     QColor,
     QDragLeaveEvent,
@@ -25,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import SongDrag, paint_artists
 from music_player.constants import MUSIC_IDS_MIMETYPE, QUEUE_ENTRY_HEIGHT, QUEUE_ENTRY_SPACING
-from music_player.db_types import DbMusic
+from music_player.db_types import DbMusic, get_db_music_cache
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap, get_single_song_drag_text, music_ids_to_qbytearray, qbytearray_to_music_ids
 from music_player.view_types import LibraryTableView, PlaylistTreeView, StackGraphicsView
@@ -39,10 +40,12 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         music: DbMusic,
         shared_signals: SharedSignals,
         start_width: int,
+        manually_added: bool = False,
         *,
         is_history: bool = False,
     ) -> None:
         super().__init__()
+        self.manually_added = manually_added
         self.is_history = is_history
         self.music: DbMusic = music
         self.shared_signals = shared_signals
@@ -224,22 +227,34 @@ class QueueGraphicsView(HistoryGraphicsView):
 
     def __init__(self, vlc_core: VLCCore, shared_signals: SharedSignals):
         super().__init__()
-        self.setMouseTracking(True)
         self.core = vlc_core
         self.shared_signals = shared_signals
         self._is_dragging: bool = False
+        self.current_queue_idx: int = -1
+
+        self.setMouseTracking(True)
         self.setAcceptDrops(True)
 
         self.manual_entries: list[QueueEntryGraphicsItem] = []
         self.drop_indicator_line_item = self.scene().addLine(QLineF(), QColor(0, 0, 255, 100))
 
+        self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
+
+    @property
+    def queue_music_ids(self) -> list[int]:
+        return [q.music.id for q in self.queue_entries]
+
+    @property
+    def manual_music_ids(self) -> list[int]:
+        return [q.music.id for q in self.manual_entries]
+
     @property
     def current_entries(self):
-        return self.manual_entries + self.queue_entries[self.core.current_media_idx + 1 :]
+        return self.manual_entries + self.queue_entries[self.current_queue_idx + 1 :]
 
     @property
     def past_entries(self):
-        return self.queue_entries[: self.core.current_media_idx + 1]
+        return self.queue_entries[: self.current_queue_idx + 1]
 
     @profile
     def insert_manual_entries(self, manual_insert_index: int, entries: list[QueueEntryGraphicsItem]) -> None:
@@ -282,7 +297,7 @@ class QueueGraphicsView(HistoryGraphicsView):
         self.drop_indicator_line_item.setLine(QLineF())
         source = event.source()
         scene_y = self.mapToScene(event.pos()).y()  # pyright: ignore[reportUnknownMemberType]
-        queue_entries_to_idx = self.core.current_media_idx + 1 + bisect.bisect_right(self.midpoints, scene_y)
+        queue_entries_to_idx = self.current_queue_idx + 1 + bisect.bisect_right(self.midpoints, scene_y)
         if isinstance(source, QueueGraphicsView):
             queue_entries_from_idx, ok = cast(
                 tuple[int, bool], event.mimeData().data(self.queue_entries_mimetype).toInt(10)
@@ -295,7 +310,6 @@ class QueueGraphicsView(HistoryGraphicsView):
                 queue_entries_to_idx if queue_entries_from_idx > queue_entries_to_idx else queue_entries_to_idx - 1
             )
             self.queue_entries.insert(insert_idx, self.queue_entries.pop(queue_entries_from_idx))
-            self.core.queue_list_indices.insert(insert_idx, self.core.queue_list_indices.pop(queue_entries_from_idx))
         elif isinstance(source, (LibraryTableView, PlaylistTreeView)):
             music_ids_to_add = qbytearray_to_music_ids(event.mimeData().data(MUSIC_IDS_MIMETYPE))
             self.shared_signals.add_to_queue_signal.emit(music_ids_to_add, queue_entries_to_idx)
@@ -306,3 +320,45 @@ class QueueGraphicsView(HistoryGraphicsView):
     def dragLeaveEvent(self, event: QDragLeaveEvent, /):
         self.drop_indicator_line_item.setLine(QLineF())
         super().dragLeaveEvent(event)
+
+    @Slot()
+    @profile
+    def add_to_queue(self, music_ids: list[int], insert_index: int):
+        assert insert_index >= 0
+        t = datetime.now(tz=UTC)
+        items = [
+            QueueEntryGraphicsItem(
+                get_db_music_cache().get(music_id), self.shared_signals, start_width=self.viewport().width()
+            )
+            for music_id in music_ids
+        ]
+
+        if insert_index <= len(self.manual_entries):
+            print("MANUAL")
+            self.insert_manual_entries(insert_index, items)
+        else:
+            print("QUEUE")
+            self.insert_queue_entries(insert_index - len(self.manual_entries), items)
+        print("add_to_queue", (datetime.now(tz=UTC) - t).microseconds / 1000)
+
+    @Slot()
+    def remove_from_queue(self, items: list[QueueEntryGraphicsItem]) -> None:
+        for item in items:
+            entries = self.manual_entries if item.manually_added else self.queue_entries
+            self.scene().removeItem(entries.pop(entries.index(item)))
+        self.update_first_queue_index()
+
+    @profile
+    def load_music_ids(self, music_ids: tuple[int, ...]) -> None:
+        """Load a list of music IDs into the queue."""
+        for item in self.scene().items():  # pyright: ignore[reportUnknownMemberType]
+            if isinstance(item, QueueEntryGraphicsItem):
+                self.scene().removeItem(item)
+        for i, music_id in enumerate([i + 1 for i in range(len((*self.manual_music_ids, *music_ids)))]):
+            qe = QueueEntryGraphicsItem(
+                get_db_music_cache().get(music_id), self.shared_signals, self.viewport().width()
+            )
+            self.scene().addItem(qe)
+
+            qe.setPos(QUEUE_ENTRY_SPACING, self.get_y_pos(i))
+            self.queue_entries.append(qe)
