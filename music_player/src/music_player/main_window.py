@@ -140,11 +140,10 @@ class MainWindow(QMainWindow):
         self.toolbar.album_button.change_music(current_music)
 
     def shuffle_indices(self, split_index: int):
-        shuffled_indices = self.queue.queue_music_ids[split_index:]
+        shuffled_entries = self.queue.queue_entries[split_index:]
         rng = np.random.default_rng()
-        rng.shuffle(shuffled_indices)
-        queue_music_ids = [*self.queue.queue_music_ids[:split_index], *shuffled_indices]
-        self.queue.queue_entries = [self.queue.queue_entries[i] for i in queue_music_ids]
+        rng.shuffle(shuffled_entries)
+        self.queue.queue_entries = [*self.queue.queue_entries[:split_index], *shuffled_entries]
 
     @Slot(bool)
     def shuffle_button_clicked(self, shuffle: bool):
@@ -159,7 +158,7 @@ class MainWindow(QMainWindow):
 
             if self.core.current_collection:
                 # Get index of original playlist music that was most recently played, and start queue from there
-                last_queue_music_played = self.queue.queue_entries[self.queue.current_queue_idx - 1].music
+                last_queue_music_played = self.queue.queue_entries[self.queue.current_queue_idx].music
 
                 # Replace any music/media that was added manually with the original lists
                 self.queue.load_music_ids(self.core.current_collection.music_ids)
