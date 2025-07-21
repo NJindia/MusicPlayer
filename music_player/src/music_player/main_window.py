@@ -158,13 +158,12 @@ class MainWindow(QMainWindow):
             self.library.header_widget.shuffle_button.button_off()
 
             if self.core.current_collection:
+                # Get index of original playlist music that was most recently played, and start queue from there
+                last_queue_music_played = self.queue.queue_entries[self.queue.current_queue_idx - 1].music
+
                 # Replace any music/media that was added manually with the original lists
                 self.queue.load_music_ids(self.core.current_collection.music_ids)
 
-                # Get index of original playlist music that was most recently played, and start queue from there
-                last_queue_music_played = next(
-                    qe for qe in self.queue.queue_entries[self.queue.current_queue_idx :: -1]
-                ).music
                 self.queue.current_queue_idx = self.queue.queue_music_ids.index(last_queue_music_played.id)
         self.queue.update_first_queue_index()
 
