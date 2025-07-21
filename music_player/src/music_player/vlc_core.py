@@ -17,6 +17,8 @@ class VLCCore:
         self.vlc_signals = VLCSignals()
 
         self.current_collection: DbCollection | None = None
+        self.current_music_id: int | None = None
+        self.last_played_music_id: int | None = None
         self.media_player = self.instance.media_player_new()
 
         self.event_manager = cast(EventManager, self.media_player.event_manager())  # pyright: ignore[reportUnknownMemberType]
@@ -41,6 +43,8 @@ class VLCCore:
 
     def play_item(self, music_id: int):
         media = self.instance.media_new_path(get_db_music_cache().get(music_id).file_path)
+        self.last_played_music_id = self.current_music_id
+        self.current_music_id = music_id
         assert media is not None
         self.media_player.set_media(media)
         self.media_player.play()

@@ -24,7 +24,6 @@ from music_player.constants import MAIN_PADDING, MAIN_SPACING, MAX_SIDE_BAR_WIDT
 from music_player.database import get_database_manager
 from music_player.db_types import (
     DbCollection,
-    DbMusic,
     DbStoredCollection,
     get_collection_children,
     get_collections_by_parent_id,
@@ -49,7 +48,6 @@ class MainWindow(QMainWindow):
         self.shared_signals = shared_signals
         self.media_changed: bool = False
         self.setWindowTitle("Media Player")
-        self.last_played_music: DbMusic | None = None  # TODO -> VLCCore?
 
         main_ui = QHBoxLayout()
         main_ui.setSpacing(MAIN_SPACING)
@@ -123,14 +121,15 @@ class MainWindow(QMainWindow):
         self.media_changed = True
         if self.queue.current_queue_idx == -1:
             self.queue.current_queue_idx = 0
-        current_music = get_db_music_cache().get(self.queue.queue_music_ids[self.queue.current_queue_idx])
+        assert self.core.current_music_id is not None
+        current_music = get_db_music_cache().get(self.core.current_music_id)
 
         # when VLC emits the MediaPlayerEnded event, it does in a separate thread
         assert QThread.currentThread().isMainThread()
         self.queue.update_first_queue_index()
-        if self.last_played_music is not None:  # None when nothing has been played yet
+        if self.core.last_played_music_id is not None:  # -1 when nothing has been played yet
             hist_entry = QueueEntryGraphicsItem(
-                self.last_played_music,
+                get_db_music_cache().get(self.core.last_played_music_id),
                 self.shared_signals,
                 start_width=self.history.viewport().width(),
                 is_history=True,
@@ -139,8 +138,6 @@ class MainWindow(QMainWindow):
         self.toolbar.song_label.set_text(current_music.name)
         self.toolbar.artists_label.set_text(", ".join(current_music.artists))
         self.toolbar.album_button.change_music(current_music)
-
-        self.last_played_music = current_music
 
     def shuffle_indices(self, split_index: int):
         shuffled_indices = self.queue.queue_music_ids[split_index:]
@@ -165,10 +162,10 @@ class MainWindow(QMainWindow):
                 self.queue.load_music_ids(self.core.current_collection.music_ids)
 
                 # Get index of original playlist music that was most recently played, and start queue from there
-                last_music_played = next(
+                last_queue_music_played = next(
                     qe for qe in self.queue.queue_entries[self.queue.current_queue_idx :: -1]
                 ).music
-                self.queue.current_queue_idx = self.queue.queue_music_ids.index(last_music_played.id)
+                self.queue.current_queue_idx = self.queue.queue_music_ids.index(last_queue_music_played.id)
         self.queue.update_first_queue_index()
 
     def play_manual_list_item(self, manual_list_index: int):
