@@ -41,14 +41,6 @@ class Player:
     def current_queue_idx(self, value: int):
         self.main_window.queue.current_queue_idx = value
 
-    @property
-    def current_music(self) -> DbMusic:
-        assert self.current_queue_idx != -1, "No current media index set"
-        music_id = (
-            self.manual_music_ids[0] if len(self.manual_music_ids) else self.queue_music_ids[self.current_queue_idx]
-        )  # TODO THIS IS WRONG
-        return get_db_music_cache().get(music_id)
-
     def play(self):
         if self.current_queue_idx == -1:
             self.next()

@@ -258,6 +258,8 @@ class QueueGraphicsView(HistoryGraphicsView):
 
     @profile
     def insert_manual_entries(self, manual_insert_index: int, entries: list[QueueEntryGraphicsItem]) -> None:
+        for entry in entries:
+            entry.manually_added = True
         self.manual_entries = (
             self.manual_entries[:manual_insert_index] + entries + self.manual_entries[manual_insert_index:]
         )
