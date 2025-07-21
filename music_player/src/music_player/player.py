@@ -5,7 +5,7 @@ from PySide6.QtGui import QPixmapCache
 from PySide6.QtWidgets import QApplication
 
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD
-from music_player.db_types import DbMusic, get_db_music_cache
+from music_player.db_types import get_db_music_cache
 from music_player.main_window import MainWindow
 from music_player.signals import SharedSignals
 from music_player.stylesheet import stylesheet
@@ -43,11 +43,11 @@ class Player:
 
     def play(self):
         if self.current_queue_idx == -1:
-            self.next()
+            self.next(manually_triggered=False)
         else:
             self.vlc_core.media_player.play()
 
-    def next(self, *, manually_triggered: bool = False):
+    def next(self, manually_triggered: bool):  # noqa: FBT001
         repeat_state = self.main_window.toolbar.repeat_button.repeat_state
         if repeat_state == "REPEAT_ONE" and not manually_triggered:
             self.vlc_core.play_item(self.queue_music_ids[self.current_queue_idx])

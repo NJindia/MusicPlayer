@@ -95,7 +95,9 @@ class MainWindow(QMainWindow):
         self.core.vlc_signals.media_paused_signal.connect(self._media_player_paused_ui)
         self.core.vlc_signals.time_changed_signal.connect(self.toolbar.media_slider.update_ui_live)
         self.core.vlc_signals.media_changed_signal.connect(self._media_changed_ui)
-        self.core.vlc_signals.media_end_reached_signal.connect(self.shared_signals.next_song_signal.emit)
+        self.core.vlc_signals.media_end_reached_signal.connect(
+            partial(self.shared_signals.next_song_signal.emit, False)  # noqa: FBT003
+        )
 
         self.shared_signals.play_collection_signal.connect(self.play_collection)
         self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_collection)

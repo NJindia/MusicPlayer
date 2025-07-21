@@ -96,7 +96,7 @@ class MediaScrubberSlider(QHBoxLayout):
     @Slot()
     def set_media_position(self):
         if self.slider.value() == self.slider.maximum():
-            self._signals.next_song_signal.emit()
+            self._signals.next_song_signal.emit(False)  # noqa: FBT003
         else:
             self.core.media_player.set_position(self.slider.value() / self.get_current_media_duration())
 
@@ -126,26 +126,27 @@ class RepeatButton(OpacityButton):
     def __init__(self):
         super().__init__()
 
+        repeat_button_icon = QIcon(get_pixmap(Path("../icons/repeat-button.svg"), None, color=Qt.GlobalColor.white))
+        self.icon_by_state: dict[RepeatState, QIcon] = {
+            "NO_REPEAT": repeat_button_icon,
+            "REPEAT_QUEUE": repeat_button_icon,
+            "REPEAT_ONE": QIcon(get_pixmap(Path("../icons/repeat-1-button.svg"), None, color=Qt.GlobalColor.white)),
+        }
         self.repeat_states = itertools.cycle(get_args(RepeatState))
-        self.repeat_state: RepeatState = next(self.repeat_states)
-        assert self.repeat_state == "NO_REPEAT"  # Should always start here TODO (for now)
+        self.repeat_state: RepeatState = "NO_REPEAT"
+        self.change_repeat_state(self.repeat_state)
 
-        self.setIcon(QIcon(get_pixmap(Path("../icons/repeat-button.svg"), None, color=Qt.GlobalColor.white)))
         self.clicked.connect(partial(self.change_repeat_state, None))
 
     @Slot()
     def change_repeat_state(self, new_state: RepeatState | None):
         """Change repeat state."""
         self.repeat_state = next(self.repeat_states) if new_state is None else new_state
-        match self.repeat_state:
-            case "NO_REPEAT":
-                self.setIcon(QIcon("../icons/repeat-button.svg"))
-                self.button_off()
-            case "REPEAT_QUEUE":
-                self.button_on()
-            case "REPEAT_ONE":
-                self.setIcon(QIcon("../icons/repeat-1-button.svg"))
-                self.button_on()
+        self.setIcon(self.icon_by_state[self.repeat_state])
+        if self.repeat_state == "NO_REPEAT":
+            self.button_off()
+        else:
+            self.button_on()
 
 
 class VolumeSlider(QHBoxLayout):
@@ -200,7 +201,7 @@ class MediaToolbar(QWidget):
         if self.core.media_player.is_playing():
             self.core.media_player.pause()
         elif self.core.current_media is None:
-            self._signals.next_song_signal.emit()
+            self._signals.next_song_signal.emit(False)  # noqa: FBT003
         else:
             self.core.media_player.play()
 
@@ -233,7 +234,7 @@ class MediaToolbar(QWidget):
 
         skip_button = QToolButton()
         skip_button.setIcon(QIcon(rewind_pixmap.transformed(QTransform().scale(-1, 1))))
-        skip_button.clicked.connect(self._signals.next_song_signal.emit)
+        skip_button.clicked.connect(partial(self._signals.next_song_signal.emit, True))  # noqa: FBT003
 
         self.repeat_button = RepeatButton()
         self.media_slider = MediaScrubberSlider(self.core, self._signals)

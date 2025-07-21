@@ -19,7 +19,7 @@ class SharedSignals(QObject):
     play_collection_signal = Signal(DbCollection, int)  # (DbStoredCollection, collection_idx_to_play_from)
     toggle_shuffle_signal = Signal(bool)  # (shuffle)
     play_from_queue_signal = Signal(object)  # (QueueEntryGraphicsItem)
-    next_song_signal = Signal()
+    next_song_signal = Signal(bool)
     rewind_signal = Signal()
     play_song_signal = Signal(int)  # (music_id)
 
