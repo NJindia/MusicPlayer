@@ -357,7 +357,7 @@ class QueueGraphicsView(HistoryGraphicsView):
         for item in self.scene().items():  # pyright: ignore[reportUnknownMemberType]
             if isinstance(item, QueueEntryGraphicsItem):
                 self.scene().removeItem(item)
-        for i, music_id in enumerate((*self.manual_music_ids, *music_ids)):
+        for i, music_id in enumerate(music_ids, start=len(self.manual_entries)):
             qe = QueueEntryGraphicsItem(
                 get_db_music_cache().get(music_id), self.shared_signals, self.viewport().width()
             )
