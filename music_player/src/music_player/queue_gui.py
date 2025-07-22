@@ -204,8 +204,7 @@ class HistoryGraphicsView(StackGraphicsView):
         self.queue_entries = self.queue_entries[:queue_insert_index] + entries + self.queue_entries[queue_insert_index:]
         self._insert_queue_entries_into_scene(entries)
 
-    @staticmethod
-    def get_y_pos(index: int) -> float:
+    def get_y_pos(self, index: int) -> float:
         return QUEUE_ENTRY_SPACING + index * (QUEUE_ENTRY_SPACING + QUEUE_ENTRY_HEIGHT)
 
     @override
@@ -237,6 +236,12 @@ class QueueGraphicsView(HistoryGraphicsView):
 
         self.manual_entries: list[QueueEntryGraphicsItem] = []
         self.drop_indicator_line_item = self.scene().addLine(QLineF(), QColor(0, 0, 255, 100))
+        self.manual_queue_header_label = self.scene().addText("Next in queue")  # pyright: ignore[reportUnknownMemberType]
+        self.manual_queue_header_label.setDefaultTextColor(Qt.GlobalColor.white)
+        self.manual_queue_header_label.setVisible(False)
+        self.queue_header_label = self.scene().addText("Next from: popopopopopopoo")  # pyright: ignore[reportUnknownMemberType]
+        self.queue_header_label.setDefaultTextColor(Qt.GlobalColor.white)
+        self.queue_header_label.setVisible(False)
 
         self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
 
@@ -277,6 +282,38 @@ class QueueGraphicsView(HistoryGraphicsView):
     @property
     def midpoints(self):
         return [self.get_y_pos(i) + QUEUE_ENTRY_HEIGHT / 2 for i in range(len(self.current_entries))]
+
+    @override
+    def get_y_pos(self, index: int, *, is_queue_header: bool = False) -> float:
+        manual_header_height = (
+            self.manual_queue_header_label.boundingRect().height() + QUEUE_ENTRY_SPACING
+            if self.manual_queue_header_label.isVisible()
+            else 0
+        )
+        queue_header_height = (
+            self.queue_header_label.boundingRect().height() + QUEUE_ENTRY_SPACING
+            if not is_queue_header and index >= len(self.manual_entries) and self.queue_header_label.isVisible()
+            else 0
+        )
+        return super().get_y_pos(index) + manual_header_height + queue_header_height
+
+    @override
+    def update_scene(self):
+        if len(self.manual_entries):
+            if not self.manual_queue_header_label.isVisible():
+                self.manual_queue_header_label.setVisible(True)
+            self.manual_queue_header_label.setPos(QUEUE_ENTRY_SPACING, QUEUE_ENTRY_SPACING)  # TODO
+        elif self.manual_queue_header_label.isVisible():
+            self.manual_queue_header_label.setVisible(False)
+        if len(self.queue_entries):
+            if not self.queue_header_label.isVisible():
+                self.queue_header_label.setVisible(True)
+            self.queue_header_label.setPos(
+                QUEUE_ENTRY_SPACING, self.get_y_pos(len(self.manual_entries), is_queue_header=True)
+            )
+        elif self.queue_header_label.isVisible():
+            self.queue_header_label.setVisible(False)
+        super().update_scene()
 
     @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
