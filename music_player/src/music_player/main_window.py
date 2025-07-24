@@ -211,6 +211,7 @@ class MainWindow(QMainWindow):
             self.playlist_view.proxy_model.invalidate()
 
         self.queue.load_music_ids(collection.music_ids)
+        self.queue.queue_header_collection_label.setPlainText(collection.name)
         jump_index = collection_index
         if self.toolbar.shuffle_button.isChecked():
             jump_index = 0

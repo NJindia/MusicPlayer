@@ -2,6 +2,7 @@ import bisect
 from datetime import UTC, datetime
 from typing import cast, override
 
+import numpy as np
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QByteArray, QLineF, QMimeData, QPoint, QRect, QRectF, Qt, Slot
 from PySide6.QtGui import (
@@ -17,6 +18,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QGraphicsItem,
+    QGraphicsLineItem,
     QGraphicsScene,
     QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
@@ -92,7 +94,6 @@ class QueueEntryGraphicsItem(QGraphicsItem):
         self._song_font.setUnderline(self._song_text_rect == self._hovered_text_rect)
         painter.setFont(self._song_font)  # pyright: ignore[reportUnknownMemberType]
         painter.drawText(self._song_text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_text)
-
         # Paint artist name rect(s)
         self._artists_bounding_rect.setWidth(available_width)
         self._artist_rects = paint_artists(
@@ -158,7 +159,7 @@ class QueueEntryGraphicsItem(QGraphicsItem):
 
 
 class HistoryGraphicsView(StackGraphicsView):
-    queue_entries_mimetype = "application/x-queue-entries-index"
+    drag_start_y = "application/x-queue-entries-index"
     possible_drop_actions = Qt.DropAction.CopyAction
 
     def __init__(self):
@@ -205,20 +206,23 @@ class HistoryGraphicsView(StackGraphicsView):
         self._insert_queue_entries_into_scene(entries)
 
     def get_y_pos(self, index: int) -> float:
-        return QUEUE_ENTRY_SPACING + index * (QUEUE_ENTRY_SPACING + QUEUE_ENTRY_HEIGHT)
+        return QUEUE_ENTRY_SPACING + index * QUEUE_ENTRY_HEIGHT
 
     @override
     def mouseMoveEvent(self, event: QMouseEvent):
         if event.buttons() == Qt.MouseButton.LeftButton:
-            item = self.item_at(event.pos())
-            if item:
+            item = self.itemAt(event.pos())
+            if isinstance(item, QueueEntryGraphicsItem):
                 drag = SongDrag(self, get_single_song_drag_text(item.music.name, item.music.artists))
                 mime_data = QMimeData()
-                mime_data.setData(self.queue_entries_mimetype, QByteArray.number(self.queue_entries.index(item)))
+                mime_data.setData(self.drag_start_y, QByteArray.number(event.pos().y()))
                 mime_data.setData(MUSIC_IDS_MIMETYPE, music_ids_to_qbytearray([item.music.id]))
                 drag.setMimeData(mime_data)
                 drag.exec(self.possible_drop_actions)
         super().mouseMoveEvent(event)
+
+    def _get_entries_and_idx(self, y_pos: float) -> list[QueueEntryGraphicsItem]:
+        return self.queue_entries
 
 
 class QueueGraphicsView(HistoryGraphicsView):
@@ -239,9 +243,12 @@ class QueueGraphicsView(HistoryGraphicsView):
         self.manual_queue_header_label = self.scene().addText("Next in queue")  # pyright: ignore[reportUnknownMemberType]
         self.manual_queue_header_label.setDefaultTextColor(Qt.GlobalColor.white)
         self.manual_queue_header_label.setVisible(False)
-        self.queue_header_label = self.scene().addText("Next from: popopopopopopoo")  # pyright: ignore[reportUnknownMemberType]
+        self.queue_header_label = self.scene().addText("Next from:")  # pyright: ignore[reportUnknownMemberType]
         self.queue_header_label.setDefaultTextColor(Qt.GlobalColor.white)
         self.queue_header_label.setVisible(False)
+        self.queue_header_collection_label = self.scene().addText("")
+        self.queue_header_collection_label.setDefaultTextColor(Qt.GlobalColor.white)
+        self.queue_header_collection_label.setVisible(False)
 
         self.shared_signals.add_to_queue_signal.connect(self.add_to_queue)
 
@@ -254,8 +261,12 @@ class QueueGraphicsView(HistoryGraphicsView):
         return [q.music.id for q in self.manual_entries]
 
     @property
+    def current_queue_entries(self) -> list[QueueEntryGraphicsItem]:
+        return self.queue_entries[self.current_queue_idx + 1 :]
+
+    @property
     def current_entries(self):
-        return self.manual_entries + self.queue_entries[self.current_queue_idx + 1 :]
+        return self.manual_entries + self.current_queue_entries
 
     @property
     def past_entries(self):
@@ -279,19 +290,22 @@ class QueueGraphicsView(HistoryGraphicsView):
                 self.scene().addItem(proxy)
         self.update_scene()
 
-    @property
-    def midpoints(self):
-        return [self.get_y_pos(i) + QUEUE_ENTRY_HEIGHT / 2 for i in range(len(self.current_entries))]
+    def get_midpoints_and_heights(self):
+        return sorted(
+            {
+                (item.pos().y() + item.boundingRect().height() / 2, item.boundingRect().height())
+                for item in self.items()
+                if not isinstance(item, QGraphicsLineItem) and item.isVisible()
+            }
+        )
 
     @override
     def get_y_pos(self, index: int, *, is_queue_header: bool = False) -> float:
         manual_header_height = (
-            self.manual_queue_header_label.boundingRect().height() + QUEUE_ENTRY_SPACING
-            if self.manual_queue_header_label.isVisible()
-            else 0
+            self.manual_queue_header_label.boundingRect().height() if self.manual_queue_header_label.isVisible() else 0
         )
         queue_header_height = (
-            self.queue_header_label.boundingRect().height() + QUEUE_ENTRY_SPACING
+            self.queue_header_label.boundingRect().height()
             if not is_queue_header and index >= len(self.manual_entries) and self.queue_header_label.isVisible()
             else 0
         )
@@ -302,18 +316,26 @@ class QueueGraphicsView(HistoryGraphicsView):
         if len(self.manual_entries):
             if not self.manual_queue_header_label.isVisible():
                 self.manual_queue_header_label.setVisible(True)
-            self.manual_queue_header_label.setPos(QUEUE_ENTRY_SPACING, QUEUE_ENTRY_SPACING)  # TODO
+            self.manual_queue_header_label.setPos(QUEUE_ENTRY_SPACING, QUEUE_ENTRY_SPACING)
         elif self.manual_queue_header_label.isVisible():
             self.manual_queue_header_label.setVisible(False)
-        if len(self.queue_entries):
+        if len(self.current_queue_entries):
             if not self.queue_header_label.isVisible():
                 self.queue_header_label.setVisible(True)
-            self.queue_header_label.setPos(
-                QUEUE_ENTRY_SPACING, self.get_y_pos(len(self.manual_entries), is_queue_header=True)
+                self.queue_header_collection_label.setVisible(True)
+            y_pos = self.get_y_pos(len(self.manual_entries), is_queue_header=True)
+            self.queue_header_label.setPos(QUEUE_ENTRY_SPACING, y_pos)
+            self.queue_header_collection_label.setPos(
+                QUEUE_ENTRY_SPACING + self.queue_header_label.boundingRect().width(), y_pos
             )
         elif self.queue_header_label.isVisible():
             self.queue_header_label.setVisible(False)
+            self.queue_header_collection_label.setVisible(False)
         super().update_scene()
+
+    def _get_midpoints_index(self, midpoints_and_heights: list[tuple[float, float]], y_pos: float) -> int:
+        arr = np.asarray([v[0] for v in midpoints_and_heights])
+        return (np.abs(arr - y_pos)).argmin().astype(int)
 
     @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
@@ -324,34 +346,50 @@ class QueueGraphicsView(HistoryGraphicsView):
             else Qt.DropAction.CopyAction
         )
 
-        midpoints = self.midpoints
-        midpoints_index = bisect.bisect_right(midpoints, self.mapToScene(event.pos()).y())  # pyright: ignore[reportUnknownMemberType]
-        line_y = (self.midpoints[midpoints_index - 1] + QUEUE_ENTRY_HEIGHT / 2) if midpoints_index > 0 else 0
+        midpoints_and_heights = self.get_midpoints_and_heights()
+        midpoints_index = bisect.bisect_right([v[0] for v in midpoints_and_heights], event.pos().y())  # pyright: ignore[reportUnknownMemberType]
+        if midpoints_index == 0:
+            midpoint, height = midpoints_and_heights[0]
+            line_y = midpoint + height / 2
+        elif midpoints_index == len(midpoints_and_heights):
+            midpoint, height = midpoints_and_heights[-1]
+            line_y = midpoint + height / 2
+        else:
+            midpoint, height = midpoints_and_heights[midpoints_index]
+            line_y = midpoint - height / 2
         self.drop_indicator_line_item.setLine(0, line_y, self.viewport().width(), line_y)
 
         event.accept()
 
     @override
+    def _get_entries_and_idx(self, y_pos: float) -> tuple[list[QueueEntryGraphicsItem], int]:
+        is_manual = self.manual_queue_header_label.isVisible() and (
+            not self.queue_header_label.isVisible() or y_pos < self.queue_header_label.scenePos().y()
+        )
+        midpoints_index = self._get_midpoints_index(self.get_midpoints_and_heights(), y_pos)
+        headers = 1 + int(self.manual_queue_header_label.isVisible() and self.queue_header_label.isVisible())
+        idx = max(midpoints_index - headers, 0) if is_manual else self.current_queue_idx + 1 + midpoints_index - headers
+        return (self.manual_entries if is_manual else self.queue_entries), idx
+
+    @override
     def dropEvent(self, event: QDropEvent):
         self.drop_indicator_line_item.setLine(QLineF())
         source = event.source()
-        scene_y = self.mapToScene(event.pos()).y()  # pyright: ignore[reportUnknownMemberType]
-        queue_entries_to_idx = self.current_queue_idx + 1 + bisect.bisect_right(self.midpoints, scene_y)
         if isinstance(source, QueueGraphicsView):
-            queue_entries_from_idx, ok = cast(
-                tuple[int, bool], event.mimeData().data(self.queue_entries_mimetype).toInt(10)
-            )
+            drag_start_y, ok = cast(tuple[int, bool], event.mimeData().data(self.drag_start_y).toInt(10))
             assert ok
-            if queue_entries_to_idx in {queue_entries_from_idx, queue_entries_from_idx + 1}:
+            from_entries, from_entries_idx = self._get_entries_and_idx(drag_start_y)
+            to_entries, to_entries_idx = self._get_entries_and_idx(event.pos().y())
+            print(from_entries_idx, to_entries_idx)
+            same_entries = from_entries == to_entries
+            if same_entries and to_entries_idx == from_entries_idx:
+                print("IGNORED")
                 event.ignore()
                 return
-            insert_idx = (
-                queue_entries_to_idx if queue_entries_from_idx > queue_entries_to_idx else queue_entries_to_idx - 1
-            )
-            self.queue_entries.insert(insert_idx, self.queue_entries.pop(queue_entries_from_idx))
+            to_entries.insert(to_entries_idx, from_entries.pop(from_entries_idx))
         elif isinstance(source, (LibraryTableView, PlaylistTreeView)):
             music_ids_to_add = qbytearray_to_music_ids(event.mimeData().data(MUSIC_IDS_MIMETYPE))
-            self.shared_signals.add_to_queue_signal.emit(music_ids_to_add, queue_entries_to_idx)
+            self.shared_signals.add_to_queue_signal.emit(music_ids_to_add, entries_to_idx)  # TODO
 
         self.update_scene()
 
