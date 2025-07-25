@@ -213,7 +213,7 @@ class HistoryGraphicsView(StackGraphicsView):
             if isinstance(item, QueueEntryGraphicsItem):
                 drag = SongDrag(self, get_single_song_drag_text(item.music.name, item.music.artists))
                 mime_data = QMimeData()
-                mime_data.setData(self.drag_scene_start_y, QByteArray.number(self.mapToScene(event.pos()).y()))
+                mime_data.setData(self.drag_scene_start_y, QByteArray.number(self.mapToScene(event.pos()).y()))  # pyright: ignore[reportUnknownMemberType]
                 mime_data.setData(MUSIC_IDS_MIMETYPE, music_ids_to_qbytearray([item.music.id]))
                 drag.setMimeData(mime_data)
                 drag.exec(self.possible_drop_actions)
@@ -241,7 +241,7 @@ class QueueGraphicsView(HistoryGraphicsView):
         self.queue_header_label = self.scene().addText("Next from:")  # pyright: ignore[reportUnknownMemberType]
         self.queue_header_label.setDefaultTextColor(Qt.GlobalColor.white)
         self.queue_header_label.setVisible(False)
-        self.queue_header_collection_label = self.scene().addText("")
+        self.queue_header_collection_label = self.scene().addText("")  # pyright: ignore[reportUnknownMemberType]
         self.queue_header_collection_label.setDefaultTextColor(Qt.GlobalColor.white)
         self.queue_header_collection_label.setVisible(False)
 
@@ -287,7 +287,7 @@ class QueueGraphicsView(HistoryGraphicsView):
         return sorted(
             {
                 (item.scenePos().y() + item.boundingRect().height() / 2, item.boundingRect().height())
-                for item in self.items()
+                for item in self.items()  # pyright: ignore[reportUnknownMemberType]
                 if not isinstance(item, QGraphicsLineItem) and item.isVisible()
             }
         )
@@ -336,7 +336,6 @@ class QueueGraphicsView(HistoryGraphicsView):
         )
 
         midpoints_and_heights = self.get_midpoints_and_heights()
-        print(self.mapToScene(event.pos()).y(), midpoints_and_heights)
         midpoints_index = bisect.bisect_right([v[0] for v in midpoints_and_heights], self.mapToScene(event.pos()).y())  # pyright: ignore[reportUnknownMemberType]
         if midpoints_index == 0:
             midpoint, height = midpoints_and_heights[0]
@@ -352,12 +351,12 @@ class QueueGraphicsView(HistoryGraphicsView):
         event.accept()
 
     def entry_at_pos_is_manual(self, y_pos: float) -> bool:
-        return len(self.manual_entries) and (
-            not len(self.queue_entries)
+        return bool(self.manual_entries) and (
+            not self.queue_entries
             or y_pos < self.queue_header_label.scenePos().y() + self.queue_header_label.boundingRect().height() / 2
         )
 
-    def _get_entries_and_idx(self, y_pos: float, *, is_from: bool) -> tuple[list[QueueEntryGraphicsItem], int]:
+    def _get_entries_tup(self, y_pos: float, *, is_from: bool) -> tuple[list[QueueEntryGraphicsItem], int, bool]:
         is_manual = self.entry_at_pos_is_manual(y_pos)
         midpoints = [m for m, h in self.get_midpoints_and_heights() if h == QUEUE_ENTRY_HEIGHT]
         print(np.asarray(midpoints) - y_pos, y_pos)
@@ -367,30 +366,26 @@ class QueueGraphicsView(HistoryGraphicsView):
             else bisect.bisect_right(midpoints, y_pos)
         )
         idx = midpoints_index if is_manual else self.current_queue_idx + 1 + midpoints_index - len(self.manual_entries)
-        return (self.manual_entries if is_manual else self.queue_entries), idx
+        return (self.manual_entries if is_manual else self.queue_entries), idx, is_manual
 
     @override
     def dropEvent(self, event: QDropEvent):
         self.drop_indicator_line_item.setLine(QLineF())
         source = event.source()
+        to_entries, to_idx, to_is_manual = self._get_entries_tup(self.mapToScene(event.pos()).y(), is_from=False)  # pyright: ignore[reportUnknownMemberType]
         if isinstance(source, QueueGraphicsView):
             drag_start_y, ok = cast(tuple[int, bool], event.mimeData().data(self.drag_scene_start_y).toInt(10))
             assert ok
-            from_entries, from_entries_idx = self._get_entries_and_idx(drag_start_y, is_from=True)
-            to_entries, to_entries_idx = self._get_entries_and_idx(self.mapToScene(event.pos()).y(), is_from=False)
-            same_entries = from_entries == to_entries
-            to_entries_insert_idx = (
-                to_entries_idx - 1 if same_entries and from_entries_idx < to_entries_idx else to_entries_idx
-            )
-            print(from_entries_idx, to_entries_idx, to_entries_insert_idx)
+            from_entries, from_entries_idx, from_is_manual = self._get_entries_tup(drag_start_y, is_from=True)
+            same_entries = from_is_manual == to_is_manual
+            to_entries_insert_idx = to_idx - 1 if same_entries and from_entries_idx < to_idx else to_idx
             if same_entries and from_entries_idx == to_entries_insert_idx:
-                print("IGNORED")
                 event.ignore()
                 return
             to_entries.insert(to_entries_insert_idx, from_entries.pop(from_entries_idx))
         elif isinstance(source, (LibraryTableView, PlaylistTreeView)):
             music_ids_to_add = qbytearray_to_music_ids(event.mimeData().data(MUSIC_IDS_MIMETYPE))
-            self.shared_signals.add_to_queue_signal.emit(music_ids_to_add, entries_to_idx)  # TODO
+            self.shared_signals.add_to_queue_signal.emit(music_ids_to_add, to_idx, to_is_manual)  # TODO
 
         self.update_scene()
 
@@ -401,7 +396,7 @@ class QueueGraphicsView(HistoryGraphicsView):
 
     @Slot()
     @profile
-    def add_to_queue(self, music_ids: list[int], insert_index: int):
+    def add_to_queue(self, music_ids: list[int], insert_index: int, is_manual: bool):  # noqa: FBT001
         assert insert_index >= 0
         t = datetime.now(tz=UTC)
         items = [
@@ -410,13 +405,8 @@ class QueueGraphicsView(HistoryGraphicsView):
             )
             for music_id in music_ids
         ]
-
-        if insert_index <= len(self.manual_entries):
-            print("MANUAL")
-            self.insert_manual_entries(insert_index, items)
-        else:
-            print("QUEUE")
-            self.insert_queue_entries(insert_index - len(self.manual_entries), items)
+        print(f"{is_manual=}")
+        (self.insert_manual_entries if is_manual else self.insert_queue_entries)(insert_index, items)
         print("add_to_queue", (datetime.now(tz=UTC) - t).microseconds / 1000)
 
     @Slot()

@@ -167,7 +167,7 @@ def get_pause_button_icon(height: int | None = None) -> QIcon:
 class AddToQueueAction(QAction):
     def __init__(self, selected_song_db_indices: Sequence[int], signals: SharedSignals, parent: QMenu):
         super().__init__("Add to queue", parent)
-        self.triggered.connect(partial(signals.add_to_queue_signal.emit, selected_song_db_indices, 0))
+        self.triggered.connect(partial(signals.add_to_queue_signal.emit, selected_song_db_indices, 0, True))  # noqa: FBT003
 
 
 class OpacityButton(QToolButton):
