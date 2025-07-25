@@ -163,9 +163,9 @@ class MainWindow(QMainWindow):
                 last_queue_music_played = self.queue.queue_entries[self.queue.current_queue_idx].music
 
                 # Replace any music/media that was added manually with the original lists
-                self.queue.load_music_ids(self.core.current_collection.music_ids)
-
-                self.queue.current_queue_idx = self.queue.queue_music_ids.index(last_queue_music_played.id)
+                self.queue.load_music_ids(
+                    self.core.current_collection.music_ids, self.queue.queue_music_ids.index(last_queue_music_played.id)
+                )
         self.queue.update_first_queue_index()
 
     def play_manual_list_item(self, manual_list_index: int):
@@ -182,17 +182,17 @@ class MainWindow(QMainWindow):
     @Slot()
     def play_from_queue(self, queue_entry: QueueEntryGraphicsItem) -> None:
         if queue_entry.is_history:
-            self.shared_signals.play_song_signal.emit(0)
-            self.queue.current_queue_idx = 0
             self.queue.load_music_ids((queue_entry.music.id,))
+            self.shared_signals.next_song_signal.emit(False)
             self.queue.update_first_queue_index()
         else:
+            is_manual = self.queue.entry_at_pos_is_manual(queue_entry.pos().y())
             index = (
                 self.queue.manual_entries.index(queue_entry)
-                if queue_entry.manually_added
+                if is_manual
                 else self.queue.queue_entries.index(queue_entry)
             )
-            self.jump_play_index(index, manual=queue_entry.manually_added)
+            self.jump_play_index(index, manual=is_manual)
 
     @Slot()
     def play_song_from_library(self, lib_index: int):
