@@ -198,11 +198,6 @@ class HistoryGraphicsView(StackGraphicsView):
             self.scene().addItem(entry)
         self.update_scene()
 
-    @profile
-    def insert_queue_entries(self, queue_insert_index: int, entries: list[QueueEntryGraphicsItem]) -> None:
-        self.queue_entries = self.queue_entries[:queue_insert_index] + entries + self.queue_entries[queue_insert_index:]
-        self._insert_queue_entries_into_scene(entries)
-
     def get_y_pos(self, index: int) -> float:
         return QUEUE_ENTRY_SPACING + index * QUEUE_ENTRY_HEIGHT
 
@@ -267,13 +262,6 @@ class QueueGraphicsView(HistoryGraphicsView):
     def past_entries(self):
         return self.queue_entries[: self.current_queue_idx + 1]
 
-    @profile
-    def insert_manual_entries(self, manual_insert_index: int, entries: list[QueueEntryGraphicsItem]) -> None:
-        self.manual_entries = (
-            self.manual_entries[:manual_insert_index] + entries + self.manual_entries[manual_insert_index:]
-        )
-        self._insert_queue_entries_into_scene(entries)
-
     def update_first_queue_index(self) -> None:
         for proxy in self.past_entries:
             if proxy.scene():
@@ -283,13 +271,19 @@ class QueueGraphicsView(HistoryGraphicsView):
                 self.scene().addItem(proxy)
         self.update_scene()
 
-    def get_midpoints_and_heights(self):
+    def _get_midpoints_and_heights(self):
         return sorted(
             {
                 (item.scenePos().y() + item.boundingRect().height() / 2, item.boundingRect().height())
                 for item in self.items()  # pyright: ignore[reportUnknownMemberType]
                 if not isinstance(item, QGraphicsLineItem) and item.isVisible()
             }
+        )
+
+    def entry_at_pos_is_manual(self, y_pos: float) -> bool:
+        return bool(self.manual_entries) and (
+            not self.queue_entries
+            or y_pos < self.queue_header_label.scenePos().y() + self.queue_header_label.boundingRect().height() / 2
         )
 
     @override
@@ -335,7 +329,7 @@ class QueueGraphicsView(HistoryGraphicsView):
             else Qt.DropAction.CopyAction
         )
 
-        midpoints_and_heights = self.get_midpoints_and_heights()
+        midpoints_and_heights = self._get_midpoints_and_heights()
         if len(midpoints_and_heights):
             midpoints_index = bisect.bisect_right(
                 [v[0] for v in midpoints_and_heights],
@@ -354,18 +348,12 @@ class QueueGraphicsView(HistoryGraphicsView):
 
         event.accept()
 
-    def entry_at_pos_is_manual(self, y_pos: float) -> bool:
-        return bool(self.manual_entries) and (
-            not self.queue_entries
-            or y_pos < self.queue_header_label.scenePos().y() + self.queue_header_label.boundingRect().height() / 2
-        )
-
     @override
     def dropEvent(self, event: QDropEvent):
         def get_entries_tup(y_pos: float, *, is_from: bool) -> tuple[list[QueueEntryGraphicsItem], int, bool]:
             is_manual = self.entry_at_pos_is_manual(y_pos) if len(self.queue_entries) else True
             if len(self.queue_entries) or len(self.manual_entries):
-                midpoints = [m for m, h in self.get_midpoints_and_heights() if h == QUEUE_ENTRY_HEIGHT]
+                midpoints = [m for m, h in self._get_midpoints_and_heights() if h == QUEUE_ENTRY_HEIGHT]
                 midpoints_index = (
                     (np.abs(np.asarray(midpoints) - y_pos)).argmin().astype(int)
                     if is_from
@@ -415,8 +403,11 @@ class QueueGraphicsView(HistoryGraphicsView):
             )
             for music_id in music_ids
         ]
-        print(f"{is_manual=}")
-        (self.insert_manual_entries if is_manual else self.insert_queue_entries)(insert_index, items)
+        if is_manual:
+            self.manual_entries = self.manual_entries[:insert_index] + items + self.manual_entries[insert_index:]
+        else:
+            self.queue_entries = self.queue_entries[:insert_index] + items + self.queue_entries[insert_index:]
+        self._insert_queue_entries_into_scene(items)
         print("add_to_queue", (datetime.now(tz=UTC) - t).microseconds / 1000)
 
     @Slot()
