@@ -336,17 +336,21 @@ class QueueGraphicsView(HistoryGraphicsView):
         )
 
         midpoints_and_heights = self.get_midpoints_and_heights()
-        midpoints_index = bisect.bisect_right([v[0] for v in midpoints_and_heights], self.mapToScene(event.pos()).y())  # pyright: ignore[reportUnknownMemberType]
-        if midpoints_index == 0:
-            midpoint, height = midpoints_and_heights[0]
-            line_y = midpoint + height / 2
-        elif midpoints_index == len(midpoints_and_heights):
-            midpoint, height = midpoints_and_heights[-1]
-            line_y = midpoint + height / 2
-        else:
-            midpoint, height = midpoints_and_heights[midpoints_index]
-            line_y = midpoint - height / 2
-        self.drop_indicator_line_item.setLine(0, line_y, self.viewport().width(), line_y)
+        if len(midpoints_and_heights):
+            midpoints_index = bisect.bisect_right(
+                [v[0] for v in midpoints_and_heights],
+                self.mapToScene(event.pos()).y(),  # pyright: ignore[reportUnknownMemberType]
+            )
+            if midpoints_index == 0:
+                midpoint, height = midpoints_and_heights[0]
+                line_y = midpoint + height / 2
+            elif midpoints_index == len(midpoints_and_heights):
+                midpoint, height = midpoints_and_heights[-1]
+                line_y = midpoint + height / 2
+            else:
+                midpoint, height = midpoints_and_heights[midpoints_index]
+                line_y = midpoint - height / 2
+            self.drop_indicator_line_item.setLine(0, line_y, self.viewport().width(), line_y)
 
         event.accept()
 
@@ -356,27 +360,33 @@ class QueueGraphicsView(HistoryGraphicsView):
             or y_pos < self.queue_header_label.scenePos().y() + self.queue_header_label.boundingRect().height() / 2
         )
 
-    def _get_entries_tup(self, y_pos: float, *, is_from: bool) -> tuple[list[QueueEntryGraphicsItem], int, bool]:
-        is_manual = self.entry_at_pos_is_manual(y_pos)
-        midpoints = [m for m, h in self.get_midpoints_and_heights() if h == QUEUE_ENTRY_HEIGHT]
-        print(np.asarray(midpoints) - y_pos, y_pos)
-        midpoints_index = (
-            (np.abs(np.asarray(midpoints) - y_pos)).argmin().astype(int)
-            if is_from
-            else bisect.bisect_right(midpoints, y_pos)
-        )
-        idx = midpoints_index if is_manual else self.current_queue_idx + 1 + midpoints_index - len(self.manual_entries)
-        return (self.manual_entries if is_manual else self.queue_entries), idx, is_manual
-
     @override
     def dropEvent(self, event: QDropEvent):
+        def get_entries_tup(y_pos: float, *, is_from: bool) -> tuple[list[QueueEntryGraphicsItem], int, bool]:
+            is_manual = self.entry_at_pos_is_manual(y_pos) if len(self.queue_entries) else True
+            if len(self.queue_entries) or len(self.manual_entries):
+                midpoints = [m for m, h in self.get_midpoints_and_heights() if h == QUEUE_ENTRY_HEIGHT]
+                midpoints_index = (
+                    (np.abs(np.asarray(midpoints) - y_pos)).argmin().astype(int)
+                    if is_from
+                    else bisect.bisect_right(midpoints, y_pos)
+                )
+                idx = (
+                    midpoints_index
+                    if is_manual
+                    else self.current_queue_idx + 1 + midpoints_index - len(self.manual_entries)
+                )
+            else:
+                idx = 0
+            return (self.manual_entries if is_manual else self.queue_entries), idx, is_manual
+
         self.drop_indicator_line_item.setLine(QLineF())
         source = event.source()
-        to_entries, to_idx, to_is_manual = self._get_entries_tup(self.mapToScene(event.pos()).y(), is_from=False)  # pyright: ignore[reportUnknownMemberType]
+        to_entries, to_idx, to_is_manual = get_entries_tup(self.mapToScene(event.pos()).y(), is_from=False)  # pyright: ignore[reportUnknownMemberType]
         if isinstance(source, QueueGraphicsView):
             drag_start_y, ok = cast(tuple[int, bool], event.mimeData().data(self.drag_scene_start_y).toInt(10))
             assert ok
-            from_entries, from_entries_idx, from_is_manual = self._get_entries_tup(drag_start_y, is_from=True)
+            from_entries, from_entries_idx, from_is_manual = get_entries_tup(drag_start_y, is_from=True)
             same_entries = from_is_manual == to_is_manual
             to_entries_insert_idx = to_idx - 1 if same_entries and from_entries_idx < to_idx else to_idx
             if same_entries and from_entries_idx == to_entries_insert_idx:
