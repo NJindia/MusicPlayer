@@ -214,6 +214,11 @@ class HistoryGraphicsView(StackGraphicsView):
                 drag.exec(self.possible_drop_actions)
         super().mouseMoveEvent(event)
 
+    @override
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.RightButton:
+            super().mousePressEvent(event)
+
 
 class QueueGraphicsView(HistoryGraphicsView):
     possible_drop_actions = Qt.DropAction.MoveAction | Qt.DropAction.CopyAction
@@ -369,6 +374,9 @@ class QueueGraphicsView(HistoryGraphicsView):
             return (self.manual_entries if is_manual else self.queue_entries), idx, is_manual
 
         self.drop_indicator_line_item.setLine(QLineF())
+        if Qt.MouseButton.RightButton in event.mouseButtons():
+            event.ignore()
+            return
         source = event.source()
         to_entries, to_idx, to_is_manual = get_entries_tup(self.mapToScene(event.pos()).y(), is_from=False)  # pyright: ignore[reportUnknownMemberType]
         if isinstance(source, QueueGraphicsView):

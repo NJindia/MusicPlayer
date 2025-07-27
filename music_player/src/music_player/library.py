@@ -854,6 +854,11 @@ class MusicLibraryTable(LibraryTableView):
         super().mouseReleaseEvent(event)
 
     @override
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.RightButton:
+            super().mousePressEvent(event)
+
+    @override
     def leaveEvent(self, event: QEvent) -> None:
         self.hovered_text_rect = QRect()
         self.setCursor(Qt.CursorShape.ArrowCursor)
