@@ -14,6 +14,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QMouseEvent,
     QPainter,
+    QPen,
     QResizeEvent,
 )
 from PySide6.QtWidgets import (
@@ -234,13 +235,20 @@ class QueueGraphicsView(HistoryGraphicsView):
         self.setAcceptDrops(True)
 
         self.manual_entries: list[QueueEntryGraphicsItem] = []
-        self.drop_indicator_line_item = self.scene().addLine(QLineF(), QColor(0, 0, 255, 100))
+
+        pen = QPen(QColor(0, 0, 255, 100))
+        pen.setWidth(3)
+        self.drop_indicator_line_item = self.scene().addLine(QLineF(0, 0, self.viewport().width(), 0), pen)
+        self.drop_indicator_line_item.setVisible(False)
+
         self.manual_queue_header_label = self.scene().addText("Next in queue")  # pyright: ignore[reportUnknownMemberType]
         self.manual_queue_header_label.setDefaultTextColor(Qt.GlobalColor.white)
         self.manual_queue_header_label.setVisible(False)
+
         self.queue_header_label = self.scene().addText("Next from:")  # pyright: ignore[reportUnknownMemberType]
         self.queue_header_label.setDefaultTextColor(Qt.GlobalColor.white)
         self.queue_header_label.setVisible(False)
+
         self.queue_header_collection_label = self.scene().addText("")  # pyright: ignore[reportUnknownMemberType]
         self.queue_header_collection_label.setDefaultTextColor(Qt.GlobalColor.white)
         self.queue_header_collection_label.setVisible(False)
@@ -326,6 +334,11 @@ class QueueGraphicsView(HistoryGraphicsView):
         super().update_scene()
 
     @override
+    def dragEnterEvent(self, event, /):
+        self.drop_indicator_line_item.setVisible(True)
+        super().dragEnterEvent(event)
+
+    @override
     def dragMoveEvent(self, event: QDragMoveEvent, /):
         source = event.source()
         assert (
@@ -349,9 +362,14 @@ class QueueGraphicsView(HistoryGraphicsView):
             else:
                 midpoint, height = midpoints_and_heights[midpoints_index]
                 line_y = midpoint - height / 2
-            self.drop_indicator_line_item.setLine(0, line_y, self.viewport().width(), line_y)
+            self.drop_indicator_line_item.setY(line_y)
 
         event.accept()
+
+    @override
+    def dragLeaveEvent(self, event: QDragLeaveEvent, /):
+        self.drop_indicator_line_item.setVisible(False)
+        super().dragLeaveEvent(event)
 
     @override
     def dropEvent(self, event: QDropEvent):
@@ -373,7 +391,7 @@ class QueueGraphicsView(HistoryGraphicsView):
                 idx = 0
             return (self.manual_entries if is_manual else self.queue_entries), idx, is_manual
 
-        self.drop_indicator_line_item.setLine(QLineF())
+        self.drop_indicator_line_item.setVisible(False)
         if Qt.MouseButton.RightButton in event.mouseButtons():
             event.ignore()
             return
@@ -394,11 +412,6 @@ class QueueGraphicsView(HistoryGraphicsView):
             self.shared_signals.add_to_queue_signal.emit(music_ids_to_add, to_idx, to_is_manual)  # TODO
 
         self.update_scene()
-
-    @override
-    def dragLeaveEvent(self, event: QDragLeaveEvent, /):
-        self.drop_indicator_line_item.setLine(QLineF())
-        super().dragLeaveEvent(event)
 
     @Slot()
     @profile
