@@ -212,15 +212,17 @@ class MainWindow(QMainWindow):
 
         self.queue.load_music_ids(collection.music_ids)
         self.queue.queue_header_collection_label.setPlainText(collection.name)
-        jump_index = collection_index
         if self.toolbar.shuffle_button.isChecked():
             jump_index = 0
             self.shuffle_indices(jump_index)  # Shuffle all
-            # Find index of song we want to play now in the shuffled list, then swap that with the shuffled 1st song
-            _list_index = self.queue.queue_music_ids.index(collection.music_ids[collection_index])
-            temp = self.queue.queue_entries[_list_index]
-            self.queue.queue_entries[_list_index] = self.queue.queue_entries[jump_index]
-            self.queue.queue_entries[jump_index] = temp
+            if collection_index != -1:
+                # Find index of song we want to play now in the shuffled list, then swap that with the shuffled 1st song
+                _list_index = self.queue.queue_music_ids.index(collection.music_ids[collection_index])
+                temp = self.queue.queue_entries[_list_index]
+                self.queue.queue_entries[_list_index] = self.queue.queue_entries[jump_index]
+                self.queue.queue_entries[jump_index] = temp
+        else:
+            jump_index = collection_index if collection_index != -1 else 0
         self.jump_play_index(jump_index, manual=False)
 
     @Slot()
@@ -235,7 +237,7 @@ class MainWindow(QMainWindow):
         playlist = self.playlist_view.item_at_index(proxy_index, is_source=False).collection
         if playlist.is_folder:
             raise NotImplementedError
-        self.shared_signals.play_collection_signal.emit(playlist, 0)
+        self.shared_signals.play_collection_signal.emit(playlist, -1)
 
     @Slot()
     def create_collection(
