@@ -861,7 +861,8 @@ class MusicLibraryTable(LibraryTableView):
     @override
     def mouseDoubleClickEvent(self, event: QMouseEvent, /):
         index = self.indexAt(event.pos())
-        print("DOUBLE", index)
+        if not index.isValid():
+            return
         self.song_clicked.emit(index.row())
 
     @override

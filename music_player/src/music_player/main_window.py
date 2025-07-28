@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
         self.queue.queue_entries = [*self.queue.queue_entries[:split_index], *shuffled_entries]
 
     @Slot(bool)
-    def shuffle_button_clicked(self, shuffle: bool):
+    def shuffle_button_clicked(self, shuffle: bool):  # noqa: FBT001
         """Shuffle remaining songs in playlist."""
         if shuffle:
             self.toolbar.shuffle_button.button_on()
@@ -183,7 +183,7 @@ class MainWindow(QMainWindow):
     def play_from_queue(self, queue_entry: QueueEntryGraphicsItem) -> None:
         if queue_entry.is_history:
             self.queue.load_music_ids((queue_entry.music.id,))
-            self.shared_signals.next_song_signal.emit(False)
+            self.shared_signals.next_song_signal.emit(False)  # noqa: FBT003
             self.queue.update_first_queue_index()
         else:
             is_manual = self.queue.entry_at_pos_is_manual(queue_entry.pos().y())
@@ -457,7 +457,7 @@ class MainWindow(QMainWindow):
     def _add_playlist_base_context_menu_actions(
         self,
         menu: QMenu,
-        collection: DbStoredCollection,
+        collection: DbCollection,
         rename_callable: Callable[[], None],
         playlist_tree_source_index: QModelIndex | None = None,
     ):
@@ -465,7 +465,7 @@ class MainWindow(QMainWindow):
         if collection.music_ids:
             menu.addAction(AddToQueueAction(collection.music_ids, self.shared_signals, menu))
             menu.addSeparator()
-        if not collection.is_protected:
+        if isinstance(collection, DbStoredCollection) and not collection.is_protected:
             rename_action = QAction("Rename", menu)
             rename_action.triggered.connect(rename_callable)
 
