@@ -164,9 +164,8 @@ class MainWindow(QMainWindow):
                 last_queue_music_played = self.queue.queue_entries[self.queue.current_queue_idx].music
 
                 # Replace any music/media that was added manually with the original lists
-                self.queue.load_music_ids(
-                    self.core.current_collection.music_ids, self.queue.queue_music_ids.index(last_queue_music_played.id)
-                )
+                music_ids = self.core.current_collection.music_ids
+                self.queue.load_music_ids(music_ids, music_ids.index(last_queue_music_played.id))
         self.queue.update_first_queue_index()
 
     def play_manual_list_item(self, manual_list_index: int):
