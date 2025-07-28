@@ -136,7 +136,8 @@ class MainWindow(QMainWindow):
                 start_width=self.history.viewport().width(),
                 is_history=True,
             )
-            self.history.insert_queue_entries(0, [hist_entry])
+            self.history.queue_entries.insert(0, hist_entry)
+            self.history.insert_queue_entries_into_scene([hist_entry])
         self.toolbar.song_label.set_text(current_music.name)
         self.toolbar.artists_label.set_text(", ".join(current_music.artists))
         self.toolbar.album_button.change_music(current_music)

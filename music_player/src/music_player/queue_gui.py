@@ -7,6 +7,7 @@ from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeSt
 from PySide6.QtCore import QByteArray, QLineF, QMimeData, QPoint, QRect, QRectF, Qt, Slot
 from PySide6.QtGui import (
     QColor,
+    QDragEnterEvent,
     QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
@@ -194,7 +195,7 @@ class HistoryGraphicsView(StackGraphicsView):
         self.setSceneRect(0, 0, self.width(), self.get_y_pos(len(self.current_entries)))  # Update scene size
 
     @profile
-    def _insert_queue_entries_into_scene(self, entries: list[QueueEntryGraphicsItem]) -> None:
+    def insert_queue_entries_into_scene(self, entries: list[QueueEntryGraphicsItem]) -> None:
         for entry in entries:
             self.scene().addItem(entry)
         self.update_scene()
@@ -334,7 +335,7 @@ class QueueGraphicsView(HistoryGraphicsView):
         super().update_scene()
 
     @override
-    def dragEnterEvent(self, event, /):
+    def dragEnterEvent(self, event: QDragEnterEvent, /):
         self.drop_indicator_line_item.setVisible(True)
         super().dragEnterEvent(event)
 
@@ -428,7 +429,7 @@ class QueueGraphicsView(HistoryGraphicsView):
             self.manual_entries = self.manual_entries[:insert_index] + items + self.manual_entries[insert_index:]
         else:
             self.queue_entries = self.queue_entries[:insert_index] + items + self.queue_entries[insert_index:]
-        self._insert_queue_entries_into_scene(items)
+        self.insert_queue_entries_into_scene(items)
         print("add_to_queue", (datetime.now(tz=UTC) - t).microseconds / 1000)
 
     @Slot()

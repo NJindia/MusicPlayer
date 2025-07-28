@@ -859,6 +859,12 @@ class MusicLibraryTable(LibraryTableView):
             super().mousePressEvent(event)
 
     @override
+    def mouseDoubleClickEvent(self, event: QMouseEvent, /):
+        index = self.indexAt(event.pos())
+        print("DOUBLE", index)
+        self.song_clicked.emit(index.row())
+
+    @override
     def leaveEvent(self, event: QEvent) -> None:
         self.hovered_text_rect = QRect()
         self.setCursor(Qt.CursorShape.ArrowCursor)
