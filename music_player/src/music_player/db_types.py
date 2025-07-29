@@ -155,19 +155,6 @@ class DbStoredCollection(DbCollection):
     _album_img_path_counter: Counter[Path]
     _pixmap_heights: set[int] = field(default_factory=set[int])
 
-    # def _music_ids(self) -> tuple[int, ...]:
-    #     match self.collection_type:
-    #         case "folder":
-    #
-    #             def traverse(parent_collection_id: int) -> Iterator[int]:
-    #                 for collection in get_collections_by_parent_id().get(parent_collection_id, []):
-    #                     if collection.is_folder:
-    #                         yield from traverse(collection.id)
-    #                     yield from collection.music_ids
-    #
-    #             return tuple(traverse(self.id))
-    #     raise ValueError
-
     @classmethod
     def from_db(cls, db_id: int = 1) -> "DbStoredCollection":
         row = get_database_manager().get_row_k(collection_query, collectionId=db_id)
@@ -196,7 +183,11 @@ class DbStoredCollection(DbCollection):
 
     @property
     def music_ids(self) -> tuple[int, ...]:
-        return self._music_ids
+        return (
+            tuple(m_id for collection in get_collection_children(self.id) for m_id in collection.music_ids)  # TODO SORT
+            if self.collection_type == "folder"
+            else self._music_ids
+        )
 
     @property
     def parent_id(self) -> int:

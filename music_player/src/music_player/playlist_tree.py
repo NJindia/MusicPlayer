@@ -65,9 +65,9 @@ PLAYLIST_ROW_HEIGHT = 50
 
 
 class SortRole(Enum):
-    UPDATED = Qt.ItemDataRole.UserRole + 3
-    PLAYED = Qt.ItemDataRole.UserRole + 4
-    ALPHABETICAL = Qt.ItemDataRole.UserRole + 5
+    UPDATED = Qt.ItemDataRole.UserRole + 5
+    PLAYED = Qt.ItemDataRole.UserRole + 6
+    ALPHABETICAL = Qt.ItemDataRole.UserRole + 7
 
 
 DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[SortRole, Qt.SortOrder] = {
@@ -117,7 +117,9 @@ class TreeModelItem(QStandardItem):
             data_val = self.collection.last_updated.timestamp()
         elif role == SortRole.PLAYED.value:
             last_played = self.collection.last_played
-            data_val = (last_played if last_played else datetime.max.replace(tzinfo=UTC)).timestamp()
+            assert last_played
+            data_val = last_played.timestamp()
+            print(self.collection.name, data_val)
         elif role == SortRole.ALPHABETICAL.value:
             data_val = self.text().lower() + self.text()
         else:
