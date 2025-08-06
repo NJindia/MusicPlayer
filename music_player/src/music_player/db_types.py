@@ -222,29 +222,66 @@ class DbStoredCollection(DbCollection):
         return self._created
 
     @property
+    def last_updated_db(self) -> datetime:
+        return self._last_updated_actual
+
+    @property
     @profile
     def last_updated(self) -> datetime:
         if self._last_updated is None:  # During initial setup
             self._last_updated = (
-                max(
-                    (
-                        self._last_updated_actual,
-                        *(e._last_updated_actual for e in get_recursive_children(self.id, get_folders=False)),
-                    )
-                )
+                max((self.last_updated_db, *(e.last_updated_db for e in get_recursive_children(self.id))))
                 if self.collection_type == "folder"
-                else self._last_updated_actual
+                else self.last_updated_db
             )
         return self._last_updated
+
+    @last_updated.setter
+    def last_updated(self, last_updated: datetime) -> None:
+        self._last_updated = last_updated
+
+    def mark_as_updated(self):
+        """Mark this collection as updated in the DB, and update the _last_updated of this collection and its parents"""
+        self._last_updated = datetime.now(tz=UTC)
+
+        for parent in get_recursive_parents(self):
+            parent.last_updated = self._last_updated  # Current time will always be > old last_played, so no max needed
+
+        update_query = "UPDATE collections SET last_updated = %s WHERE collection_id = %s"
+        get_database_manager().execute_query(update_query, (self.last_updated, self.id))
 
     @property
     @profile
     def last_played(self) -> datetime:
         if self._last_played is None and self.collection_type == "folder":  # During initial setup
-            self._last_played = max(
+            self._last_played = max(  # Folders do not have last_played
                 (c.last_played for c in get_recursive_children(self.id, get_folders=False)), default=MIN_DATETIME
             )
         return self._last_played or MIN_DATETIME
+
+    @last_played.setter
+    def last_played(self, last_played: datetime) -> None:
+        self._last_played = last_played
+
+    def mark_as_played(self):
+        """If is playlist, set parents' _last_played, but only update this playlist in the DB.
+        If is folder, also set _last_played of children collections and update any playlists' last_played in the DB.
+
+        It should not be possible for a folder to have a last_played value."""
+        self._last_played = datetime.now(tz=UTC)
+
+        for parent in get_recursive_parents(self):
+            parent.last_played = self._last_played  # Current time will always be > old last_played, so no max needed
+
+        update_ids: list[int] = [self.id]
+        if self.collection_type == "folder":
+            for child in get_recursive_children(self.id):
+                child.last_played = self._last_played
+                if not child.is_folder:
+                    update_ids.append(child.id)
+
+        update_query = "UPDATE collections SET last_played = %s WHERE collection_id IN %s"
+        get_database_manager().execute_query(update_query, (self.last_played, tuple(update_ids)))
 
     @property
     def thumbnail_path(self) -> Path | None:
@@ -291,34 +328,6 @@ class DbStoredCollection(DbCollection):
                     self.id,
                 ),
             )
-
-    def mark_as_played(self):
-        """If is playlist, set parents' _last_played, but only update this playlist in the DB.
-        If is folder, also set _last_played of children collections and update their last_played in the DB."""
-        self._last_played = datetime.now(tz=UTC)
-
-        for parent in get_recursive_parents(self):
-            parent._last_played = self._last_played  # Current time will always be > old last_played, so no max needed
-
-        update_ids: list[int] = [self.id]
-        if self.collection_type == "folder":
-            for child in get_recursive_children(self.id):
-                child._last_played = self._last_played
-                if not child.is_folder:
-                    update_ids.append(child.id)
-
-        update_query = "UPDATE collections SET last_played = %s WHERE collection_id IN %s"
-        get_database_manager().execute_query(update_query, (self.last_played, tuple(update_ids)))
-
-    def mark_as_updated(self):
-        """Mark this collection as updated in the DB, and update the _last_updated of this collection and its parents"""
-        self._last_updated = datetime.now(tz=UTC)
-
-        for parent in get_recursive_parents(self):
-            parent._last_updated = self._last_updated  # Current time will always be > old last_played, so no max needed
-
-        update_query = "UPDATE collections SET last_updated = %s WHERE collection_id = %s"
-        get_database_manager().execute_query(update_query, (self.last_updated, self.id))
 
     @profile
     def add_music_ids(self, music_ids: Sequence[int]) -> None:
@@ -441,11 +450,10 @@ def _get_folder_pixmap(height: int) -> QPixmap:
 
 @profile
 def get_collections_by_parent_id() -> dict[int, list[DbStoredCollection]]:
-    collections = list(get_db_stored_collection_cache()._collection_by_id.values())
-
     def parent_key(collection: DbStoredCollection) -> int:
         return collection.parent_id
 
+    collections = get_db_stored_collection_cache().collections
     return {k: list(v) for k, v in groupby(sorted(collections, key=parent_key), key=parent_key)}
 
 
@@ -547,6 +555,10 @@ class _DbStoredCollectionCache:
         if collection_id not in self._collection_by_id:
             self._collection_by_id[collection_id] = DbStoredCollection.from_db(collection_id)
         return self._collection_by_id[collection_id]
+
+    @property
+    def collections(self) -> list[DbStoredCollection]:
+        return list(self._collection_by_id.values())
 
 
 @cache
