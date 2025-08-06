@@ -1,5 +1,4 @@
 from collections.abc import Iterator, Sequence
-from datetime import UTC, datetime
 from enum import Enum
 from functools import partial
 from pathlib import Path
@@ -56,7 +55,7 @@ from music_player.constants import (
     PLAYLIST_HEADER_FONT_SIZE,
     PLAYLIST_HEADER_PADDING,
 )
-from music_player.db_types import DbStoredCollection, get_collections_by_parent_id
+from music_player.db_types import DbStoredCollection, get_collections_by_parent_id, get_recursive_parents
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
 from music_player.view_types import PlaylistTreeView
@@ -114,12 +113,12 @@ class TreeModelItem(QStandardItem):
         elif role == PlaylistTreeView.collection_role:
             data_val = self.collection
         elif role == SortRole.UPDATED.value:
+            print(self.collection.name, self.collection.last_updated)
             data_val = self.collection.last_updated.timestamp()
         elif role == SortRole.PLAYED.value:
+            print(self.collection.name, self.collection.last_played)
             last_played = self.collection.last_played
-            assert last_played
             data_val = last_played.timestamp()
-            print(self.collection.name, data_val)
         elif role == SortRole.ALPHABETICAL.value:
             data_val = self.text().lower() + self.text()
         else:
@@ -183,14 +182,17 @@ class PlaylistProxyModel(QSortFilterProxyModel):
         assert len(indexes) == 1
         collection = cast(DbStoredCollection, self.data(indexes[0], PlaylistTreeView.collection_role))
         mime_data = QMimeData()
-        if collection.music_ids:
-            mime_data.setData(MUSIC_IDS_MIMETYPE, music_ids_to_qbytearray(collection.music_ids))
+        mime_data.setData(MUSIC_IDS_MIMETYPE, music_ids_to_qbytearray(collection.music_ids))
         return mime_data
 
     def data_(self, index: QModelIndex, role: int):
         data = self.data(index, role)
         assert data is not None, (index, role)
         return data
+
+    def invalidate(self, /):
+        print("invalidate")
+        super().invalidate()
 
 
 class PlaylistTree(PlaylistTreeView):
@@ -423,18 +425,38 @@ class PlaylistTreeWidget(QWidget):
         assert self.source_model() == self.model_, "Should not be able to move in flattened model!"
 
         src_item = self.item_at_index(source_idx, is_source=True)
-        src_parent = src_item.parent() if src_item.parent() else self.model_
-        dest_parent = (
-            self.item_at_index(destination_parent_idx, is_source=True)
-            if destination_parent_idx.isValid()
-            else self.model_
-        )
+        if src_item.parent():
+            src_parent = src_item.parent()
+            assert isinstance(src_parent, TreeModelItem)
+            src_parent_collection = src_parent.collection
+        else:
+            src_parent = self.model_
+            src_parent_collection = None
+        if destination_parent_idx.isValid():
+            dest_parent = self.item_at_index(destination_parent_idx, is_source=True)
+            dest_parent_collection = dest_parent.collection
+        else:
+            dest_parent = self.model_
+            dest_parent_collection = None
 
         child = src_parent.takeRow(source_idx.row())[0]
         assert child is not None
         dest_parent.appendRow(child)  # pyright: ignore[reportUnknownMemberType]
 
-        src_item.collection.parent_id = dest_parent.collection.id if isinstance(dest_parent, TreeModelItem) else -1
+        if src_parent_collection is not None:
+            src_parent_collection.mark_as_updated()
+            for parent_collection in get_recursive_parents(src_item.collection):
+                if parent_collection.last_played == src_item.collection.last_played:
+                    parent_collection._last_played = None
+        if dest_parent_collection is not None:
+            src_item.collection.parent_id = dest_parent_collection.id
+            dest_parent_collection.mark_as_updated()
+            for parent_collection in (dest_parent_collection, *get_recursive_parents(dest_parent_collection)):
+                parent_collection._last_played = max(src_item.collection.last_played, parent_collection.last_played)
+        else:
+            src_item.collection.parent_id = -1
+
+        self.proxy_model.invalidate()
 
     def update_sort_button(self):
         sort_role = SortRole(self.proxy_model.sortRole())
@@ -468,7 +490,6 @@ class PlaylistTreeWidget(QWidget):
             else DEFAULT_SORT_ORDER_BY_SORT_ROLE[sort_role]
         )
         self.proxy_model.setSortRole(sort_type)
-        # TODO THIS IS BASICALLY JUST ALPHA
         self.proxy_model.sort(0, order)
 
         self.update_sort_button()
@@ -499,7 +520,6 @@ class PlaylistTreeWidget(QWidget):
 
     @Slot()
     def update_playlist(self, tl_source_index: QModelIndex, _: QModelIndex, roles: list[int]) -> None:
-        print("UPDATE")
         if not self.is_main_view:
             raise ValueError
         if Qt.ItemDataRole.DisplayRole in roles:
@@ -517,17 +537,17 @@ class PlaylistTreeWidget(QWidget):
         if not self.is_main_view:
             raise ValueError
         print("CUSTOM_SORT FM")
-        self.flattened_model_.beginResetModel()
         self.flattened_model_.clear()
         for item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=self.is_main_view):
             self.flattened_model_.appendRow(TreeModelItem(item.collection))  # pyright: ignore[reportUnknownMemberType]
-        self.flattened_model_.endResetModel()
 
     def _initialize_model(self) -> None:
         assert self.is_main_view
 
+        collections_by_parent_id = get_collections_by_parent_id()
+
         def _add_children_to_item(root_item_: QStandardItem, root_item_id_: int):
-            for collection in get_collections_by_parent_id().get(root_item_id_, []):
+            for collection in collections_by_parent_id.get(root_item_id_, []):
                 item = TreeModelItem(collection)
                 root_item_.appendRow(item)  # pyright: ignore[reportUnknownMemberType]
                 if collection.is_folder:
@@ -544,12 +564,12 @@ class PlaylistTreeWidget(QWidget):
         )
 
     @profile
-    def refresh_collection(self, collection: DbStoredCollection, affected_sort_role: SortRole):
+    def refresh_collection_ui(self, collection: DbStoredCollection):
         item = self.get_model_item(collection)
         item.collection = collection
         item.update_icon()
 
-        if self.proxy_model.sortRole() == affected_sort_role.value:
+        if self.proxy_model.sortRole() == SortRole.UPDATED.value:
             self.proxy_model.invalidate()
 
 

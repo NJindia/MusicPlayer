@@ -8,11 +8,12 @@ from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeSt
 from PySide6.QtCore import QByteArray, QSize, QThread
 from PySide6.QtGui import QPixmap, QPixmapCache, Qt
 
+from music_player.constants import MIN_DATETIME
+
 
 def length_timestamp_to_seconds(length_timestamp: str) -> int:
-    min_datetime_utc = datetime.min.replace(tzinfo=UTC)
     length_time_utc = datetime.strptime(length_timestamp, "%H:%M:%S").replace(tzinfo=UTC).time()
-    return int((datetime.combine(min_datetime_utc, length_time_utc) - min_datetime_utc).total_seconds())
+    return int((datetime.combine(MIN_DATETIME, length_time_utc) - MIN_DATETIME).total_seconds())
 
 
 def parse_release_date(release_date: str) -> date:

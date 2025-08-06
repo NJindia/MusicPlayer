@@ -13,6 +13,7 @@ from psycopg2.extras import RealDictRow
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QPixmap, QPixmapCache
 
+from music_player.constants import MIN_DATETIME
 from music_player.database import PATH_TO_IMGS, get_database_manager
 from music_player.utils import get_pixmap
 
@@ -143,16 +144,33 @@ WHERE (%(collectionId)s IS NULL) OR (c.collection_id = %(collectionId)s)
 GROUP BY c.collection_id
 """
 
+update_field_recursive = """
+WITH RECURSIVE hierarchy AS (
+    SELECT collection_id
+    FROM collections
+    WHERE parent_collection_id = :id
+
+    UNION ALL
+
+    SELECT c.collection_id
+    FROM collections c
+    INNER JOIN hierarchy h ON c.parent_collection_id = h.collection_id
+    WHERE c.parent_collection_id != -1
+)
+UPDATE collections SET last_played = %s
+WHERE collection_id = %s OR collection_id IN (SELECT collection_id FROM hierarchy)"""
+
 
 @dataclass(kw_only=True, eq=False)
 class DbStoredCollection(DbCollection):
     _parent_id: int
     _created: datetime
-    _last_updated: datetime
+    _last_updated_actual: datetime
     _last_played: datetime | None
     _music_ids: tuple[int, ...]
     _music_added_on: list[datetime]
     _album_img_path_counter: Counter[Path]
+    _last_updated: datetime | None = None
     _pixmap_heights: set[int] = field(default_factory=set[int])
 
     @classmethod
@@ -170,7 +188,8 @@ class DbStoredCollection(DbCollection):
             _img_path=db_row["thumbnail"],
             _parent_id=db_row["parent_collection_id"],
             _created=db_row["created"],
-            _last_updated=db_row["last_updated"],
+            _last_updated=None,
+            _last_updated_actual=db_row["last_updated"],
             _last_played=db_row["last_played"],
             _music_ids=tuple(db_row["music_ids"]),
             _music_added_on=db_row["added_on"],
@@ -184,7 +203,7 @@ class DbStoredCollection(DbCollection):
     @property
     def music_ids(self) -> tuple[int, ...]:
         return (
-            tuple(m_id for collection in get_collection_children(self.id) for m_id in collection.music_ids)  # TODO SORT
+            tuple(m_id for collection in get_recursive_children(self.id) for m_id in collection.music_ids)  # TODO SORT
             if self.collection_type == "folder"
             else self._music_ids
         )
@@ -203,12 +222,29 @@ class DbStoredCollection(DbCollection):
         return self._created
 
     @property
+    @profile
     def last_updated(self) -> datetime:
+        if self._last_updated is None:  # During initial setup
+            self._last_updated = (
+                max(
+                    (
+                        self._last_updated_actual,
+                        *(e._last_updated_actual for e in get_recursive_children(self.id, get_folders=False)),
+                    )
+                )
+                if self.collection_type == "folder"
+                else self._last_updated_actual
+            )
         return self._last_updated
 
     @property
-    def last_played(self) -> datetime | None:
-        return self._last_played
+    @profile
+    def last_played(self) -> datetime:
+        if self._last_played is None and self.collection_type == "folder":  # During initial setup
+            self._last_played = max(
+                (c.last_played for c in get_recursive_children(self.id, get_folders=False)), default=MIN_DATETIME
+            )
+        return self._last_played or MIN_DATETIME
 
     @property
     def thumbnail_path(self) -> Path | None:
@@ -217,6 +253,7 @@ class DbStoredCollection(DbCollection):
     def rename(self, name: str):
         self._name = name
         self.save()
+        self.mark_as_updated()
 
     def delete(self):
         assert not self.is_protected
@@ -231,8 +268,8 @@ class DbStoredCollection(DbCollection):
                     self.collection_type,
                     self.name,
                     self.created,
-                    self.last_updated,
-                    self.last_played,
+                    self._last_updated_actual,
+                    self._last_played,
                     self.thumbnail_path,
                     self.is_protected,
                 ),
@@ -247,8 +284,8 @@ class DbStoredCollection(DbCollection):
                     self.collection_type,
                     self.name,
                     self.created,
-                    self.last_updated,
-                    self.last_played,
+                    self._last_updated_actual,
+                    self._last_played,
                     self.thumbnail_path,
                     self.is_protected,
                     self.id,
@@ -256,12 +293,30 @@ class DbStoredCollection(DbCollection):
             )
 
     def mark_as_played(self):
+        """If is playlist, set parents' _last_played, but only update this playlist in the DB.
+        If is folder, also set _last_played of children collections and update their last_played in the DB."""
         self._last_played = datetime.now(tz=UTC)
-        update_query = "UPDATE collections SET last_played = %s WHERE collection_id = %s"
-        get_database_manager().execute_query(update_query, (self.last_played, self.id))
+
+        for parent in get_recursive_parents(self):
+            parent._last_played = self._last_played  # Current time will always be > old last_played, so no max needed
+
+        update_ids: list[int] = [self.id]
+        if self.collection_type == "folder":
+            for child in get_recursive_children(self.id):
+                child._last_played = self._last_played
+                if not child.is_folder:
+                    update_ids.append(child.id)
+
+        update_query = "UPDATE collections SET last_played = %s WHERE collection_id IN %s"
+        get_database_manager().execute_query(update_query, (self.last_played, tuple(update_ids)))
 
     def mark_as_updated(self):
+        """Mark this collection as updated in the DB, and update the _last_updated of this collection and its parents"""
         self._last_updated = datetime.now(tz=UTC)
+
+        for parent in get_recursive_parents(self):
+            parent._last_updated = self._last_updated  # Current time will always be > old last_played, so no max needed
+
         update_query = "UPDATE collections SET last_updated = %s WHERE collection_id = %s"
         get_database_manager().execute_query(update_query, (self.last_updated, self.id))
 
@@ -384,12 +439,9 @@ def _get_folder_pixmap(height: int) -> QPixmap:
     return QPixmap("../icons/playlist/folder.svg").scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
 
 
-@cache
+@profile
 def get_collections_by_parent_id() -> dict[int, list[DbStoredCollection]]:
-    collections = [
-        DbStoredCollection.from_db_row(row)
-        for row in get_database_manager().get_rows_k(collection_query, collectionId=None)
-    ]
+    collections = list(get_db_stored_collection_cache()._collection_by_id.values())
 
     def parent_key(collection: DbStoredCollection) -> int:
         return collection.parent_id
@@ -397,10 +449,28 @@ def get_collections_by_parent_id() -> dict[int, list[DbStoredCollection]]:
     return {k: list(v) for k, v in groupby(sorted(collections, key=parent_key), key=parent_key)}
 
 
-def get_collection_children(parent_id: int) -> Iterator[DbStoredCollection]:
-    for child_collection in get_collections_by_parent_id().get(parent_id, []):
+def get_recursive_parents(collection: DbStoredCollection) -> Iterator[DbStoredCollection]:
+    if collection.parent_id != -1:
+        parent = get_db_stored_collection_cache().get(collection.parent_id)
+        yield parent
+        yield from get_recursive_parents(parent)
+
+
+@profile
+def get_recursive_children(
+    parent_id: int,
+    collections_by_parent_id: dict[int, list[DbStoredCollection]] | None = None,
+    *,
+    get_folders: bool = True,
+) -> Iterator[DbStoredCollection]:
+    collections_by_parent_id = (
+        get_collections_by_parent_id() if collections_by_parent_id is None else collections_by_parent_id
+    )
+    for child_collection in collections_by_parent_id.get(parent_id, []):
         if child_collection.is_folder:
-            yield from get_collection_children(child_collection.id)
+            yield from get_recursive_children(child_collection.id, collections_by_parent_id)
+        if child_collection.is_folder and not get_folders:
+            continue
         yield child_collection
 
 
@@ -448,11 +518,11 @@ class DbMusic:
 
 class _DbMusicCache:
     def __init__(self):
-        self._music_by_id: dict[int, DbMusic] = {}
         rows = get_database_manager().get_rows("SELECT * FROM music_view ORDER BY (music_id, artist_order)")
         rows_by_music_id = {k: list(v) for k, v in groupby(rows, key=lambda r: r["music_id"])}
-        for music_id, rows in rows_by_music_id.items():
-            self._music_by_id[music_id] = DbMusic.from_db_rows(rows)
+        self._music_by_id: dict[int, DbMusic] = {
+            music_id: DbMusic.from_db_rows(rows) for music_id, rows in rows_by_music_id.items()
+        }
 
     @profile
     def get(self, music_id: int) -> DbMusic:
@@ -464,3 +534,21 @@ class _DbMusicCache:
 @cache
 def get_db_music_cache() -> _DbMusicCache:
     return _DbMusicCache()
+
+
+class _DbStoredCollectionCache:
+    def __init__(self):
+        self._collection_by_id = {
+            row["collection_id"]: DbStoredCollection.from_db_row(row)
+            for row in get_database_manager().get_rows_k(collection_query, collectionId=None)
+        }
+
+    def get(self, collection_id: int) -> DbStoredCollection:
+        if collection_id not in self._collection_by_id:
+            self._collection_by_id[collection_id] = DbStoredCollection.from_db(collection_id)
+        return self._collection_by_id[collection_id]
+
+
+@cache
+def get_db_stored_collection_cache() -> _DbStoredCollectionCache:
+    return _DbStoredCollectionCache()

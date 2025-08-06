@@ -580,6 +580,7 @@ class MusicLibraryWidget(QWidget):
         if sort_orders is not None:
             self.table_view.model_.sort_order_by_music_id = dict(zip(music_ids, sort_orders, strict=True))
             assert len(sort_orders) == self.table_view.model().rowCount()
+            print("LOAD")
             model.invalidate()
         if not no_meta:
             num_tracks = model.rowCount()

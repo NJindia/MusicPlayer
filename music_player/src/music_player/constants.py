@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Literal
 
 from PySide6.QtCore import Qt
@@ -29,3 +30,5 @@ MAX_SIDE_BAR_WIDTH = 450
 ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
 MUSIC_IDS_MIMETYPE = "application/x-music-ids"
+
+MIN_DATETIME = datetime(1970, 1, 1, tzinfo=UTC)

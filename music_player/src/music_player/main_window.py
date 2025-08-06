@@ -22,13 +22,7 @@ from music_player.common_gui import (
 )
 from music_player.constants import MAIN_PADDING, MAIN_SPACING, MAX_SIDE_BAR_WIDTH
 from music_player.database import get_database_manager
-from music_player.db_types import (
-    DbCollection,
-    DbStoredCollection,
-    get_collection_children,
-    get_collections_by_parent_id,
-    get_db_music_cache,
-)
+from music_player.db_types import DbCollection, DbStoredCollection, get_db_music_cache, get_recursive_children
 from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
 from music_player.playlist_tree import AddToPlaylistMenu, MoveToFolderMenu, PlaylistTreeWidget, SortRole, TreeModelItem
 from music_player.queue_gui import HistoryGraphicsView, QueueEntryGraphicsItem, QueueGraphicsView
@@ -235,8 +229,6 @@ class MainWindow(QMainWindow):
     @Slot()
     def double_click_tree_view_item(self, proxy_index: QModelIndex) -> None:
         playlist = self.playlist_view.item_at_index(proxy_index, is_source=False).collection
-        if playlist.is_folder:
-            raise NotImplementedError
         self.shared_signals.play_collection_signal.emit(playlist, -1)
 
     @Slot()
@@ -263,27 +255,25 @@ class MainWindow(QMainWindow):
             _is_protected=False,
             _parent_id=parent_id,
             _created=datetime.now(tz=UTC),
-            _last_updated=datetime.now(tz=UTC),
+            _last_updated_actual=datetime.now(tz=UTC),
             _last_played=None,
             _music_ids=(),
             _music_added_on=[],
             _album_img_path_counter=Counter(),
         )
         collection.save()
-        get_collections_by_parent_id.cache_clear()
         item = TreeModelItem(collection)
         default_model_root_item.appendRow(item)  # pyright: ignore[reportUnknownMemberType]
 
-        if callback_value:
-            match mode:
-                case "folder":
-                    assert isinstance(callback_value, QModelIndex)
-                    if callback_value.isValid():
-                        self.shared_signals.move_collection_signal.emit(callback_value, item.index())
-                case "playlist":
-                    assert isinstance(callback_value, Sequence)
-                    if len(callback_value):
-                        self.shared_signals.add_to_playlist_signal.emit(callback_value, collection)
+        match mode:
+            case "folder":
+                assert isinstance(callback_value, QModelIndex)
+                if callback_value.isValid():
+                    self.shared_signals.move_collection_signal.emit(callback_value, item.index())
+            case "playlist":
+                assert isinstance(callback_value, Sequence)
+                if len(callback_value):
+                    self.shared_signals.add_to_playlist_signal.emit(callback_value, collection)
 
     def __delete_single_collection(self, collection: DbStoredCollection):
         if collection == self.library.collection:
@@ -296,10 +286,9 @@ class MainWindow(QMainWindow):
         (self.playlist_view.model_ if item_parent is None else item_parent).removeRow(playlist_tree_item.row())
 
         if collection.is_folder:
-            for child in list(get_collection_children(collection.id)):
+            for child in list(get_recursive_children(collection.id)):
                 self.__delete_single_collection(child)
         self.__delete_single_collection(collection)
-        get_collections_by_parent_id.cache_clear()
 
     @Slot()
     def delete_collection(self, collection: DbStoredCollection):
@@ -329,15 +318,15 @@ class MainWindow(QMainWindow):
 
         if self.library.collection and playlist.id == self.library.collection.id:
             self.library.load_playlist(playlist)
-        self.playlist_view.refresh_collection(playlist, SortRole.UPDATED)
+        self.playlist_view.refresh_collection_ui(playlist)
 
     @Slot()
-    def remove_items_from_playlist(self, item_indices: tuple[int, ...]):
+    def remove_items_from_collection(self, item_indices: tuple[int, ...]):
         playlist = self.library.collection
         assert isinstance(playlist, DbStoredCollection)
         playlist.remove_music_ids(item_indices)
         self.library.load_playlist(playlist)
-        self.playlist_view.refresh_collection(playlist, SortRole.UPDATED)
+        self.playlist_view.refresh_collection_ui(playlist)
 
     @Slot()
     @profile
@@ -364,7 +353,7 @@ class MainWindow(QMainWindow):
             # Remove from current playlist
             remove_from_curr_playlist_action = QAction("Remove from this playlist", menu)
             remove_from_curr_playlist_action.triggered.connect(
-                partial(self.remove_items_from_playlist, tuple(selected_song_indices))
+                partial(self.remove_items_from_collection, tuple(selected_song_indices))
             )
             menu.addSeparator()
             menu.addAction(remove_from_curr_playlist_action)

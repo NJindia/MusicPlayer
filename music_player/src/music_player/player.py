@@ -1,11 +1,12 @@
 import sys
 
 import qdarktheme  # pyright: ignore[reportMissingTypeStubs]
+from line_profiler_pycharm import profile
 from PySide6.QtGui import QPixmapCache
 from PySide6.QtWidgets import QApplication
 
 from music_player.constants import SKIP_BACK_SECOND_THRESHOLD
-from music_player.db_types import get_db_music_cache
+from music_player.db_types import get_db_music_cache, get_db_stored_collection_cache
 from music_player.main_window import MainWindow
 from music_player.signals import SharedSignals
 from music_player.stylesheet import stylesheet
@@ -76,9 +77,11 @@ class Player:
         self.current_queue_idx = max(self.current_queue_idx - 1, 0)
         self.vlc_core.play_item(self.queue_music_ids[self.current_queue_idx])
 
+    @profile
     def run(self):
         QPixmapCache.setCacheLimit(102400)  # 100MB
         get_db_music_cache()  # TODO THIS COULD BE BETTER THAN FRONTLOADING
+        get_db_stored_collection_cache()
         qdarktheme.setup_theme()
         self.main_window.show()
         sys.exit(self.app.exec())
