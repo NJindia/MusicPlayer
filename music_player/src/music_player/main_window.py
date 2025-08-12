@@ -269,7 +269,7 @@ class MainWindow(QMainWindow):
         )
         collection.save()
         get_db_stored_collection_cache()._collection_by_id[collection.id] = collection
-        item = TreeModelItem(collection)
+        item = TreeModelItem(collection.id)
         default_model_root_item.appendRow(item)  # pyright: ignore[reportUnknownMemberType]
 
         match mode:

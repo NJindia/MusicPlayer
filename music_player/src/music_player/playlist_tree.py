@@ -55,7 +55,12 @@ from music_player.constants import (
     PLAYLIST_HEADER_FONT_SIZE,
     PLAYLIST_HEADER_PADDING,
 )
-from music_player.db_types import DbStoredCollection, get_collections_by_parent_id, get_recursive_parents
+from music_player.db_types import (
+    DbStoredCollection,
+    get_collections_by_parent_id,
+    get_db_stored_collection_cache,
+    get_recursive_parents,
+)
 from music_player.signals import SharedSignals
 from music_player.utils import get_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
 from music_player.view_types import PlaylistTreeView
@@ -92,15 +97,21 @@ class TreeItemDelegate(QStyledItemDelegate):
 
 
 class TreeModelItem(QStandardItem):
-    def __init__(self, collection: DbStoredCollection) -> None:
-        super().__init__(collection.name)
-        self.collection: DbStoredCollection = collection
+    def __init__(self, collection_id: int) -> None:
+        super().__init__()
+        self.collection_id: int = collection_id
 
         font = QFont()
         font.setPointSize(14)
         self.setFont(font)  # pyright: ignore[reportUnknownMemberType]
         self.setEditable(False)
+
+        self.setText(self.collection.name)
         self.update_icon()
+
+    @property
+    def collection(self) -> DbStoredCollection:
+        return get_db_stored_collection_cache().get(self.collection_id)
 
     @override
     def data(self, /, role: int = Qt.ItemDataRole.DisplayRole):
@@ -128,9 +139,8 @@ class TreeModelItem(QStandardItem):
     def update_icon(self):
         self.setIcon(QIcon(self.collection.get_thumbnail_pixmap(PLAYLIST_ROW_HEIGHT)))
 
-    def sync_item(self, item: "TreeModelItem"):
+    def refresh_text(self):
         self.setText(self.collection.name)
-        self.collection = item.collection
 
 
 def _recursive_traverse(parent_item: QStandardItem, *, get_non_leaf: bool) -> Iterator[TreeModelItem]:
@@ -528,7 +538,7 @@ class PlaylistTreeWidget(QWidget):
 
             if self.proxy_model.filterRegularExpression().pattern():
                 self.model_.blockSignals(True)  # noqa: FBT003
-                self.get_model_item(item.collection).sync_item(item)
+                self.get_model_item(item.collection).refresh_text()
                 self.model_.blockSignals(False)  # noqa: FBT003
             else:
                 self._update_flattened_model()
@@ -539,7 +549,7 @@ class PlaylistTreeWidget(QWidget):
         print("CUSTOM_SORT FM")
         self.flattened_model_.clear()
         for item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=self.is_main_view):
-            self.flattened_model_.appendRow(TreeModelItem(item.collection))  # pyright: ignore[reportUnknownMemberType]
+            self.flattened_model_.appendRow(TreeModelItem(item.collection.id))  # pyright: ignore[reportUnknownMemberType]
 
     def _initialize_model(self) -> None:
         assert self.is_main_view
@@ -548,7 +558,7 @@ class PlaylistTreeWidget(QWidget):
 
         def _add_children_to_item(root_item_: QStandardItem, root_item_id_: int):
             for collection in collections_by_parent_id.get(root_item_id_, []):
-                item = TreeModelItem(collection)
+                item = TreeModelItem(collection.id)
                 root_item_.appendRow(item)  # pyright: ignore[reportUnknownMemberType]
                 if collection.is_folder:
                     _add_children_to_item(item, collection.id)
@@ -560,13 +570,12 @@ class PlaylistTreeWidget(QWidget):
         return next(
             tree_model_item
             for tree_model_item in _recursive_traverse(self.model_.invisibleRootItem(), get_non_leaf=True)
-            if tree_model_item.collection.id == collection.id
+            if tree_model_item.collection_id == collection.id
         )
 
     @profile
     def refresh_collection_ui(self, collection: DbStoredCollection):
         item = self.get_model_item(collection)
-        item.collection = collection
         item.update_icon()
 
         if self.proxy_model.sortRole() == SortRole.UPDATED.value:

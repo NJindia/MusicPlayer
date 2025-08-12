@@ -241,7 +241,7 @@ class DbStoredCollection(DbCollection):
         self._last_updated = last_updated
 
     def mark_as_updated(self):
-        """Mark this collection as updated in the DB, and update the _last_updated of this collection and its parents"""
+        """Mark this collection_id as updated in the DB, and update the _last_updated of this collection_id and its parents"""
         self._last_updated = datetime.now(tz=UTC)
 
         for parent in get_recursive_parents(self):
