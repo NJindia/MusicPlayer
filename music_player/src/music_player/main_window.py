@@ -22,7 +22,13 @@ from music_player.common_gui import (
 )
 from music_player.constants import MAIN_PADDING, MAIN_SPACING, MAX_SIDE_BAR_WIDTH
 from music_player.database import get_database_manager
-from music_player.db_types import DbCollection, DbStoredCollection, get_db_music_cache, get_recursive_children
+from music_player.db_types import (
+    DbCollection,
+    DbStoredCollection,
+    get_db_music_cache,
+    get_db_stored_collection_cache,
+    get_recursive_children,
+)
 from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
 from music_player.playlist_tree import AddToPlaylistMenu, MoveToFolderMenu, PlaylistTreeWidget, SortRole, TreeModelItem
 from music_player.queue_gui import HistoryGraphicsView, QueueEntryGraphicsItem, QueueGraphicsView
@@ -262,6 +268,7 @@ class MainWindow(QMainWindow):
             _album_img_path_counter=Counter(),
         )
         collection.save()
+        get_db_stored_collection_cache()._collection_by_id[collection.id] = collection
         item = TreeModelItem(collection)
         default_model_root_item.appendRow(item)  # pyright: ignore[reportUnknownMemberType]
 
