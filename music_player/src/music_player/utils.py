@@ -9,8 +9,6 @@ from PySide6.QtCore import QByteArray, QSize, QThread
 from PySide6.QtGui import QPixmap, QPixmapCache, Qt
 
 from music_player.constants import MIN_DATETIME
-from music_player.db_types import DbCollection, get_folder_music_ids
-from music_player.view_types import CollectionTreeSortRole
 
 
 def length_timestamp_to_seconds(length_timestamp: str) -> int:
@@ -105,11 +103,3 @@ def qbytearray_to_music_ids(data: QByteArray) -> list[int]:
     byte_data = data.data()
     num_ints = len(byte_data) // 4
     return list(struct.unpack(f">{num_ints}i", byte_data))
-
-
-def get_music_ids(collection: DbCollection, sort_role: CollectionTreeSortRole) -> tuple[int, ...]:
-    return (
-        get_folder_music_ids(collection.id, sort_role)
-        if collection.collection_type == "folder"
-        else collection.music_ids
-    )

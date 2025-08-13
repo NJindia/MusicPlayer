@@ -570,6 +570,8 @@ class MusicLibraryWidget(QWidget):
             self.collection = new_collection
         if self.collection is None:
             print("NOT IMPLEMENTED")
+        elif self.collection.collection_type == "folder":
+            raise NotImplementedError("not yet implemented")
         is_play_button = self.collection != self.core.current_collection or not self.core.media_player.is_playing()
         self.header_widget.set_play_pause_button_state(is_play_button=is_play_button)
 

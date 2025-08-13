@@ -27,6 +27,7 @@ from music_player.db_types import (
     DbStoredCollection,
     get_db_music_cache,
     get_db_stored_collection_cache,
+    get_music_ids,
     get_recursive_children,
 )
 from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
@@ -35,7 +36,6 @@ from music_player.queue_gui import HistoryGraphicsView, QueueEntryGraphicsItem, 
 from music_player.signals import SharedSignals
 from music_player.stylesheet import stylesheet
 from music_player.toolbar import MediaToolbar
-from music_player.utils import get_music_ids
 from music_player.view_types import CollectionTreeSortRole
 from music_player.vlc_core import VLCCore
 
@@ -166,7 +166,7 @@ class MainWindow(QMainWindow):
                 last_queue_music_played = self.queue.queue_entries[self.queue.current_queue_idx].music
 
                 # Replace any music/media that was added manually with the original lists
-                music_ids = self.core.current_collection.music_ids
+                music_ids = get_music_ids(self.core.current_collection, self.playlist_view.proxy_model.sort_role())
                 self.queue.load_music_ids(music_ids, music_ids.index(last_queue_music_played.id))
         self.queue.update_first_queue_index()
 
@@ -204,7 +204,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def play_collection(self, collection: DbCollection, collection_index: int):
         self.core.current_collection = collection
-        collection_music_ids = collection.music_ids
+        collection_music_ids = get_music_ids(collection, self.playlist_view.proxy_model.sort_role())
         if not collection_music_ids:
             return
         if isinstance(collection, DbStoredCollection):
@@ -463,7 +463,7 @@ class MainWindow(QMainWindow):
     ):
         """Add the base context menu actions for a playlist."""
         collection_music_ids = get_music_ids(collection, self.playlist_view.proxy_model.sort_role())
-        if collection.music_ids:
+        if collection_music_ids:
             menu.addAction(AddToQueueAction(collection_music_ids, self.shared_signals, menu))
             menu.addSeparator()
         if isinstance(collection, DbStoredCollection) and not collection.is_protected:

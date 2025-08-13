@@ -583,3 +583,11 @@ class _DbStoredCollectionCache:
 @cache
 def get_db_stored_collection_cache() -> _DbStoredCollectionCache:
     return _DbStoredCollectionCache()
+
+
+def get_music_ids(collection: DbCollection, sort_role: CollectionTreeSortRole) -> tuple[int, ...]:
+    return (
+        get_folder_music_ids(collection.id, sort_role)
+        if collection.collection_type == "folder"
+        else collection.music_ids
+    )

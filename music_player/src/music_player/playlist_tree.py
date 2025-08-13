@@ -57,10 +57,11 @@ from music_player.db_types import (
     DbStoredCollection,
     get_collections_by_parent_id,
     get_db_stored_collection_cache,
+    get_music_ids,
     get_recursive_parents,
 )
 from music_player.signals import SharedSignals
-from music_player.utils import get_music_ids, get_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
+from music_player.utils import get_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
 from music_player.view_types import CollectionTreeSortRole, PlaylistTreeView
 
 PLAYLIST_ROW_HEIGHT = 50
