@@ -16,6 +16,7 @@ from PySide6.QtGui import QPainter, QPixmap, QPixmapCache
 from music_player.constants import MIN_DATETIME
 from music_player.database import PATH_TO_IMGS, get_database_manager
 from music_player.utils import get_pixmap
+from music_player.view_types import CollectionTreeSortRole
 
 CollectionType = Literal["folder", "playlist", "artist", "album"]
 INSERT_COLLECTION_SQL = """
@@ -161,6 +162,14 @@ UPDATE collections SET last_played = %s
 WHERE collection_id = %s OR collection_id IN (SELECT collection_id FROM hierarchy)"""
 
 
+def get_folder_music_ids(folder_id: int, sort_role: CollectionTreeSortRole | None) -> tuple[int, ...]:
+    return tuple(
+        m_id
+        for collection in get_recursive_children(folder_id, get_folders=False, sort_role=sort_role)
+        for m_id in collection.music_ids
+    )
+
+
 @dataclass(kw_only=True, eq=False)
 class DbStoredCollection(DbCollection):
     _parent_id: int
@@ -202,11 +211,7 @@ class DbStoredCollection(DbCollection):
 
     @property
     def music_ids(self) -> tuple[int, ...]:
-        return (
-            tuple(m_id for collection in get_recursive_children(self.id) for m_id in collection.music_ids)  # TODO SORT
-            if self.collection_type == "folder"
-            else self._music_ids
-        )
+        return get_folder_music_ids(self.id, None) if self.collection_type == "folder" else self._music_ids
 
     @property
     def parent_id(self) -> int:
@@ -241,7 +246,7 @@ class DbStoredCollection(DbCollection):
         self._last_updated = last_updated
 
     def mark_as_updated(self):
-        """Mark this collection_id as updated in the DB, and update the _last_updated of this collection_id and its parents"""
+        """Mark this collection as updated in the DB, and update the _last_updated of this collection and its parents"""
         self._last_updated = datetime.now(tz=UTC)
 
         for parent in get_recursive_parents(self):
@@ -432,6 +437,17 @@ class DbStoredCollection(DbCollection):
     def is_folder(self) -> bool:
         return self.collection_type == "folder"
 
+    def get_sort_value(self, sort_role: CollectionTreeSortRole):
+        match sort_role:
+            case CollectionTreeSortRole.ALPHABETICAL:
+                return self.name.lower() + self.name
+            case CollectionTreeSortRole.UPDATED:
+                return self.last_updated.timestamp()
+            case CollectionTreeSortRole.PLAYED:
+                return self.last_played.timestamp()
+            case _:
+                raise ValueError("Unknown sort role")
+
 
 T = TypeVar("T", bound=DbStoredCollection)
 
@@ -470,16 +486,19 @@ def get_recursive_children(
     collections_by_parent_id: dict[int, list[DbStoredCollection]] | None = None,
     *,
     get_folders: bool = True,
+    sort_role: CollectionTreeSortRole | None = None,
 ) -> Iterator[DbStoredCollection]:
     collections_by_parent_id = (
         get_collections_by_parent_id() if collections_by_parent_id is None else collections_by_parent_id
     )
-    for child_collection in collections_by_parent_id.get(parent_id, []):
+    child_collections = collections_by_parent_id.get(parent_id, [])
+    for child_collection in (
+        sorted(child_collections, key=lambda c: c.get_sort_value(sort_role)) if sort_role else child_collections
+    ):
+        if not child_collection.is_folder or get_folders:
+            yield child_collection
         if child_collection.is_folder:
-            yield from get_recursive_children(child_collection.id, collections_by_parent_id)
-        if child_collection.is_folder and not get_folders:
-            continue
-        yield child_collection
+            yield from get_recursive_children(child_collection.id, collections_by_parent_id, get_folders=get_folders)
 
 
 @dataclass(frozen=True)

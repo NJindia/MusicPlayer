@@ -59,7 +59,7 @@ from music_player.common_gui import (
     paint_artists,
     text_is_buffer,
 )
-from music_player.constants import ID_ROLE, MUSIC_IDS_MIMETYPE
+from music_player.constants import MUSIC_IDS_MIMETYPE
 from music_player.database import PATH_TO_IMGS, get_database_manager
 from music_player.db_types import DbAlbum, DbArtist, DbCollection, DbStoredCollection
 from music_player.signals import SharedSignals
@@ -203,15 +203,15 @@ class MusicTableModel(QSqlQueryModel):
         if not index.isValid():
             return None
 
-        if role == ID_ROLE + 1:
-            return self.sort_order_by_music_id[super().data(self.index(index.row(), self.music_id_field_idx))]
-
         column_name, db_field = COLUMN_MAP_BY_IDX.get(index.column(), (None, None))
         if not column_name or not db_field:
             return None
 
-        if role == ID_ROLE:
+        if role == LibraryTableView.music_id_role:
             return super().data(self.index(index.row(), self.music_id_field_idx))
+
+        if role == LibraryTableView.sort_order_role:
+            return self.sort_order_by_music_id[super().data(self.index(index.row(), self.music_id_field_idx))]
 
         if role in {Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole}:
             res = super().data(self.index(index.row(), self.record().indexOf(db_field)), role)
@@ -289,7 +289,7 @@ class ProxyModel(QSortFilterProxyModel):
     def __init__(self):
         super().__init__()
         self._music_ids: tuple[int, ...] = ()
-        self.setSortRole(ID_ROLE + 1)
+        self.setSortRole(LibraryTableView.sort_order_role)
         self.sort(0)
 
     @override
@@ -314,8 +314,7 @@ class ProxyModel(QSortFilterProxyModel):
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex, /):
         if not self._music_ids:
             return False
-        source_model = self.sourceModel()
-        data = source_model.data(source_model.index(source_row, 0, source_parent), ID_ROLE)
+        data = self.sourceModel().index(source_row, 0, source_parent).data(LibraryTableView.music_id_role)
         assert data
         return data in self._music_ids
 

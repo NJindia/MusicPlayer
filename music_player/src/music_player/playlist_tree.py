@@ -1,5 +1,4 @@
 from collections.abc import Iterator, Sequence
-from enum import Enum
 from functools import partial
 from pathlib import Path
 from typing import cast, override
@@ -49,7 +48,6 @@ from PySide6.QtWidgets import (
 
 from music_player.common_gui import NewFolderAction, NewPlaylistAction
 from music_player.constants import (
-    ID_ROLE,
     MAX_SIDE_BAR_WIDTH,
     MUSIC_IDS_MIMETYPE,
     PLAYLIST_HEADER_FONT_SIZE,
@@ -62,24 +60,17 @@ from music_player.db_types import (
     get_recursive_parents,
 )
 from music_player.signals import SharedSignals
-from music_player.utils import get_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
-from music_player.view_types import PlaylistTreeView
+from music_player.utils import get_music_ids, get_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
+from music_player.view_types import CollectionTreeSortRole, PlaylistTreeView
 
 PLAYLIST_ROW_HEIGHT = 50
 
-
-class SortRole(Enum):
-    UPDATED = Qt.ItemDataRole.UserRole + 5
-    PLAYED = Qt.ItemDataRole.UserRole + 6
-    ALPHABETICAL = Qt.ItemDataRole.UserRole + 7
-
-
-DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[SortRole, Qt.SortOrder] = {
-    SortRole.UPDATED: Qt.SortOrder.DescendingOrder,
-    SortRole.PLAYED: Qt.SortOrder.DescendingOrder,
-    SortRole.ALPHABETICAL: Qt.SortOrder.AscendingOrder,
+DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[CollectionTreeSortRole, Qt.SortOrder] = {
+    CollectionTreeSortRole.UPDATED: Qt.SortOrder.DescendingOrder,
+    CollectionTreeSortRole.PLAYED: Qt.SortOrder.DescendingOrder,
+    CollectionTreeSortRole.ALPHABETICAL: Qt.SortOrder.AscendingOrder,
 }
-INITIAL_SORT_ROLE = SortRole.ALPHABETICAL
+INITIAL_SORT_ROLE = CollectionTreeSortRole.ALPHABETICAL
 
 
 class TreeItemDelegate(QStyledItemDelegate):
@@ -115,25 +106,23 @@ class TreeModelItem(QStandardItem):
 
     @override
     def data(self, /, role: int = Qt.ItemDataRole.DisplayRole):
-        if role == ID_ROLE:
-            data_val = self.collection.id
-        elif role == PlaylistTreeView.is_folder_role:
-            data_val = self.collection.is_folder
-        elif role == PlaylistTreeView.is_protected_role:
-            data_val = self.collection.is_protected
-        elif role == PlaylistTreeView.collection_role:
-            data_val = self.collection
-        elif role == SortRole.UPDATED.value:
-            print(self.collection.name, self.collection.last_updated)
-            data_val = self.collection.last_updated.timestamp()
-        elif role == SortRole.PLAYED.value:
-            print(self.collection.name, self.collection.last_played)
-            last_played = self.collection.last_played
-            data_val = last_played.timestamp()
-        elif role == SortRole.ALPHABETICAL.value:
-            data_val = self.text().lower() + self.text()
-        else:
-            data_val = super().data(role)
+        match role:
+            case PlaylistTreeView.collection_id_role:
+                data_val = self.collection.id
+            case PlaylistTreeView.is_folder_role:
+                data_val = self.collection.is_folder
+            case PlaylistTreeView.is_protected_role:
+                data_val = self.collection.is_protected
+            case PlaylistTreeView.collection_role:
+                data_val = self.collection
+            case CollectionTreeSortRole.UPDATED.value:
+                data_val = self.collection.get_sort_value(CollectionTreeSortRole.UPDATED)
+            case CollectionTreeSortRole.PLAYED.value:
+                data_val = self.collection.get_sort_value(CollectionTreeSortRole.PLAYED)
+            case CollectionTreeSortRole.ALPHABETICAL.value:
+                data_val = self.collection.get_sort_value(CollectionTreeSortRole.ALPHABETICAL)
+            case _:
+                data_val = super().data(role)
         return data_val
 
     def update_icon(self):
@@ -192,13 +181,19 @@ class PlaylistProxyModel(QSortFilterProxyModel):
         assert len(indexes) == 1
         collection = cast(DbStoredCollection, self.data(indexes[0], PlaylistTreeView.collection_role))
         mime_data = QMimeData()
-        mime_data.setData(MUSIC_IDS_MIMETYPE, music_ids_to_qbytearray(collection.music_ids))
+        mime_data.setData(
+            MUSIC_IDS_MIMETYPE,
+            music_ids_to_qbytearray(get_music_ids(collection, self.sort_role())),
+        )
         return mime_data
 
     def data_(self, index: QModelIndex, role: int):
         data = self.data(index, role)
         assert data is not None, (index, role)
         return data
+
+    def sort_role(self) -> CollectionTreeSortRole:
+        return CollectionTreeSortRole(self.sortRole())
 
     def invalidate(self, /):
         print("invalidate")
@@ -469,10 +464,13 @@ class PlaylistTreeWidget(QWidget):
         self.proxy_model.invalidate()
 
     def update_sort_button(self):
-        sort_role = SortRole(self.proxy_model.sortRole())
+        sort_role = self.proxy_model.sort_role()
         order_str = "asc" if self.proxy_model.sortOrder() == Qt.SortOrder.AscendingOrder else "desc"
         pm = get_pixmap(
-            Path(f"../icons/sort/sort-{'alpha-' if sort_role == SortRole.ALPHABETICAL else ''}{order_str}.svg"),
+            Path(
+                f"../icons/sort/sort-{'alpha-' if sort_role == CollectionTreeSortRole.ALPHABETICAL else ''}"
+                f"{order_str}.svg"
+            ),
             None,
             color=Qt.GlobalColor.white,
         )
@@ -487,8 +485,8 @@ class PlaylistTreeWidget(QWidget):
         self.proxy_model.setSourceModel(self.flattened_model_)
         self.proxy_model.setFilterRegularExpression(rf"\b{text}\w*")
 
-    @Slot(SortRole)
-    def change_sort_role(self, sort_role: SortRole) -> None:
+    @Slot(CollectionTreeSortRole)
+    def change_sort_role(self, sort_role: CollectionTreeSortRole) -> None:
         sort_type = sort_role.value
         order = (
             (
@@ -578,12 +576,12 @@ class PlaylistTreeWidget(QWidget):
         item = self.get_model_item(collection)
         item.update_icon()
 
-        if self.proxy_model.sortRole() == SortRole.UPDATED.value:
+        if self.proxy_model.sortRole() == CollectionTreeSortRole.UPDATED.value:
             self.proxy_model.invalidate()
 
 
 class SortRoleAction(QAction):
-    def __init__(self, sort_role: SortRole, playlist_widget: PlaylistTreeWidget, parent: QMenu) -> None:
+    def __init__(self, sort_role: CollectionTreeSortRole, playlist_widget: PlaylistTreeWidget, parent: QMenu) -> None:
         super().__init__(sort_role.name.capitalize(), parent)
         self.sort_role = sort_role
         self.triggered.connect(partial(playlist_widget.change_sort_role, sort_role))
@@ -595,9 +593,9 @@ class SortMenu(QMenu):
         self.setObjectName("SortMenu")
         self.installEventFilter(self)
 
-        self.sort_updated_action = SortRoleAction(SortRole.UPDATED, parent, self)
-        self.sort_played_action = SortRoleAction(SortRole.PLAYED, parent, self)
-        self.sort_alphabetical_action = SortRoleAction(SortRole.ALPHABETICAL, parent, self)
+        self.sort_updated_action = SortRoleAction(CollectionTreeSortRole.UPDATED, parent, self)
+        self.sort_played_action = SortRoleAction(CollectionTreeSortRole.PLAYED, parent, self)
+        self.sort_alphabetical_action = SortRoleAction(CollectionTreeSortRole.ALPHABETICAL, parent, self)
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
         self.addActions([self.sort_updated_action, self.sort_played_action, self.sort_alphabetical_action])  # pyright: ignore[reportUnknownMemberType]

@@ -30,11 +30,13 @@ from music_player.db_types import (
     get_recursive_children,
 )
 from music_player.library import MusicLibraryScrollArea, MusicLibraryWidget
-from music_player.playlist_tree import AddToPlaylistMenu, MoveToFolderMenu, PlaylistTreeWidget, SortRole, TreeModelItem
+from music_player.playlist_tree import AddToPlaylistMenu, MoveToFolderMenu, PlaylistTreeWidget, TreeModelItem
 from music_player.queue_gui import HistoryGraphicsView, QueueEntryGraphicsItem, QueueGraphicsView
 from music_player.signals import SharedSignals
 from music_player.stylesheet import stylesheet
 from music_player.toolbar import MediaToolbar
+from music_player.utils import get_music_ids
+from music_player.view_types import CollectionTreeSortRole
 from music_player.vlc_core import VLCCore
 
 
@@ -100,7 +102,7 @@ class MainWindow(QMainWindow):
         )
 
         self.shared_signals.play_collection_signal.connect(self.play_collection)
-        self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_collection)
+        self.shared_signals.add_to_playlist_signal.connect(self.add_items_to_playlist)
         self.shared_signals.create_playlist_signal.connect(partial(self.create_collection, "playlist"))
         self.shared_signals.create_folder_signal.connect(partial(self.create_collection, "folder"))
         self.shared_signals.toggle_shuffle_signal.connect(self.shuffle_button_clicked)
@@ -202,22 +204,23 @@ class MainWindow(QMainWindow):
     @Slot()
     def play_collection(self, collection: DbCollection, collection_index: int):
         self.core.current_collection = collection
-        if not collection.music_ids:
+        collection_music_ids = collection.music_ids
+        if not collection_music_ids:
             return
         if isinstance(collection, DbStoredCollection):
             collection.mark_as_played()
 
-        if self.playlist_view.proxy_model.sortRole() == SortRole.PLAYED.value:
+        if self.playlist_view.proxy_model.sortRole() == CollectionTreeSortRole.PLAYED.value:
             self.playlist_view.proxy_model.invalidate()
 
-        self.queue.load_music_ids(collection.music_ids)
+        self.queue.load_music_ids(collection_music_ids)
         self.queue.queue_header_collection_label.setPlainText(collection.name)
         if self.toolbar.shuffle_button.isChecked():
             jump_index = 0
             self.shuffle_indices(jump_index)  # Shuffle all
             if collection_index != -1:
                 # Find index of song we want to play now in the shuffled list, then swap that with the shuffled 1st song
-                _list_index = self.queue.queue_music_ids.index(collection.music_ids[collection_index])
+                _list_index = self.queue.queue_music_ids.index(collection_music_ids[collection_index])
                 temp = self.queue.queue_entries[_list_index]
                 self.queue.queue_entries[_list_index] = self.queue.queue_entries[jump_index]
                 self.queue.queue_entries[jump_index] = temp
@@ -310,8 +313,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     @profile
-    def add_items_to_collection(self, music_db_indices: Sequence[int], playlist: DbStoredCollection):
-        valid_music_ids = [m_id for m_id in music_db_indices if m_id not in playlist.music_ids]
+    def add_items_to_playlist(self, music_db_indices: Sequence[int], playlist: DbStoredCollection):
+        assert not playlist.is_folder
+        valid_music_ids = list(dict.fromkeys(m_id for m_id in music_db_indices if m_id not in playlist.music_ids))
         if bad_num := len(music_db_indices) - len(valid_music_ids):
             warning = f"Could not add {bad_num} song{'s'[: bad_num ^ 1]} to '{playlist.name}': Already added."
             warning_popup = WarningPopup(self, warning)
@@ -323,7 +327,7 @@ class MainWindow(QMainWindow):
             warning_popup.show()
         playlist.add_music_ids(valid_music_ids)
 
-        if self.library.collection and playlist.id == self.library.collection.id:
+        if playlist == self.library.collection:
             self.library.load_playlist(playlist)
         self.playlist_view.refresh_collection_ui(playlist)
 
@@ -458,8 +462,9 @@ class MainWindow(QMainWindow):
         playlist_tree_source_index: QModelIndex | None = None,
     ):
         """Add the base context menu actions for a playlist."""
+        collection_music_ids = get_music_ids(collection, self.playlist_view.proxy_model.sort_role())
         if collection.music_ids:
-            menu.addAction(AddToQueueAction(collection.music_ids, self.shared_signals, menu))
+            menu.addAction(AddToQueueAction(collection_music_ids, self.shared_signals, menu))
             menu.addSeparator()
         if isinstance(collection, DbStoredCollection) and not collection.is_protected:
             rename_action = QAction("Rename", menu)
@@ -481,4 +486,4 @@ class MainWindow(QMainWindow):
         else:
             menu.addSeparator()
 
-        menu.addMenu(AddToPlaylistMenu(collection.music_ids, self.shared_signals, menu, self, self.playlist_view))
+        menu.addMenu(AddToPlaylistMenu(collection_music_ids, self.shared_signals, menu, self, self.playlist_view))
