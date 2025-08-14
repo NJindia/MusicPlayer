@@ -1,4 +1,5 @@
 from collections.abc import Iterator, Sequence
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import cast, override
@@ -120,6 +121,7 @@ class TreeModelItem(QStandardItem):
                 data_val = self.collection.get_sort_value(CollectionTreeSortRole.UPDATED)
             case CollectionTreeSortRole.PLAYED.value:
                 data_val = self.collection.get_sort_value(CollectionTreeSortRole.PLAYED)
+                print(self.collection.name, datetime.fromtimestamp(data_val, tz=UTC))
             case CollectionTreeSortRole.ALPHABETICAL.value:
                 data_val = self.collection.get_sort_value(CollectionTreeSortRole.ALPHABETICAL)
             case _:

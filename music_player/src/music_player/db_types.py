@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from functools import cache, cached_property
 from itertools import groupby
 from pathlib import Path
@@ -280,8 +280,8 @@ class DbStoredCollection(DbCollection):
 
         update_ids: list[int] = [self.id]
         if self.collection_type == "folder":
-            for child in get_recursive_children(self.id):
-                child.last_played = self._last_played
+            for i, child in enumerate(get_recursive_children(self.id, sort_role=CollectionTreeSortRole.PLAYED)):
+                child.last_played = self._last_played + timedelta(microseconds=i)
                 if not child.is_folder:
                     update_ids.append(child.id)
 
