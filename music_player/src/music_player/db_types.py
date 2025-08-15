@@ -278,15 +278,23 @@ class DbStoredCollection(DbCollection):
         for parent in get_recursive_parents(self):
             parent.last_played = self._last_played  # Current time will always be > old last_played, so no max needed
 
-        update_ids: list[int] = [self.id]
-        if self.collection_type == "folder":
-            for i, child in enumerate(get_recursive_children(self.id, sort_role=CollectionTreeSortRole.PLAYED)):
-                child.last_played = self._last_played + timedelta(microseconds=i)
+        update_ids: list[tuple[int, datetime]]
+        if self.is_folder:
+            playlist_idx = 0
+            update_ids = []
+            for child in get_recursive_children(self.id, sort_role=CollectionTreeSortRole.PLAYED):
+                child.last_played = self._last_played + timedelta(microseconds=playlist_idx)
                 if not child.is_folder:
-                    update_ids.append(child.id)
+                    playlist_idx += 1
+                    update_ids.append((child.id, child.last_played))
+        else:
+            update_ids = [(self.id, self._last_played)]
 
-        update_query = "UPDATE collections SET last_played = %s WHERE collection_id IN %s"
-        get_database_manager().execute_query(update_query, (self.last_played, tuple(update_ids)))
+        update_query = (
+            "UPDATE collections c SET last_played = t.last_played FROM "
+            "(VALUES %s) AS t(id, last_played) WHERE c.collection_id = t.id"
+        )
+        get_database_manager().execute_values(update_query, update_ids)
 
     @property
     def thumbnail_path(self) -> Path | None:

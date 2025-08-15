@@ -121,7 +121,6 @@ class TreeModelItem(QStandardItem):
                 data_val = self.collection.get_sort_value(CollectionTreeSortRole.UPDATED)
             case CollectionTreeSortRole.PLAYED.value:
                 data_val = self.collection.get_sort_value(CollectionTreeSortRole.PLAYED)
-                print(self.collection.name, datetime.fromtimestamp(data_val, tz=UTC))
             case CollectionTreeSortRole.ALPHABETICAL.value:
                 data_val = self.collection.get_sort_value(CollectionTreeSortRole.ALPHABETICAL)
             case _:
