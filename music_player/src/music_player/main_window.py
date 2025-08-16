@@ -55,7 +55,7 @@ class MainWindow(QMainWindow):
         main_ui.setSpacing(MAIN_SPACING)
         main_ui.setContentsMargins(MAIN_PADDING, MAIN_PADDING, MAIN_PADDING, MAIN_PADDING)
 
-        self.playlist_view = PlaylistTreeWidget(self, self, self.shared_signals, is_main_view=True)
+        self.playlist_view = PlaylistTreeWidget(self, self, self.shared_signals)
         self.playlist_view.tree_view.clicked.connect(self.select_tree_view_item)
         self.playlist_view.tree_view.doubleClicked.connect(self.double_click_tree_view_item)
         self.playlist_view.tree_view.customContextMenuRequested.connect(self.playlist_context_menu)

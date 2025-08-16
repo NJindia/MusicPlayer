@@ -308,6 +308,7 @@ class DbStoredCollection(DbCollection):
     def delete(self):
         assert not self.is_protected
         get_database_manager().execute_query("DELETE FROM collections WHERE collection_id = %s", (self.id,))
+        get_db_stored_collection_cache().delete_collection(self.id)
 
     def save(self):
         if self.id == -1:
@@ -586,6 +587,9 @@ class _DbStoredCollectionCache:
     @property
     def collections(self) -> list[DbStoredCollection]:
         return list(self._collection_by_id.values())
+
+    def delete_collection(self, collection_id: int) -> None:
+        del self._collection_by_id[collection_id]
 
 
 @cache

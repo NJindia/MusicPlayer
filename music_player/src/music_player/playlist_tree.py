@@ -2,7 +2,7 @@ from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import cast, override
+from typing import cast, override, Optional
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import (
@@ -52,7 +52,7 @@ from music_player.constants import (
     MAX_SIDE_BAR_WIDTH,
     MUSIC_IDS_MIMETYPE,
     PLAYLIST_HEADER_FONT_SIZE,
-    PLAYLIST_HEADER_PADDING,
+    PLAYLIST_HEADER_PADDING, USER_ID,
 )
 from music_player.db_types import (
     DbStoredCollection,
@@ -62,6 +62,8 @@ from music_player.db_types import (
     get_recursive_parents,
 )
 from music_player.signals import SharedSignals
+from music_player.user import get_user_session_tree_sort_role_order_tup, update_user_session_tree_sort_role_order, \
+    UserStartupConfig, get_user_startup_config
 from music_player.utils import get_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
 from music_player.view_types import CollectionTreeSortRole, PlaylistTreeView
 
@@ -72,8 +74,6 @@ DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[CollectionTreeSortRole, Qt.SortOrder] = {
     CollectionTreeSortRole.PLAYED: Qt.SortOrder.DescendingOrder,
     CollectionTreeSortRole.ALPHABETICAL: Qt.SortOrder.AscendingOrder,
 }
-INITIAL_SORT_ROLE = CollectionTreeSortRole.ALPHABETICAL
-
 
 class TreeItemDelegate(QStyledItemDelegate):
     @override
@@ -147,7 +147,7 @@ def _recursive_traverse(parent_item: QStandardItem, *, get_non_leaf: bool) -> It
 
 
 class PlaylistProxyModel(QSortFilterProxyModel):
-    def __init__(self, source_model: QStandardItemModel, *, is_main_view: bool, folders_only: bool):
+    def __init__(self, source_model: QStandardItemModel, sort_role: int, sort_order: Qt.SortOrder, *, is_main_view: bool, folders_only: bool):
         super().__init__()
         self.main_view = is_main_view
         self.folders_only = folders_only
@@ -155,8 +155,8 @@ class PlaylistProxyModel(QSortFilterProxyModel):
         self._source_model = source_model
 
         self.setSourceModel(self._source_model)
-        self.setSortRole(INITIAL_SORT_ROLE.value)
-        self.sort(0)
+        self.setSortRole(sort_role)
+        self.sort(0, sort_order)
         self.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
     @override
@@ -335,35 +335,39 @@ class PlaylistTreeWidget(QWidget):
         main_window: QMainWindow,
         signals: SharedSignals,
         *,
-        is_main_view: bool,
+        main_view: Optional["PlaylistTreeWidget"] = None,
         folders_only: bool = False,
-        model: QStandardItemModel | None = None,
-        flattened_model: QStandardItemModel | None = None,
     ):
         super().__init__(parent)
         self.setObjectName("PlaylistTreeWidget")
-        self.is_main_view = is_main_view
         self.signals = signals
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, on=True)
         self.setMaximumWidth(MAX_SIDE_BAR_WIDTH)
 
-        if self.is_main_view:
-            self.model_: QStandardItemModel = QStandardItemModel()
+        self.model_: QStandardItemModel
+        self.flattened_model_: QStandardItemModel
+        if main_view is None:
+            self.is_main_view = True
+            self.model_ = QStandardItemModel()
             self.model_.layoutChanged.connect(self._update_flattened_model)  # TODO NECESSARY?
             self.model_.rowsRemoved.connect(self._update_flattened_model)
             self.model_.dataChanged.connect(self.update_playlist)
-            self.flattened_model_: QStandardItemModel = QStandardItemModel()
+            self.flattened_model_  = QStandardItemModel()
             self.flattened_model_.dataChanged.connect(self.update_playlist)
             self._initialize_model()
+            user_startup_config = get_user_startup_config(USER_ID)
+            sort_role = user_startup_config.sort_role.value
+            sort_order = user_startup_config.sort_order
         else:
-            assert model
-            assert flattened_model
-            self.model_ = model
-            self.flattened_model_ = flattened_model
+            self.is_main_view = False
+            self.model_ = main_view.model_
+            self.flattened_model_ = main_view.flattened_model_
+            sort_role = main_view.proxy_model.sortRole()
+            sort_order = main_view.proxy_model.sortOrder()
 
-        self.proxy_model = PlaylistProxyModel(self.model_, is_main_view=is_main_view, folders_only=folders_only)
-        self.tree_view = PlaylistTree(self.proxy_model, self.signals, is_main_view=is_main_view)
+        self.proxy_model = PlaylistProxyModel(self.model_, sort_role, sort_order, is_main_view=self.is_main_view, folders_only=folders_only)
+        self.tree_view = PlaylistTree(self.proxy_model, self.signals, is_main_view=self.is_main_view)
 
         header_widget = QWidget()
         header_widget.setObjectName("PlaylistTreeHeader")
@@ -504,6 +508,7 @@ class PlaylistTreeWidget(QWidget):
 
         self.update_sort_button()
         self.sort_menu.update_active_action()
+        update_user_session_tree_sort_role_order(USER_ID, sort_role, order)
 
     def source_model(self):
         return self.proxy_model.sourceModel()
@@ -651,10 +656,8 @@ class MoveToFolderMenu(QMenu):
             self,
             parent,
             self.signals,
-            is_main_view=False,
-            folders_only=True,
-            model=main_playlist_view.model_,
-            flattened_model=main_playlist_view.flattened_model_,
+            main_view=main_playlist_view,
+            folders_only=True
         )
         self.playlist_tree_widget.tree_view.clicked.connect(partial(self.adjust_root_index, source_index))
         widget_action = QWidgetAction(self)
@@ -698,9 +701,7 @@ class AddToPlaylistMenu(QMenu):
             self,
             parent,
             self.signals,
-            is_main_view=False,
-            model=main_playlist_view.model_,
-            flattened_model=main_playlist_view.flattened_model_,
+            main_view=main_playlist_view
         )
         self.playlist_tree_widget.tree_view.clicked.connect(
             partial(self.add_items_to_playlist_at_index, selected_music_ids)

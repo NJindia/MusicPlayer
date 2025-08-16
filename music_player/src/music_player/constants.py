@@ -29,3 +29,5 @@ MAX_SIDE_BAR_WIDTH = 450
 MUSIC_IDS_MIMETYPE = "application/x-music-ids"
 
 MIN_DATETIME = datetime(1970, 1, 1, tzinfo=UTC)
+
+USER_ID = 1

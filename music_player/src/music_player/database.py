@@ -32,23 +32,20 @@ CREATE TABLE artists (
 CREATE TABLE music (
 	music_id SERIAL PRIMARY KEY,
     music_name VARCHAR(255) NOT NULL,
-    album_id INT NOT NULL,
+    album_id INT NOT NULL REFERENCES albums,
     lyrics_by_timestamp JSONB,
     release_date DATE NOT NULL,
     duration REAL NOT NULL,
     isrc VARCHAR(255) NOT NULL,
     file_path VARCHAR(255) NOT NULL,
     downloaded_on TIMESTAMPTZ NOT NULL,
-    FOREIGN KEY (album_id) REFERENCES albums(album_id)
 );
 
 CREATE TABLE music_artists (
-	music_id INT NOT NULL,
-    artist_id INT NOT NULL,
+	music_id INT NOT NULL REFERENCES music,
+    artist_id INT NOT NULL REFERENCES artists,
     sort_order INT NOT NULL,
     PRIMARY KEY (music_id, artist_id),
-    FOREIGN KEY (music_id) REFERENCES music(music_id),
-	FOREIGN KEY (artist_id) REFERENCES artists(artist_id)
 );
 
 DROP MATERIALIZED VIEW IF EXISTS library_music_view;
@@ -85,13 +82,11 @@ CREATE TABLE collections (
 );
 
 CREATE TABLE collection_children (
-    collection_id INT NOT NULL,
-    music_id INT NOT NULL,
+    collection_id INT NOT NULL REFERENCES collections ON DELETE CASCADE,
+    music_id INT NOT NULL REFERENCES music,
     added_on TIMESTAMPTZ NOT NULL,
     sort_order SERIAL,
-    PRIMARY KEY (collection_id, music_id),
-    FOREIGN KEY (collection_id) REFERENCES collections(collection_id) ON DELETE CASCADE,
-    FOREIGN KEY (music_id) REFERENCES music(music_id)
+    PRIMARY KEY (collection_id, music_id)
 );
 
 DROP MATERIALIZED VIEW IF EXISTS music_view;
@@ -100,6 +95,19 @@ SELECT lmv.*, a.artist_id, a.artist_name, ma.sort_order AS artist_order FROM lib
 JOIN music_artists ma USING (music_id)
 JOIN artists AS a USING (artist_id);
 REFRESH MATERIALIZED VIEW music_view;
+
+DROP TABLE IF EXISTS users, user_session_config;
+CREATE TABLE users (
+    user_id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL
+);
+
+CREATE TABLE user_session_config (
+    user_id INT NOT NULL PRIMARY KEY REFERENCES users,
+    playlist_tree_sort_role INT,
+    playlist_tree_sort_order INT,
+    library_collection_id INT REFERENCES collections(collection_id)
+);
 """
 
 INSERT_ALBUM_SQL = "INSERT INTO albums (album_name, release_date) VALUES (%s, %s) RETURNING album_id, img_path;"
