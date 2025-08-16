@@ -591,6 +591,9 @@ class _DbStoredCollectionCache:
     def delete_collection(self, collection_id: int) -> None:
         del self._collection_by_id[collection_id]
 
+    def add_collection(self, collection: DbStoredCollection) -> None:
+        self._collection_by_id[collection.id] = collection
+
 
 @cache
 def get_db_stored_collection_cache() -> _DbStoredCollectionCache:

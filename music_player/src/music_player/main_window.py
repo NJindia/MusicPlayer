@@ -271,7 +271,7 @@ class MainWindow(QMainWindow):
             _album_img_path_counter=Counter(),
         )
         collection.save()
-        get_db_stored_collection_cache()._collection_by_id[collection.id] = collection
+        get_db_stored_collection_cache().add_collection(collection)
         item = TreeModelItem(collection.id)
         default_model_root_item.appendRow(item)  # pyright: ignore[reportUnknownMemberType]
 
