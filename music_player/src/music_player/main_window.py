@@ -2,12 +2,12 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from functools import partial
-from typing import cast
+from typing import cast, override
 
 import numpy as np
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import QModelIndex, QPoint, Qt, QThread, Slot
-from PySide6.QtGui import QAction, QStandardItem
+from PySide6.QtGui import QAction, QCloseEvent, QStandardItem
 from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QMenu, QTabWidget, QVBoxLayout, QWidget
 
 from music_player.common_gui import (
@@ -36,6 +36,7 @@ from music_player.queue_gui import HistoryGraphicsView, QueueEntryGraphicsItem, 
 from music_player.signals import SharedSignals
 from music_player.stylesheet import stylesheet
 from music_player.toolbar import MediaToolbar
+from music_player.user import get_user_config
 from music_player.view_types import CollectionTreeSortRole
 from music_player.vlc_core import VLCCore
 
@@ -109,6 +110,11 @@ class MainWindow(QMainWindow):
         self.shared_signals.play_from_queue_signal.connect(self.play_from_queue)
         self.shared_signals.delete_collection_signal.connect(self.delete_collection)
 
+    @override
+    def closeEvent(self, event: QCloseEvent) -> None:
+        get_user_config().upload_to_db()
+        super().closeEvent(event)
+
     def _media_player_playing_ui(self):
         self.toolbar.play_pause_button.setIcon(get_pause_button_icon())
         if self.media_changed:
@@ -166,11 +172,7 @@ class MainWindow(QMainWindow):
                 last_queue_music_played = self.queue.queue_entries[self.queue.current_queue_idx].music
 
                 # Replace any music/media that was added manually with the original lists
-                music_ids = get_music_ids(
-                    self.core.current_collection,
-                    self.playlist_view.proxy_model.sort_role(),
-                    self.playlist_view.proxy_model.sortOrder(),
-                )
+                music_ids = get_music_ids(self.core.current_collection)
                 self.queue.load_music_ids(music_ids, music_ids.index(last_queue_music_played.id))
         self.queue.update_first_queue_index()
 
@@ -208,14 +210,12 @@ class MainWindow(QMainWindow):
     @Slot()
     def play_collection(self, collection: DbCollection, collection_index: int):
         self.core.current_collection = collection
-        collection_music_ids = get_music_ids(
-            collection, self.playlist_view.proxy_model.sort_role(), self.playlist_view.proxy_model.sortOrder()
-        )
+        collection_music_ids = get_music_ids(collection)
         if not collection_music_ids:
             return
         tree_sort_role = self.playlist_view.proxy_model.sort_role()
         if isinstance(collection, DbStoredCollection):
-            collection.mark_as_played(tree_sort_role, self.playlist_view.proxy_model.sortOrder())
+            collection.mark_as_played()
 
         if tree_sort_role == CollectionTreeSortRole.PLAYED:
             self.playlist_view.proxy_model.invalidate()
@@ -469,9 +469,7 @@ class MainWindow(QMainWindow):
         playlist_tree_source_index: QModelIndex | None = None,
     ):
         """Add the base context menu actions for a playlist."""
-        collection_music_ids = get_music_ids(
-            collection, self.playlist_view.proxy_model.sort_role(), self.playlist_view.proxy_model.sortOrder()
-        )
+        collection_music_ids = get_music_ids(collection)
         if collection_music_ids:
             menu.addAction(AddToQueueAction(collection_music_ids, self.shared_signals, menu))
             menu.addSeparator()

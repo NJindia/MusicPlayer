@@ -52,7 +52,6 @@ from music_player.constants import (
     MUSIC_IDS_MIMETYPE,
     PLAYLIST_HEADER_FONT_SIZE,
     PLAYLIST_HEADER_PADDING,
-    USER_ID,
 )
 from music_player.db_types import (
     DbStoredCollection,
@@ -62,7 +61,7 @@ from music_player.db_types import (
     get_recursive_parents,
 )
 from music_player.signals import SharedSignals
-from music_player.user import get_user_startup_config, update_user_session_tree_sort_role_order
+from music_player.user import get_user_config
 from music_player.utils import get_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
 from music_player.view_types import CollectionTreeSortRole, PlaylistTreeView
 
@@ -150,8 +149,6 @@ class PlaylistProxyModel(QSortFilterProxyModel):
     def __init__(
         self,
         source_model: QStandardItemModel,
-        sort_role: int,
-        sort_order: Qt.SortOrder,
         *,
         is_main_view: bool,
         folders_only: bool,
@@ -163,8 +160,9 @@ class PlaylistProxyModel(QSortFilterProxyModel):
         self._source_model = source_model
 
         self.setSourceModel(self._source_model)
-        self.setSortRole(sort_role)
-        self.sort(0, sort_order)
+        user_config = get_user_config()
+        self.setSortRole(user_config.tree_sort_role.value)
+        self.sort(0, user_config.tree_sort_order)
         self.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
     @override
@@ -193,7 +191,7 @@ class PlaylistProxyModel(QSortFilterProxyModel):
         mime_data = QMimeData()
         mime_data.setData(
             MUSIC_IDS_MIMETYPE,
-            music_ids_to_qbytearray(get_music_ids(collection, self.sort_role(), self.sortOrder())),
+            music_ids_to_qbytearray(get_music_ids(collection)),
         )
         return mime_data
 
@@ -364,19 +362,12 @@ class PlaylistTreeWidget(QWidget):
             self.flattened_model_ = QStandardItemModel()
             self.flattened_model_.dataChanged.connect(self.update_playlist)
             self._initialize_model()
-            user_startup_config = get_user_startup_config()
-            sort_role = user_startup_config.sort_role.value
-            sort_order = user_startup_config.sort_order
         else:
             self.is_main_view = False
             self.model_ = main_view.model_
             self.flattened_model_ = main_view.flattened_model_
-            sort_role = main_view.proxy_model.sortRole()
-            sort_order = main_view.proxy_model.sortOrder()
 
-        self.proxy_model = PlaylistProxyModel(
-            self.model_, sort_role, sort_order, is_main_view=self.is_main_view, folders_only=folders_only
-        )
+        self.proxy_model = PlaylistProxyModel(self.model_, is_main_view=self.is_main_view, folders_only=folders_only)
         self.tree_view = PlaylistTree(self.proxy_model, self.signals, is_main_view=self.is_main_view)
 
         header_widget = QWidget()
@@ -518,7 +509,9 @@ class PlaylistTreeWidget(QWidget):
 
         self.update_sort_button()
         self.sort_menu.update_active_action()
-        update_user_session_tree_sort_role_order(USER_ID, sort_role, order)
+        user_config = get_user_config()
+        user_config.tree_sort_role = sort_role
+        user_config.tree_sort_order = order
 
     def source_model(self):
         return self.proxy_model.sourceModel()

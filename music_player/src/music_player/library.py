@@ -59,15 +59,11 @@ from music_player.common_gui import (
     paint_artists,
     text_is_buffer,
 )
-from music_player.constants import MUSIC_IDS_MIMETYPE, USER_ID
+from music_player.constants import MUSIC_IDS_MIMETYPE
 from music_player.database import PATH_TO_IMGS, get_database_manager
 from music_player.db_types import DbAlbum, DbArtist, DbCollection, DbStoredCollection
 from music_player.signals import SharedSignals
-from music_player.user import (
-    get_user_startup_config,
-    update_user_session_library_collection_id,
-    update_user_session_library_sort_column_order,
-)
+from music_player.user import get_user_config
 from music_player.utils import (
     datetime_to_age_string,
     datetime_to_date_str,
@@ -224,8 +220,7 @@ class MusicTableModel(QSqlQueryModel):
             return super().data(self.index(index.row(), self.music_id_field_idx))
 
         if role == LibraryTableView.sort_order_role:
-            res = super().data(self.index(index.row(), db_field_idx), Qt.ItemDataRole.DisplayRole)
-            return res
+            return super().data(self.index(index.row(), db_field_idx), Qt.ItemDataRole.DisplayRole)
 
         if role in {Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole}:
             res = super().data(self.index(index.row(), db_field_idx), role)
@@ -306,7 +301,7 @@ class MusicProxyModel(QSortFilterProxyModel):
     def __init__(self):
         super().__init__()
         self.setSortRole(LibraryTableView.sort_order_role)
-        user_startup_config = get_user_startup_config()
+        user_startup_config = get_user_config()
         self.sort(user_startup_config.library_sort_column, user_startup_config.library_sort_order)
 
     @override
@@ -328,8 +323,10 @@ class MusicProxyModel(QSortFilterProxyModel):
 
     @override
     def sort(self, column: int, /, order: Qt.SortOrder = Qt.SortOrder.DescendingOrder):
+        user_config = get_user_config()
+        user_config.library_sort_column = column
+        user_config.library_sort_order = order
         super().sort(column, order)
-        update_user_session_library_sort_column_order(USER_ID, column, order)
 
     @classmethod
     def clean_text(cls, text: str):
@@ -364,6 +361,10 @@ class PlaylistProxyModel(QSortFilterProxyModel):
     @override
     def sourceModel(self, /) -> MusicProxyModel:
         return cast(MusicProxyModel, super().sourceModel())
+
+    @override
+    def sort(self, column: int, /, order: Qt.SortOrder = Qt.SortOrder.DescendingOrder):
+        self.sourceModel().sort(column, order)
 
     def set_music_ids(self, music_ids: tuple[int, ...]):
         if music_ids != self._music_ids:
@@ -536,7 +537,7 @@ class MusicLibraryWidget(QWidget):
         self.header_widget.play_pause_button.clicked.connect(self.play_button_clicked)
 
         self.collection: DbCollection | None = None
-        self.load_playlist(DbStoredCollection.from_db(get_user_startup_config().library_collection_id))
+        self.load_playlist(DbStoredCollection.from_db(get_user_config().library_collection_id))
 
         layout = QVBoxLayout()
         layout.addWidget(self.header_widget)
@@ -613,9 +614,7 @@ class MusicLibraryWidget(QWidget):
         else:
             meta_text = ""
         self.header_widget.header_label_meta.setText(meta_text)
-        t = datetime.now(tz=UTC)
-        update_user_session_library_collection_id(USER_ID, 1 if new_collection is None else new_collection.id)
-        print(f"update: {(datetime.now(tz=UTC) - t).microseconds / 1000}")
+        get_user_config().library_collection_id = 1 if new_collection is None else new_collection.id
 
     def load_nothing(self):
         self._load(
@@ -681,7 +680,7 @@ class TableHeader(QHeaderView):
         self.setObjectName("LibraryTableHeader")
         self.setSortIndicatorClearable(True)
         self.setSortIndicatorShown(True)
-        user_startup_config = get_user_startup_config()
+        user_startup_config = get_user_config()
         self.setSortIndicator(user_startup_config.library_sort_column, user_startup_config.library_sort_order)
         self.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.setMinimumSectionSize(self.minimum_section_size)
