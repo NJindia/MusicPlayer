@@ -171,8 +171,6 @@ class SongItemDelegate(QStyledItemDelegate):
 
 
 class MusicTableModel(QSqlQueryModel):
-    re_pattern = re.compile(r"[\W_]+")
-
     def __init__(self, parent: "MusicLibraryTable"):
         super().__init__(parent)
         get_database_manager().get_qt_connection()
@@ -187,8 +185,17 @@ class MusicTableModel(QSqlQueryModel):
         self.duration_field_idx = self.record().indexOf("duration")
         self.album_img_path_field_idx = self.record().indexOf("img_path")
         self.sort_order_field_idx = self.record().indexOf("sort_order")
+        self.date_added_field_idx = self.record().indexOf("downloaded_on")
 
-        self.sort_order_by_music_id = {
+        self.field_idx_by_col_idx = {
+            0: self.music_name_field_idx,
+            1: self.artist_names_field_idx,
+            2: self.album_name_field_idx,
+            3: self.date_added_field_idx,  # TODO
+            4: self.duration_field_idx,
+        }
+
+        self.custom_sort_order_by_music_id = {
             super().data(self.index(i, self.music_id_field_idx)): super().data(self.index(i, self.sort_order_field_idx))
             for i in range(self.rowCount())
         }
@@ -207,37 +214,40 @@ class MusicTableModel(QSqlQueryModel):
         """Returns data for given index."""
         if not index.isValid():
             return None
+        if role == Qt.ItemDataRole.TextAlignmentRole:
+            return Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
 
-        column_name, db_field = COLUMN_MAP_BY_IDX.get(index.column(), (None, None))
-        if not column_name or not db_field:
+        if not (db_field_idx := self.field_idx_by_col_idx.get(index.column())):
             return None
 
         if role == LibraryTableView.music_id_role:
             return super().data(self.index(index.row(), self.music_id_field_idx))
 
         if role == LibraryTableView.sort_order_role:
-            return self.sort_order_by_music_id[super().data(self.index(index.row(), self.music_id_field_idx))]
+            res = super().data(self.index(index.row(), db_field_idx), Qt.ItemDataRole.DisplayRole)
+            return res
 
         if role in {Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole}:
-            res = super().data(self.index(index.row(), self.record().indexOf(db_field)), role)
-            if column_name == "Artists":
-                return pg_array_agg_to_list(res)
-            if column_name == "Date Added":
-                return datetime_to_age_string(datetime.fromtimestamp(res.toSecsSinceEpoch(), tz=UTC))
-            if column_name == "Duration":
-                return timestamp_to_str(res)
-            return str(res)
-        if role == Qt.ItemDataRole.TextAlignmentRole:
-            return Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+            res = super().data(self.index(index.row(), db_field_idx), role)
+            match db_field_idx:
+                case self.artist_names_field_idx:
+                    return pg_array_agg_to_list(res)
+                case self.date_added_field_idx:
+                    return datetime_to_age_string(datetime.fromtimestamp(res.toSecsSinceEpoch(), tz=UTC))
+                case self.duration_field_idx:
+                    return timestamp_to_str(res)
+                case _:
+                    return str(res)
+
         if role == Qt.ItemDataRole.ToolTipRole:
-            data = super().data(self.index(index.row(), self.record().indexOf(db_field)), Qt.ItemDataRole.DisplayRole)
-            if column_name == "Date Added":
+            data = super().data(self.index(index.row(), db_field_idx), Qt.ItemDataRole.DisplayRole)
+            if db_field_idx == self.date_added_field_idx:
                 return datetime_to_date_str(datetime.fromtimestamp(data.toSecsSinceEpoch(), tz=UTC))
-            text = ", ".join(pg_array_agg_to_list(data)) if column_name == "Artists" else data
+            text = ", ".join(pg_array_agg_to_list(data)) if db_field_idx == self.artist_names_field_idx else data
             column_width = self.view.columnWidth(index.column()) - (ROW_HEIGHT if index.column() == 0 else PADDING * 2)
             if self.view.fontMetrics().horizontalAdvance(text) > column_width:
                 return text
-        if role == Qt.ItemDataRole.DecorationRole and column_name == "Title":
+        if role == Qt.ItemDataRole.DecorationRole and db_field_idx == self.music_name_field_idx:
             img_path = super().data(self.index(index.row(), self.album_img_path_field_idx))
             if img_path:
                 return get_pixmap(PATH_TO_IMGS / img_path, ICON_SIZE)
@@ -290,29 +300,52 @@ class MusicTableModel(QSqlQueryModel):
         return sum([super().data(self.index(row, self.duration_field_idx)) for row in range(self.rowCount())])
 
 
-class LibraryProxyModel(QSortFilterProxyModel):
+class MusicProxyModel(QSortFilterProxyModel):
+    re_pattern = re.compile(r"[\W_]+")
+
     def __init__(self):
         super().__init__()
-        self._music_ids: tuple[int, ...] = ()
         self.setSortRole(LibraryTableView.sort_order_role)
         user_startup_config = get_user_startup_config()
         self.sort(user_startup_config.library_sort_column, user_startup_config.library_sort_order)
-
-    @override
-    def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
-        return 5
-
-    @override
-    def rowCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
-        return len(self._music_ids)
 
     @override
     def sourceModel(self, /) -> MusicTableModel:
         return cast(MusicTableModel, super().sourceModel())
 
     @override
+    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex, /):
+        if not self.filterRegularExpression().pattern():
+            return True
+
+        match_string = "\x00".join(
+            [
+                self.clean_text(self.sourceModel().index(source_row, ColIndex.MUSIC_NAME.value).data()),
+                self.clean_text(self.sourceModel().index(source_row, ColIndex.ALBUM_NAME.value).data()),
+            ]
+        )
+        return self.filterRegularExpression().match(match_string).hasMatch()
+
+    @override
+    def sort(self, column: int, /, order: Qt.SortOrder = Qt.SortOrder.DescendingOrder):
+        super().sort(column, order)
+        update_user_session_library_sort_column_order(USER_ID, column, order)
+
+    @classmethod
+    def clean_text(cls, text: str):
+        return re.sub(cls.re_pattern, "", text).lower()
+
+
+class PlaylistProxyModel(QSortFilterProxyModel):
+    def __init__(self, source_model: MusicTableModel):
+        super().__init__()
+        self._music_ids: tuple[int, ...] = ()
+        proxy_model = MusicProxyModel()
+        proxy_model.setSourceModel(source_model)
+        self.setSourceModel(proxy_model)
+
+    @override
     def invalidateFilter(self, /):
-        self.layoutAboutToBeChanged.emit()
         super().invalidateFilter()
         self.layoutChanged.emit()
 
@@ -325,9 +358,12 @@ class LibraryProxyModel(QSortFilterProxyModel):
         return data in self._music_ids
 
     @override
-    def sort(self, column: int, /, order: Qt.SortOrder = Qt.SortOrder.DescendingOrder):
-        super().sort(column, order)
-        update_user_session_library_sort_column_order(USER_ID, column, order)
+    def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
+        return 5
+
+    @override
+    def sourceModel(self, /) -> MusicProxyModel:
+        return cast(MusicProxyModel, super().sourceModel())
 
     def set_music_ids(self, music_ids: tuple[int, ...]):
         if music_ids != self._music_ids:
@@ -336,7 +372,7 @@ class LibraryProxyModel(QSortFilterProxyModel):
 
     def get_music_id(self, row: int):
         source_model_index = self.mapToSource(self.index(row, 0))
-        return self.sourceModel().get_music_id(source_model_index.row())
+        return self.sourceModel().sourceModel().get_music_id(source_model_index.row())
 
 
 class ElidedTextLabel(QLabel):
@@ -424,7 +460,7 @@ class LibraryHeaderWidget(QWidget):
 
     def __init__(self, shared_signals: SharedSignals, library: "MusicLibraryWidget"):
         super().__init__()
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
         self.header_img = QLabel()
@@ -521,30 +557,9 @@ class MusicLibraryWidget(QWidget):
     def play_library(self) -> None:
         self.table_view.song_clicked.emit(0)
 
-    @Slot()
+    @Slot(str)
     def filter(self, text: str):
-        model = self.table_view.model_
-
-        def clean_text(_text: str):
-            return re.sub(model.re_pattern, "", _text).lower()
-
-        cleaned_text = clean_text(text)
-        good_rows: list[int] = []
-        bad_rows: list[int] = []
-        for row in range(model.rowCount()):
-            if (
-                cleaned_text in clean_text(model.data(model.index(row, ColIndex.MUSIC_NAME.value)))  # Title
-                or cleaned_text in clean_text(model.data(model.index(row, ColIndex.ALBUM_NAME.value)))  # Album
-            ):
-                good_rows.append(row)
-                continue
-            bad_rows.append(row)
-        for row in bad_rows:
-            if not self.table_view.isRowHidden(row):
-                self.table_view.hideRow(row)
-        for row in good_rows:
-            if self.table_view.isRowHidden(row):
-                self.table_view.showRow(row)
+        self.table_view.model().sourceModel().setFilterWildcard(f"*{MusicProxyModel.clean_text(text)}*")
         self.table_view.adjust_height_to_content()
 
     @profile
@@ -558,7 +573,6 @@ class MusicLibraryWidget(QWidget):
         header_label_subtitle: str | None,
         show_date_added_col: bool | None,
         no_meta: bool = False,
-        sort_orders: list[int] | None = None,
     ):
         self.header_widget.header_img.setPixmap(img_pixmap)
         self.header_widget.header_label_type.setText(header_label_type)
@@ -588,12 +602,10 @@ class MusicLibraryWidget(QWidget):
 
         model = self.table_view.model()
         music_ids = () if new_collection is None else new_collection.music_ids
+        t = datetime.now(tz=UTC)
         model.set_music_ids(music_ids)
-        if sort_orders is not None:
-            self.table_view.model_.sort_order_by_music_id = dict(zip(music_ids, sort_orders, strict=True))
-            assert len(sort_orders) == self.table_view.model().rowCount()
-            print("LOAD")
-            model.invalidate()
+        print(f"set: {(datetime.now(tz=UTC) - t).microseconds / 1000}")
+        assert len(music_ids) == self.table_view.model().rowCount()
         if not no_meta:
             num_tracks = model.rowCount()
             total_timestamp = self.table_view.model_.get_total_timestamp()  # TODO FIX THIS TO MODEL()
@@ -601,7 +613,9 @@ class MusicLibraryWidget(QWidget):
         else:
             meta_text = ""
         self.header_widget.header_label_meta.setText(meta_text)
+        t = datetime.now(tz=UTC)
         update_user_session_library_collection_id(USER_ID, 1 if new_collection is None else new_collection.id)
+        print(f"update: {(datetime.now(tz=UTC) - t).microseconds / 1000}")
 
     def load_nothing(self):
         self._load(
@@ -626,7 +640,6 @@ class MusicLibraryWidget(QWidget):
             header_label_title=playlist.name,
             header_label_subtitle=None,
             show_date_added_col=True,
-            sort_orders=playlist.sort_order,
         )
         print("LOAD END", (datetime.now(tz=UTC) - t).microseconds / 1000)
 
@@ -737,7 +750,7 @@ class MusicLibraryTable(LibraryTableView):
         self.setObjectName("LibraryTableView")
         self._signals = shared_signals
 
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setShowGrid(False)
         self.setMouseTracking(True)
         self.setWordWrap(False)
@@ -769,9 +782,7 @@ class MusicLibraryTable(LibraryTableView):
         self.setItemDelegateForColumn(2, self.album_delegate)
 
         self.model_ = MusicTableModel(self)
-        proxy_model = LibraryProxyModel()
-        proxy_model.setSourceModel(self.model_)
-        self.setModel(proxy_model)
+        self.setModel(PlaylistProxyModel(self.model_))
         self.model().layoutChanged.connect(self.adjust_height_to_content)
 
         self.horizontalHeader().setSectionResizeMode(ColIndex.DATE_ADDED.value, QHeaderView.ResizeMode.Fixed)
@@ -886,8 +897,8 @@ class MusicLibraryTable(LibraryTableView):
         return super().eventFilter(obj, event)
 
     @override
-    def model(self, /) -> LibraryProxyModel:
-        return cast(LibraryProxyModel, super().model())
+    def model(self, /) -> PlaylistProxyModel:
+        return cast(PlaylistProxyModel, super().model())
 
     def get_text_rect_tups_for_index(self, index: QModelIndex | QPersistentModelIndex) -> list[tuple[QRect, str, str]]:
         column = index.column()

@@ -208,7 +208,7 @@ class DbStoredCollection(DbCollection):
         )
 
     @property
-    def sort_order(self) -> list[int]:
+    def custom_sort_order(self) -> list[int]:
         return list(range(len(self._music_ids)))
 
     @property
