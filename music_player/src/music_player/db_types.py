@@ -162,10 +162,12 @@ UPDATE collections SET last_played = %s
 WHERE collection_id = %s OR collection_id IN (SELECT collection_id FROM hierarchy)"""
 
 
-def get_folder_music_ids(folder_id: int, sort_role: CollectionTreeSortRole | None) -> tuple[int, ...]:
+def get_folder_music_ids(
+    folder_id: int, sort_role_order: tuple[CollectionTreeSortRole, Qt.SortOrder] | None
+) -> tuple[int, ...]:
     return tuple(
         m_id
-        for collection in get_recursive_children(folder_id, get_folders=False, sort_role=sort_role)
+        for collection in get_recursive_children(folder_id, get_folders=False, sort_role_order=sort_role_order)
         for m_id in collection.music_ids
     )
 
@@ -495,15 +497,22 @@ def get_recursive_children(
     collections_by_parent_id: dict[int, list[DbStoredCollection]] | None = None,
     *,
     get_folders: bool = True,
-    sort_role: CollectionTreeSortRole | None = None,
+    sort_role_order: tuple[CollectionTreeSortRole, Qt.SortOrder] | None = None,
 ) -> Iterator[DbStoredCollection]:
     collections_by_parent_id = (
         get_collections_by_parent_id() if collections_by_parent_id is None else collections_by_parent_id
     )
     child_collections = collections_by_parent_id.get(parent_id, [])
-    for child_collection in (
-        sorted(child_collections, key=lambda c: c.get_sort_value(sort_role)) if sort_role else child_collections
-    ):
+    child_collections = (
+        sorted(
+            child_collections,
+            key=lambda c: c.get_sort_value(sort_role_order[0]),
+            reverse=bool(sort_role_order[1].value),
+        )
+        if sort_role_order
+        else child_collections
+    )
+    for child_collection in child_collections:
         if not child_collection.is_folder or get_folders:
             yield child_collection
         if child_collection.is_folder:
@@ -600,9 +609,11 @@ def get_db_stored_collection_cache() -> _DbStoredCollectionCache:
     return _DbStoredCollectionCache()
 
 
-def get_music_ids(collection: DbCollection, sort_role: CollectionTreeSortRole) -> tuple[int, ...]:
+def get_music_ids(
+    collection: DbCollection, sort_role: CollectionTreeSortRole, sort_order: Qt.SortOrder
+) -> tuple[int, ...]:
     return (
-        get_folder_music_ids(collection.id, sort_role)
+        get_folder_music_ids(collection.id, (sort_role, sort_order))
         if collection.collection_type == "folder"
         else collection.music_ids
     )

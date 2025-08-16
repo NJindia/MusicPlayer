@@ -1,8 +1,7 @@
 from collections.abc import Iterator, Sequence
-from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import cast, override, Optional
+from typing import Optional, cast, override
 
 from line_profiler_pycharm import profile  # pyright: ignore[reportMissingTypeStubs, reportUnknownVariableType]
 from PySide6.QtCore import (
@@ -52,7 +51,8 @@ from music_player.constants import (
     MAX_SIDE_BAR_WIDTH,
     MUSIC_IDS_MIMETYPE,
     PLAYLIST_HEADER_FONT_SIZE,
-    PLAYLIST_HEADER_PADDING, USER_ID,
+    PLAYLIST_HEADER_PADDING,
+    USER_ID,
 )
 from music_player.db_types import (
     DbStoredCollection,
@@ -62,8 +62,7 @@ from music_player.db_types import (
     get_recursive_parents,
 )
 from music_player.signals import SharedSignals
-from music_player.user import get_user_session_tree_sort_role_order_tup, update_user_session_tree_sort_role_order, \
-    UserStartupConfig, get_user_startup_config
+from music_player.user import get_user_startup_config, update_user_session_tree_sort_role_order
 from music_player.utils import get_pixmap, music_ids_to_qbytearray, qbytearray_to_music_ids
 from music_player.view_types import CollectionTreeSortRole, PlaylistTreeView
 
@@ -74,6 +73,7 @@ DEFAULT_SORT_ORDER_BY_SORT_ROLE: dict[CollectionTreeSortRole, Qt.SortOrder] = {
     CollectionTreeSortRole.PLAYED: Qt.SortOrder.DescendingOrder,
     CollectionTreeSortRole.ALPHABETICAL: Qt.SortOrder.AscendingOrder,
 }
+
 
 class TreeItemDelegate(QStyledItemDelegate):
     @override
@@ -147,7 +147,15 @@ def _recursive_traverse(parent_item: QStandardItem, *, get_non_leaf: bool) -> It
 
 
 class PlaylistProxyModel(QSortFilterProxyModel):
-    def __init__(self, source_model: QStandardItemModel, sort_role: int, sort_order: Qt.SortOrder, *, is_main_view: bool, folders_only: bool):
+    def __init__(
+        self,
+        source_model: QStandardItemModel,
+        sort_role: int,
+        sort_order: Qt.SortOrder,
+        *,
+        is_main_view: bool,
+        folders_only: bool,
+    ):
         super().__init__()
         self.main_view = is_main_view
         self.folders_only = folders_only
@@ -185,7 +193,7 @@ class PlaylistProxyModel(QSortFilterProxyModel):
         mime_data = QMimeData()
         mime_data.setData(
             MUSIC_IDS_MIMETYPE,
-            music_ids_to_qbytearray(get_music_ids(collection, self.sort_role())),
+            music_ids_to_qbytearray(get_music_ids(collection, self.sort_role(), self.sortOrder())),
         )
         return mime_data
 
@@ -353,7 +361,7 @@ class PlaylistTreeWidget(QWidget):
             self.model_.layoutChanged.connect(self._update_flattened_model)  # TODO NECESSARY?
             self.model_.rowsRemoved.connect(self._update_flattened_model)
             self.model_.dataChanged.connect(self.update_playlist)
-            self.flattened_model_  = QStandardItemModel()
+            self.flattened_model_ = QStandardItemModel()
             self.flattened_model_.dataChanged.connect(self.update_playlist)
             self._initialize_model()
             user_startup_config = get_user_startup_config(USER_ID)
@@ -366,7 +374,9 @@ class PlaylistTreeWidget(QWidget):
             sort_role = main_view.proxy_model.sortRole()
             sort_order = main_view.proxy_model.sortOrder()
 
-        self.proxy_model = PlaylistProxyModel(self.model_, sort_role, sort_order, is_main_view=self.is_main_view, folders_only=folders_only)
+        self.proxy_model = PlaylistProxyModel(
+            self.model_, sort_role, sort_order, is_main_view=self.is_main_view, folders_only=folders_only
+        )
         self.tree_view = PlaylistTree(self.proxy_model, self.signals, is_main_view=self.is_main_view)
 
         header_widget = QWidget()
@@ -653,11 +663,7 @@ class MoveToFolderMenu(QMenu):
         self.signals = shared_signals
 
         self.playlist_tree_widget = PlaylistTreeWidget(
-            self,
-            parent,
-            self.signals,
-            main_view=main_playlist_view,
-            folders_only=True
+            self, parent, self.signals, main_view=main_playlist_view, folders_only=True
         )
         self.playlist_tree_widget.tree_view.clicked.connect(partial(self.adjust_root_index, source_index))
         widget_action = QWidgetAction(self)
@@ -697,12 +703,7 @@ class AddToPlaylistMenu(QMenu):
         self.parent_menu = parent_menu
         self.signals = shared_signals
 
-        self.playlist_tree_widget = PlaylistTreeWidget(
-            self,
-            parent,
-            self.signals,
-            main_view=main_playlist_view
-        )
+        self.playlist_tree_widget = PlaylistTreeWidget(self, parent, self.signals, main_view=main_playlist_view)
         self.playlist_tree_widget.tree_view.clicked.connect(
             partial(self.add_items_to_playlist_at_index, selected_music_ids)
         )

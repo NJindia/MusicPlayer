@@ -166,7 +166,11 @@ class MainWindow(QMainWindow):
                 last_queue_music_played = self.queue.queue_entries[self.queue.current_queue_idx].music
 
                 # Replace any music/media that was added manually with the original lists
-                music_ids = get_music_ids(self.core.current_collection, self.playlist_view.proxy_model.sort_role())
+                music_ids = get_music_ids(
+                    self.core.current_collection,
+                    self.playlist_view.proxy_model.sort_role(),
+                    self.playlist_view.proxy_model.sortOrder(),
+                )
                 self.queue.load_music_ids(music_ids, music_ids.index(last_queue_music_played.id))
         self.queue.update_first_queue_index()
 
@@ -204,7 +208,9 @@ class MainWindow(QMainWindow):
     @Slot()
     def play_collection(self, collection: DbCollection, collection_index: int):
         self.core.current_collection = collection
-        collection_music_ids = get_music_ids(collection, self.playlist_view.proxy_model.sort_role())
+        collection_music_ids = get_music_ids(
+            collection, self.playlist_view.proxy_model.sort_role(), self.playlist_view.proxy_model.sortOrder()
+        )
         if not collection_music_ids:
             return
         if isinstance(collection, DbStoredCollection):
@@ -462,7 +468,9 @@ class MainWindow(QMainWindow):
         playlist_tree_source_index: QModelIndex | None = None,
     ):
         """Add the base context menu actions for a playlist."""
-        collection_music_ids = get_music_ids(collection, self.playlist_view.proxy_model.sort_role())
+        collection_music_ids = get_music_ids(
+            collection, self.playlist_view.proxy_model.sort_role(), self.playlist_view.proxy_model.sortOrder()
+        )
         if collection_music_ids:
             menu.addAction(AddToQueueAction(collection_music_ids, self.shared_signals, menu))
             menu.addSeparator()
