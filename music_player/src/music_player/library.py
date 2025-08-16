@@ -220,8 +220,8 @@ class MusicTableModel(QSqlQueryModel):
             return super().data(self.index(index.row(), self.music_id_field_idx))
 
         if role == LibraryTableView.sort_order_role:
-            return super().data(self.index(index.row(), db_field_idx), Qt.ItemDataRole.DisplayRole)
-
+            res = super().data(self.index(index.row(), db_field_idx), Qt.ItemDataRole.DisplayRole)
+            return res.lower() if isinstance(res, str) else res
         if role in {Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole}:
             res = super().data(self.index(index.row(), db_field_idx), role)
             match db_field_idx:
@@ -295,18 +295,52 @@ class MusicTableModel(QSqlQueryModel):
         return sum([super().data(self.index(row, self.duration_field_idx)) for row in range(self.rowCount())])
 
 
+class PlaylistProxyModel(QSortFilterProxyModel):
+    def __init__(self, source_model: MusicTableModel):
+        super().__init__()
+        self._music_ids: tuple[int, ...] = ()
+        self.setSourceModel(source_model)
+
+    @override
+    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex, /):
+        if not self._music_ids:
+            return False
+        data = self.sourceModel().index(source_row, 0, source_parent).data(LibraryTableView.music_id_role)
+        assert data
+        return data in self._music_ids
+
+    @override
+    def sourceModel(self, /) -> MusicTableModel:
+        return cast(MusicTableModel, super().sourceModel())
+
+    def set_music_ids(self, music_ids: tuple[int, ...]):
+        if music_ids != self._music_ids:
+            self._music_ids = music_ids
+            self.layoutAboutToBeChanged.emit()
+            self.invalidateFilter()
+            self.layoutChanged.emit()
+
+
 class MusicProxyModel(QSortFilterProxyModel):
     re_pattern = re.compile(r"[\W_]+")
 
-    def __init__(self):
+    def __init__(self, source_model: MusicTableModel):
         super().__init__()
+        self.setSourceModel(PlaylistProxyModel(source_model))
         self.setSortRole(LibraryTableView.sort_order_role)
         user_startup_config = get_user_config()
         self.sort(user_startup_config.library_sort_column, user_startup_config.library_sort_order)
 
     @override
-    def sourceModel(self, /) -> MusicTableModel:
-        return cast(MusicTableModel, super().sourceModel())
+    def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
+        return 5
+
+    @override
+    def sourceModel(self, /) -> PlaylistProxyModel:
+        return cast(PlaylistProxyModel, super().sourceModel())
+
+    def map_to_base_source(self, index: QModelIndex):
+        return self.sourceModel().mapToSource(self.mapToSource(index))
 
     @override
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex, /):
@@ -331,45 +365,6 @@ class MusicProxyModel(QSortFilterProxyModel):
     @classmethod
     def clean_text(cls, text: str):
         return re.sub(cls.re_pattern, "", text).lower()
-
-
-class PlaylistProxyModel(QSortFilterProxyModel):
-    def __init__(self, source_model: MusicTableModel):
-        super().__init__()
-        self._music_ids: tuple[int, ...] = ()
-        proxy_model = MusicProxyModel()
-        proxy_model.setSourceModel(source_model)
-        self.setSourceModel(proxy_model)
-
-    @override
-    def invalidateFilter(self, /):
-        super().invalidateFilter()
-        self.layoutChanged.emit()
-
-    @override
-    def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex | QPersistentModelIndex, /):
-        if not self._music_ids:
-            return False
-        data = self.sourceModel().index(source_row, 0, source_parent).data(LibraryTableView.music_id_role)
-        assert data
-        return data in self._music_ids
-
-    @override
-    def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
-        return 5
-
-    @override
-    def sourceModel(self, /) -> MusicProxyModel:
-        return cast(MusicProxyModel, super().sourceModel())
-
-    @override
-    def sort(self, column: int, /, order: Qt.SortOrder = Qt.SortOrder.DescendingOrder):
-        self.sourceModel().sort(column, order)
-
-    def set_music_ids(self, music_ids: tuple[int, ...]):
-        if music_ids != self._music_ids:
-            self._music_ids = music_ids
-            self.invalidateFilter()
 
     def get_music_id(self, row: int):
         source_model_index = self.mapToSource(self.index(row, 0))
@@ -560,7 +555,7 @@ class MusicLibraryWidget(QWidget):
 
     @Slot(str)
     def filter(self, text: str):
-        self.table_view.model().sourceModel().setFilterWildcard(f"*{MusicProxyModel.clean_text(text)}*")
+        self.table_view.model().setFilterWildcard(f"*{MusicProxyModel.clean_text(text)}*")
         self.table_view.adjust_height_to_content()
 
     @profile
@@ -604,7 +599,7 @@ class MusicLibraryWidget(QWidget):
         model = self.table_view.model()
         music_ids = () if new_collection is None else new_collection.music_ids
         t = datetime.now(tz=UTC)
-        model.set_music_ids(music_ids)
+        model.sourceModel().set_music_ids(music_ids)
         print(f"set: {(datetime.now(tz=UTC) - t).microseconds / 1000}")
         assert len(music_ids) == self.table_view.model().rowCount()
         if not no_meta:
@@ -781,7 +776,7 @@ class MusicLibraryTable(LibraryTableView):
         self.setItemDelegateForColumn(2, self.album_delegate)
 
         self.model_ = MusicTableModel(self)
-        self.setModel(PlaylistProxyModel(self.model_))
+        self.setModel(MusicProxyModel(self.model_))
         self.model().layoutChanged.connect(self.adjust_height_to_content)
 
         self.horizontalHeader().setSectionResizeMode(ColIndex.DATE_ADDED.value, QHeaderView.ResizeMode.Fixed)
@@ -842,7 +837,9 @@ class MusicLibraryTable(LibraryTableView):
         for rect, original_text, shown_text in self.get_text_rect_tups_for_index(proxy_index):
             if not text_is_buffer(shown_text) and rect.contains(pos):
                 self.hovered_text_rect = rect
-                self.hovered_data = self.model_.get_foreign_key(original_text, self.model().mapToSource(proxy_index))
+                self.hovered_data = self.model_.get_foreign_key(
+                    original_text, self.model().map_to_base_source(proxy_index)
+                )
                 self.setCursor(Qt.CursorShape.PointingHandCursor)
                 break
         else:
@@ -896,8 +893,8 @@ class MusicLibraryTable(LibraryTableView):
         return super().eventFilter(obj, event)
 
     @override
-    def model(self, /) -> PlaylistProxyModel:
-        return cast(PlaylistProxyModel, super().model())
+    def model(self, /) -> MusicProxyModel:
+        return cast(MusicProxyModel, super().model())
 
     def get_text_rect_tups_for_index(self, index: QModelIndex | QPersistentModelIndex) -> list[tuple[QRect, str, str]]:
         column = index.column()
