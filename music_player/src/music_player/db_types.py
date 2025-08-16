@@ -185,7 +185,7 @@ class DbStoredCollection(DbCollection):
     _pixmap_heights: set[int] = field(default_factory=set[int])
 
     @classmethod
-    def from_db(cls, db_id: int = 1) -> "DbStoredCollection":
+    def from_db(cls, db_id: int) -> "DbStoredCollection":
         row = get_database_manager().get_row_k(collection_query, collectionId=db_id)
         return cls.from_db_row(row)
 
@@ -270,7 +270,7 @@ class DbStoredCollection(DbCollection):
     def last_played(self, last_played: datetime) -> None:
         self._last_played = last_played
 
-    def mark_as_played(self):
+    def mark_as_played(self, sort_role: CollectionTreeSortRole, sort_order: Qt.SortOrder):
         """If is playlist, set parents' _last_played, but only update this playlist in the DB.
         If is folder, also set _last_played of children collections and update any playlists' last_played in the DB.
 
@@ -284,7 +284,7 @@ class DbStoredCollection(DbCollection):
         if self.is_folder:
             playlist_idx = 0
             update_ids = []
-            for child in get_recursive_children(self.id, sort_role=CollectionTreeSortRole.PLAYED):
+            for child in get_recursive_children(self.id, sort_role_order=(sort_role, sort_order)):
                 child.last_played = self._last_played + timedelta(microseconds=playlist_idx)
                 if not child.is_folder:
                     playlist_idx += 1

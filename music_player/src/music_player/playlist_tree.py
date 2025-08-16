@@ -364,7 +364,7 @@ class PlaylistTreeWidget(QWidget):
             self.flattened_model_ = QStandardItemModel()
             self.flattened_model_.dataChanged.connect(self.update_playlist)
             self._initialize_model()
-            user_startup_config = get_user_startup_config(USER_ID)
+            user_startup_config = get_user_startup_config()
             sort_role = user_startup_config.sort_role.value
             sort_order = user_startup_config.sort_order
         else:

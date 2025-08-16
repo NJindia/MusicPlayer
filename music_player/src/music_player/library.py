@@ -59,10 +59,15 @@ from music_player.common_gui import (
     paint_artists,
     text_is_buffer,
 )
-from music_player.constants import MUSIC_IDS_MIMETYPE
+from music_player.constants import MUSIC_IDS_MIMETYPE, USER_ID
 from music_player.database import PATH_TO_IMGS, get_database_manager
 from music_player.db_types import DbAlbum, DbArtist, DbCollection, DbStoredCollection
 from music_player.signals import SharedSignals
+from music_player.user import (
+    get_user_startup_config,
+    update_user_session_library_collection_id,
+    update_user_session_library_sort_column_order,
+)
 from music_player.utils import (
     datetime_to_age_string,
     datetime_to_date_str,
@@ -285,12 +290,13 @@ class MusicTableModel(QSqlQueryModel):
         return sum([super().data(self.index(row, self.duration_field_idx)) for row in range(self.rowCount())])
 
 
-class ProxyModel(QSortFilterProxyModel):
+class LibraryProxyModel(QSortFilterProxyModel):
     def __init__(self):
         super().__init__()
         self._music_ids: tuple[int, ...] = ()
         self.setSortRole(LibraryTableView.sort_order_role)
-        self.sort(0)
+        user_startup_config = get_user_startup_config()
+        self.sort(user_startup_config.library_sort_column, user_startup_config.library_sort_order)
 
     @override
     def columnCount(self, /, parent: QModelIndex | QPersistentModelIndex = QModelIndex()):  # pyright: ignore[reportCallInDefaultInitializer]  # noqa: B008
@@ -317,6 +323,11 @@ class ProxyModel(QSortFilterProxyModel):
         data = self.sourceModel().index(source_row, 0, source_parent).data(LibraryTableView.music_id_role)
         assert data
         return data in self._music_ids
+
+    @override
+    def sort(self, column: int, /, order: Qt.SortOrder = Qt.SortOrder.DescendingOrder):
+        super().sort(column, order)
+        update_user_session_library_sort_column_order(USER_ID, column, order)
 
     def set_music_ids(self, music_ids: tuple[int, ...]):
         if music_ids != self._music_ids:
@@ -489,7 +500,7 @@ class MusicLibraryWidget(QWidget):
         self.header_widget.play_pause_button.clicked.connect(self.play_button_clicked)
 
         self.collection: DbCollection | None = None
-        self.load_playlist(DbStoredCollection.from_db())
+        self.load_playlist(DbStoredCollection.from_db(get_user_startup_config().library_collection_id))
 
         layout = QVBoxLayout()
         layout.addWidget(self.header_widget)
@@ -590,6 +601,7 @@ class MusicLibraryWidget(QWidget):
         else:
             meta_text = ""
         self.header_widget.header_label_meta.setText(meta_text)
+        update_user_session_library_collection_id(USER_ID, 1 if new_collection is None else new_collection.id)
 
     def load_nothing(self):
         self._load(
@@ -656,7 +668,8 @@ class TableHeader(QHeaderView):
         self.setObjectName("LibraryTableHeader")
         self.setSortIndicatorClearable(True)
         self.setSortIndicatorShown(True)
-        self.setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
+        user_startup_config = get_user_startup_config()
+        self.setSortIndicator(user_startup_config.library_sort_column, user_startup_config.library_sort_order)
         self.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.setMinimumSectionSize(self.minimum_section_size)
         self.sectionResized.connect(self._resize)
@@ -668,16 +681,7 @@ class TableHeader(QHeaderView):
 
     @override
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        logical_index = self.logicalIndexAt(event.pos())
-        if logical_index == -1:
-            return
-        target_order = (
-            Qt.SortOrder.AscendingOrder
-            if self.sortIndicatorSection() != logical_index
-            else (Qt.SortOrder.DescendingOrder if self.sortIndicatorOrder() == Qt.SortOrder.AscendingOrder else None)
-        )
-        args = (-1, Qt.SortOrder.AscendingOrder) if target_order is None else (logical_index, target_order)
-        self.setSortIndicator(*args)
+        self.mousePressEvent(event)
 
     def _resize(self, logical_index: int, old_size: int, new_size: int):
         self.blockSignals(True)  # noqa: FBT003
@@ -765,7 +769,7 @@ class MusicLibraryTable(LibraryTableView):
         self.setItemDelegateForColumn(2, self.album_delegate)
 
         self.model_ = MusicTableModel(self)
-        proxy_model = ProxyModel()
+        proxy_model = LibraryProxyModel()
         proxy_model.setSourceModel(self.model_)
         self.setModel(proxy_model)
         self.model().layoutChanged.connect(self.adjust_height_to_content)
@@ -882,8 +886,8 @@ class MusicLibraryTable(LibraryTableView):
         return super().eventFilter(obj, event)
 
     @override
-    def model(self, /) -> ProxyModel:
-        return cast(ProxyModel, super().model())
+    def model(self, /) -> LibraryProxyModel:
+        return cast(LibraryProxyModel, super().model())
 
     def get_text_rect_tups_for_index(self, index: QModelIndex | QPersistentModelIndex) -> list[tuple[QRect, str, str]]:
         column = index.column()

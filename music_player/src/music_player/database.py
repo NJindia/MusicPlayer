@@ -104,9 +104,11 @@ CREATE TABLE users (
 
 CREATE TABLE user_session_config (
     user_id INT NOT NULL PRIMARY KEY REFERENCES users,
-    playlist_tree_sort_role INT,
-    playlist_tree_sort_order INT,
-    library_collection_id INT REFERENCES collections(collection_id)
+    playlist_tree_sort_role INT NOT NULL DEFAULT 263,  -- CollectionTreeSortRole.ALPHABETICAL.value
+    playlist_tree_sort_order INT NOT NULL DEFAULT 0,  -- Qt.SortOrder.AscendingOrder.value
+    library_collection_id INT REFERENCES collections(collection_id) NOT NULL DEFAULT 1,
+    library_sort_column INT NOT NULL DEFAULT -1,
+    library_sort_order INT NOT NULL DEFAULT 0  -- Qt.SortOrder.AscendingOrder.value
 );
 """
 

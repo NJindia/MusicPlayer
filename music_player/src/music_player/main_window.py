@@ -213,10 +213,11 @@ class MainWindow(QMainWindow):
         )
         if not collection_music_ids:
             return
+        tree_sort_role = self.playlist_view.proxy_model.sort_role()
         if isinstance(collection, DbStoredCollection):
-            collection.mark_as_played()
+            collection.mark_as_played(tree_sort_role, self.playlist_view.proxy_model.sortOrder())
 
-        if self.playlist_view.proxy_model.sortRole() == CollectionTreeSortRole.PLAYED.value:
+        if tree_sort_role == CollectionTreeSortRole.PLAYED:
             self.playlist_view.proxy_model.invalidate()
 
         self.queue.load_music_ids(collection_music_ids)
